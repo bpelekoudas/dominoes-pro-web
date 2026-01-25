@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Straight Dominoes (All Fives)</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="hud">
+            <div id="series-tracker">Series: Player 0 - 0 AI</div>
+            <div id="game-info">
+                <span id="ai-score">AI: 0</span>
+                <span id="target-score">Target: 150</span>
+                <span id="player-score">Player: 0</span>
+            </div>
+            <div id="message-area">Starting Game...</div>
+        </div>
+
+        <div id="ai-hand" class="hand"></div>
+
+        <div id="board-area">
+            <div id="board">
+                <!-- Dominoes will be placed here -->
+            </div>
+        </div>
+
+        <div id="player-hand" class="hand"></div>
+
+        <div id="controls">
+            <button id="start-btn">Start Game</button>
+            <select id="difficulty">
+                <option value="easy">Easy</option>
+                <option value="hard">Hard</option>
+            </select>
+            <div id="boneyard-info">Boneyard: <span id="boneyard-count">0</span></div>
+        </div>
+    </div>
+
+    <!-- Score Popup Template -->
+    <div id="score-popup" class="hidden">+0</div>
+
+    <script src="game.js"></script>
+    <script src="ui.js"></script>
+</body>
+</html>
