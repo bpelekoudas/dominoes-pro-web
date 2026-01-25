@@ -21,6 +21,7 @@ let draggedTileIndex = null;
 
 // Init
 startBtn.addEventListener('click', startGame);
+window.addEventListener('resize', updateZoom);
 
 function startGame() {
     game.startNewGame();
@@ -38,6 +39,9 @@ function render() {
     renderBoard();
     renderHands();
     renderHUD();
+    // Delay slightly to ensure DOM is updated and layout is calculated?
+    // Actually renderBoard() updates DOM synchronously. Layout happens on read.
+    requestAnimationFrame(updateZoom);
 }
 
 function renderHUD() {
@@ -454,6 +458,97 @@ function showScorePopup(points, isAI = false) {
         scorePopupEl.classList.remove('slide-up');
         scorePopupEl.classList.add('hidden');
     }, 1500);
+}
+
+function updateZoom() {
+    const boardAreaEl = document.getElementById('board-area');
+    if (!boardAreaEl) return;
+
+    // Viewport Center
+    const areaRect = boardAreaEl.getBoundingClientRect();
+    const centerX = areaRect.left + areaRect.width / 2;
+    const centerY = areaRect.top + areaRect.height / 2;
+
+    // Board Content Bounds
+    // Include all dominos and drop zones
+    const elements = boardEl.querySelectorAll('.domino, .drop-zone');
+    if (elements.length === 0) {
+        boardEl.style.transform = 'scale(1)';
+        return;
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    elements.forEach(el => {
+        const rect = el.getBoundingClientRect();
+        // Since getBoundingClientRect is affected by current transform, we need to be careful.
+        // If we are currently scaled at 0.5, the rects will be small.
+        // However, we want to know if they fit in areaRect.
+        // We compare rect vs areaRect centers.
+        // If we calculate distances based on CURRENT positions (scaled), we get current visual distance.
+        // To find the NEW scale, we want to know the "Unscaled" distance?
+        // Or we can iteratively adjust?
+        // Or: If we use the current rects, we get the current extent.
+        // If extent > area, we need to scale down.
+        // If extent < area, we can scale up (max 1).
+
+        // Better: Calculate relative to the boardEl's center, undoing the current scale.
+        // But undoing scale is hard without knowing exact transform origin logic relative to elements.
+
+        // Simple approach: unscale first.
+        // But unscaling causes flash.
+        // Math approach:
+        // Current Scale = currentScale.
+        // elementRect is scaled.
+        // trueDist = (elementRect.coord - center) / currentScale.
+        // We want scale_new * trueDist < limit.
+        // scale_new < limit / trueDist.
+        // scale_new < limit / ((elementRect.coord - center) / currentScale).
+        // scale_new < (limit * currentScale) / (elementRect.coord - center).
+
+        if (rect.left < minX) minX = rect.left;
+        if (rect.top < minY) minY = rect.top;
+        if (rect.right > maxX) maxX = rect.right;
+        if (rect.bottom > maxY) maxY = rect.bottom;
+    });
+
+    // Current Scale
+    const computedStyle = window.getComputedStyle(boardEl);
+    const matrix = new DOMMatrix(computedStyle.transform);
+    const currentScale = matrix.a; // Assume uniform scale
+
+    // Max Distance from Center (Visual)
+    const distLeft = centerX - minX;
+    const distRight = maxX - centerX;
+    const distTop = centerY - minY;
+    const distBottom = maxY - centerY;
+
+    const maxDistX = Math.max(distLeft, distRight);
+    const maxDistY = Math.max(distTop, distBottom);
+
+    // Available Space (Half dimensions)
+    const padding = 20;
+    const availX = (areaRect.width / 2) - padding;
+    const availY = (areaRect.height / 2) - padding;
+
+    // Calculate new scale factor
+    // newScale * (UnscaledDist) = Avail
+    // UnscaledDist = VisualDist / currentScale
+    // newScale * (VisualDist / currentScale) = Avail
+    // newScale = (Avail * currentScale) / VisualDist
+
+    let scaleX = (availX * currentScale) / maxDistX;
+    let scaleY = (availY * currentScale) / maxDistY;
+
+    // Avoid division by zero
+    if (maxDistX === 0) scaleX = 1;
+    if (maxDistY === 0) scaleY = 1;
+
+    let newScale = Math.min(scaleX, scaleY);
+    if (newScale > 1) newScale = 1; // Cap at 1
+    if (newScale < 0.1) newScale = 0.1; // Safety floor
+
+    boardEl.style.transform = `scale(${newScale})`;
 }
 
 // Initial Render
