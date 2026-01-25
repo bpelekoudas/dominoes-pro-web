@@ -84,6 +84,19 @@ class Board {
         return this.calculateScore();
     }
 
+    isSpinnerEnclosed() {
+        if (!this.spinner) return false;
+        // Must be played on both left and right sides.
+        // This means the spinner is not at the start (index 0) and not at the end (index length-1).
+        // This requires at least 3 tiles on the board.
+        if (this.placedTiles.length < 3) return false;
+
+        const first = this.placedTiles[0].domino;
+        const last = this.placedTiles[this.placedTiles.length - 1].domino;
+
+        return first !== this.spinner && last !== this.spinner;
+    }
+
     // Check if a move is valid
     isValidMove(domino, side) {
         if (this.placedTiles.length === 0) return true;
@@ -93,10 +106,15 @@ class Board {
         } else if (side === 'right') {
             return domino.val1 === this.rightOpen || domino.val2 === this.rightOpen;
         } else if (side === 'top' && this.spinner) {
+             // Spinner must be enclosed (played on both sides) before branching
+             if (this.topBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
+
              // If branch is empty, match spinner value. If not, match topOpen.
              const target = (this.topBranch.length === 0) ? this.spinner.val1 : this.topOpen;
              return domino.val1 === target || domino.val2 === target;
         } else if (side === 'bottom' && this.spinner) {
+             if (this.bottomBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
+
              const target = (this.bottomBranch.length === 0) ? this.spinner.val1 : this.bottomOpen;
              return domino.val1 === target || domino.val2 === target;
         }
