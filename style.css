@@ -49,7 +49,7 @@ body {
 #board-area {
     flex-grow: 1;
     position: relative;
-    overflow: hidden; /* Or auto if we want scroll bars */
+    overflow: auto; /* Allow scrolling if board gets large */
     display: flex;
     justify-content: center;
     align-items: center;
@@ -61,6 +61,7 @@ body {
     justify-content: center;
     position: relative;
     transition: transform 0.3s ease;
+    min-height: 200px; /* Ensure space for vertical branches */
 }
 
 /* 3D Domino Style */
@@ -207,6 +208,7 @@ button, select {
     pointer-events: none;
     transition: all 1s ease-out;
     opacity: 0;
+    z-index: 100;
 }
 
 .hidden {
@@ -231,4 +233,32 @@ button, select {
         2px 2px 0 #aaa,
         3px 3px 0 #999,
         4px 4px 6px rgba(0,0,0,0.4);
+}
+
+/* Branch Containers */
+.branch-container {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    pointer-events: none; /* Let clicks pass through to tiles? No, tiles need events. */
+}
+/* Re-enable pointer events for children */
+.branch-container > * {
+    pointer-events: auto;
+}
+
+.top-branch {
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    flex-direction: column-reverse; /* Grow upwards */
+    padding-bottom: 2px;
+}
+
+.bottom-branch {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    flex-direction: column; /* Grow downwards */
+    padding-top: 2px;
 }

@@ -17,16 +17,11 @@ const scorePopupEl = document.getElementById('score-popup');
 
 // State
 let selectedTileIndex = null;
-let ambiguityMode = false; // When user needs to choose Left/Right
 
 // Init
 startBtn.addEventListener('click', startGame);
 
 function startGame() {
-    const diff = difficultySelect.value;
-    // Set difficulty? Game class doesn't store it, we pass it to AI move.
-    // We should store it in UI state.
-
     game.startNewGame();
     render();
 
@@ -34,7 +29,6 @@ function startGame() {
     if (game.turnIndex === 1) { // 1 is AI
         setTimeout(playAITurn, 1000);
     } else {
-        // Player starts (after first move was auto-played)
         checkPlayerStatus();
     }
 }
@@ -64,12 +58,20 @@ function renderHands() {
     // Player Hand
     playerHandEl.innerHTML = '';
     game.players[0].hand.forEach((tile, index) => {
-        const tileEl = createTileElement(tile);
+        const tileEl = createTileElement(tile); // Default style, modified by valid check?
+        // Actually createTileElement adds .horizontal/.vertical based on double logic, which assumes main line.
+        // We can just rely on basic style and override if needed, but for hand it's usually vertical.
+        // Current CSS: .domino is vertical. .horizontal overrides.
+        // Let's force hand tiles to be vertical for consistency.
+        tileEl.classList.remove('horizontal');
+        tileEl.classList.add('vertical'); // Doubles are vertical by default too?
+        // My CSS: .domino is 44x88 (Vertical). .horizontal is 88x44.
+        // Hand should probably be vertical.
+
         tileEl.dataset.index = index;
         tileEl.addEventListener('click', () => onPlayerTileClick(index));
 
-        // Highlight valid moves?
-        // Check if this tile has valid moves
+        // Highlight valid moves
         const validMoves = game.board.getValidMoves(game.players[0].hand);
         const isValid = validMoves.some(m => m.index === index);
         if (isValid) tileEl.classList.add('valid');
@@ -113,14 +115,6 @@ function createTileElement(tile) {
 }
 
 function createPips(val, container) {
-    // Positions for pips (0-6)
-    // We can use grid or absolute positioning.
-    // 3x3 grid is easiest.
-    // 1 2 3
-    // 4 5 6
-    // 7 8 9
-    // Map val to visible pips.
-
     const pipMap = {
         0: [],
         1: [5],
@@ -128,18 +122,13 @@ function createPips(val, container) {
         3: [1, 5, 9],
         4: [1, 3, 7, 9],
         5: [1, 3, 5, 7, 9],
-        6: [1, 3, 4, 6, 7, 9] // Standard 6 is 2 rows of 3? Or 2 columns of 3. usually columns.
-                             // 1(TL) 3(TR)
-                             // 4(ML) 6(MR)
-                             // 7(BL) 9(BR)
+        6: [1, 3, 4, 6, 7, 9]
     };
 
     const positions = pipMap[val];
     positions.forEach(pos => {
         const pip = document.createElement('div');
         pip.className = 'pip';
-        // CSS for positioning based on 'pos'
-        // We'll add styles for data-pos
         pip.dataset.pos = pos;
         container.appendChild(pip);
     });
@@ -148,61 +137,88 @@ function createPips(val, container) {
 function renderBoard() {
     boardEl.innerHTML = '';
 
-    // game.board.placedTiles is array of {domino, flipped}
-    // Render them in order.
-
+    // Main Line
     game.board.placedTiles.forEach(item => {
         const tile = item.domino;
-        // Logic stores 'flipped'.
-        // Logic assumes:
-        // Not flipped: val1 is Left, val2 is Right.
-        // Flipped: val2 is Left, val1 is Right.
-
-        // Visuals:
-        // We render left-to-right.
-        // If not flipped: Render val1 then val2.
-        // If flipped: Render val2 then val1.
-
-        // Wait. Board Logic:
-        // place('left'): unshift.
-        // if matches val2==leftOpen (normal): flipped=false. val1 becomes new leftOpen.
-        // So visually: [val1 | val2] - [oldLeft...]
-        // So val1 is Leftmost.
-
-        // So 'flipped' false means [val1 | val2].
-        // 'flipped' true means [val2 | val1].
-
         const el = createTileElement(tile);
 
-        // Orientation
+        // Main Line Orientation
         if (tile.isDouble()) {
-            el.classList.add('vertical'); // Doubles are crosswise (vertical in a horizontal line)
-            // Actually, usually line is horizontal, doubles are vertical.
-            // My CSS `.domino` is vertical by default. `.horizontal` is horizontal.
-            // So Doubles should be Default (Vertical).
-            // Singles should be Horizontal.
+            el.classList.add('vertical');
         } else {
             el.classList.add('horizontal');
         }
 
-        // Rotation/Flipping
-        // Construct visual based on flipped state.
-        // My createTileElement creates val1 then val2 (Top/Bottom or Left/Right).
-        // If horizontal: Top is Left, Bottom is Right.
-
-        // If flipped (true): We want val2 on Left.
-        // So we need to reverse the order of children OR rotate the element 180deg.
-        // Rotation is easier.
+        // Flipped
         if (item.flipped) {
             el.style.transform = 'rotate(180deg)';
+        }
+
+        // Check if Spinner
+        if (game.board.spinner && tile === game.board.spinner) {
+            // Append Branches
+            renderBranches(el);
         }
 
         boardEl.appendChild(el);
     });
 }
 
+function renderBranches(spinnerEl) {
+    // Top Branch
+    if (game.board.topBranch.length > 0) {
+        const container = document.createElement('div');
+        container.className = 'branch-container top-branch';
+
+        game.board.topBranch.forEach(item => {
+            const tile = item.domino;
+            const el = createTileElement(tile);
+
+            // Branch Orientation: Perpendicular to Main Line?
+            // "Any double played after the spinner can only be played on the outside (the domino is placed perpendicular)."
+            // Main Line doubles are Vertical (Crosswise). Singles Horizontal.
+            // Vertical Branch: Singles should be Vertical (Line). Doubles Horizontal (Crosswise).
+
+            if (tile.isDouble()) {
+                el.classList.add('horizontal');
+            } else {
+                el.classList.add('vertical'); // Default, but explicit
+            }
+
+            if (item.flipped) {
+                el.style.transform = 'rotate(180deg)';
+            }
+            container.appendChild(el);
+        });
+        spinnerEl.appendChild(container);
+    }
+
+    // Bottom Branch
+    if (game.board.bottomBranch.length > 0) {
+        const container = document.createElement('div');
+        container.className = 'branch-container bottom-branch';
+
+        game.board.bottomBranch.forEach(item => {
+            const tile = item.domino;
+            const el = createTileElement(tile);
+
+            if (tile.isDouble()) {
+                el.classList.add('horizontal');
+            } else {
+                el.classList.add('vertical');
+            }
+
+            if (item.flipped) {
+                el.style.transform = 'rotate(180deg)';
+            }
+            container.appendChild(el);
+        });
+        spinnerEl.appendChild(container);
+    }
+}
+
 function onPlayerTileClick(index) {
-    if (game.turnIndex !== 0) return; // Not player turn
+    if (game.turnIndex !== 0) return;
     if (game.isGameOver) return;
 
     const tile = game.players[0].hand[index];
@@ -210,23 +226,35 @@ function onPlayerTileClick(index) {
     const tileMoves = moves.filter(m => m.index === index);
 
     if (tileMoves.length === 0) {
-        // Invalid
         showMessage("Invalid tile!");
         return;
     }
 
     if (tileMoves.length === 1) {
-        // Execute
         executeMove(tileMoves[0]);
     } else {
-        // Ambiguous (Left or Right)
-        // Show selection UI
-        // We can use a simple confirm or custom buttons.
-        // Let's use a quick prompt for now or better, highlight ends.
-        const choice = confirm("Play on Left? (Cancel for Right)");
-        const side = choice ? 'left' : 'right';
+        // Ambiguous
+        // Construct prompt
+        const sides = tileMoves.map(m => m.side);
+        // Map to simpler keys
+        const sideMap = {
+            'left': 'L', 'right': 'R', 'top': 'T', 'bottom': 'B'
+        };
+        const options = sides.map(s => `${sideMap[s]}: ${s}`).join(', ');
+
+        let choice = prompt(`Play where? (${options})`).toUpperCase();
+
+        // Map input back to side
+        const keyMap = { 'L': 'left', 'R': 'right', 'T': 'top', 'B': 'bottom' };
+        // Also allow full names
+        let side = keyMap[choice] || choice.toLowerCase();
+
         const move = tileMoves.find(m => m.side === side);
-        executeMove(move);
+        if (move) {
+            executeMove(move);
+        } else {
+            showMessage("Invalid choice.");
+        }
     }
 }
 
@@ -249,24 +277,20 @@ function executeMove(moveInfo) {
         return;
     }
 
-    // Check if game blocked
     if (result.type === 'game_over') {
-         // Should have been handled? No, playTurn returns game_over if called when over.
          return;
     }
 
-    // AI Turn
     setTimeout(playAITurn, 1000);
 }
 
 function playAITurn() {
     if (game.isGameOver) return;
-    if (game.turnIndex !== 1) return; // Not AI turn
+    if (game.turnIndex !== 1) return;
 
     showMessage("AI Thinking...");
 
-    // Check if AI can play or needs to draw
-    const status = game.ensurePlayable(); // Helper in Game?
+    const status = game.ensurePlayable();
 
     if (status === 'blocked_game') {
         handleRoundOver("Game Blocked!");
@@ -275,14 +299,12 @@ function playAITurn() {
 
     if (status === 'pass') {
         showMessage("AI Passed.");
-        // Turn passed to Player
         render();
-        checkPlayerStatus(); // Check if Player can play
+        checkPlayerStatus();
         return;
     }
 
-    // AI has moves (or drew until it has one)
-    render(); // Update hand size if drew
+    render();
 
     const diff = difficultySelect.value;
     const move = game.getAIMove(diff);
@@ -297,7 +319,6 @@ function playAITurn() {
         if (result.type === 'win') {
             handleRoundOver("AI Wins Round!");
         } else {
-             // Player turn
              checkPlayerStatus();
         }
     } else {
@@ -306,8 +327,6 @@ function playAITurn() {
 }
 
 function checkPlayerStatus() {
-    // Check if player can play. If not, Auto-draw?
-
     const status = game.ensurePlayable();
     render();
 
@@ -317,7 +336,6 @@ function checkPlayerStatus() {
         showMessage("You are blocked. Passing to AI.");
         setTimeout(playAITurn, 1000);
     } else {
-        // Player can play
         showMessage("Your Turn");
     }
 }
@@ -325,14 +343,14 @@ function checkPlayerStatus() {
 function handleRoundOver(message) {
     if (game.isGameOver) {
         showMessage(`Game Over! Winner: ${game.gameWinner.name}`);
-        render(); // Update scores
+        render();
     } else {
         showMessage(`${message} Next hand in 3s...`);
-        render(); // Update scores
+        render();
         setTimeout(() => {
             game.startNextHand();
             render();
-            if (game.turnIndex === 1) { // AI
+            if (game.turnIndex === 1) {
                 setTimeout(playAITurn, 1000);
             } else {
                 checkPlayerStatus();
@@ -349,9 +367,6 @@ function showScorePopup(points, isAI = false) {
     scorePopupEl.textContent = `+${points}`;
     scorePopupEl.classList.remove('hidden');
     scorePopupEl.classList.add('slide-up');
-
-    // Position? Center for now.
-    // Ideally relative to HUD score.
 
     scorePopupEl.style.left = isAI ? '20%' : '80%';
     scorePopupEl.style.top = isAI ? '20%' : '80%';
