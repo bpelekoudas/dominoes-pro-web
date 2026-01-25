@@ -33,6 +33,9 @@ function startGame() {
     // If AI starts, trigger AI turn
     if (game.turnIndex === 1) { // 1 is AI
         setTimeout(playAITurn, 1000);
+    } else {
+        // Player starts (after first move was auto-played)
+        checkPlayerStatus();
     }
 }
 
@@ -332,7 +335,7 @@ function handleRoundOver(message) {
             if (game.turnIndex === 1) { // AI
                 setTimeout(playAITurn, 1000);
             } else {
-                showMessage("Your Turn");
+                checkPlayerStatus();
             }
         }, 3000);
     }
