@@ -17,6 +17,7 @@ const scorePopupEl = document.getElementById('score-popup');
 
 // State
 let selectedTileIndex = null;
+let draggedTileIndex = null;
 
 // Init
 startBtn.addEventListener('click', startGame);
@@ -69,6 +70,8 @@ function renderHands() {
         // Hand should probably be vertical.
 
         tileEl.dataset.index = index;
+        tileEl.draggable = true;
+        tileEl.addEventListener('dragstart', (e) => handleDragStart(e, index));
         tileEl.addEventListener('click', () => onPlayerTileClick(index));
 
         // Highlight valid moves
@@ -137,6 +140,14 @@ function createPips(val, container) {
 function renderBoard() {
     boardEl.innerHTML = '';
 
+    if (game.board.placedTiles.length === 0) {
+        const zone = createDropZone('start');
+        boardEl.appendChild(zone);
+    } else {
+        const leftZone = createDropZone('left');
+        boardEl.appendChild(leftZone);
+    }
+
     // Main Line
     game.board.placedTiles.forEach(item => {
         const tile = item.domino;
@@ -162,59 +173,127 @@ function renderBoard() {
 
         boardEl.appendChild(el);
     });
+
+    if (game.board.placedTiles.length > 0) {
+        const rightZone = createDropZone('right');
+        boardEl.appendChild(rightZone);
+    }
+}
+
+function createDropZone(side) {
+    const el = document.createElement('div');
+    el.className = 'drop-zone';
+    el.dataset.side = side;
+    el.addEventListener('dragover', handleDragOver);
+    el.addEventListener('dragleave', handleDragLeave);
+    el.addEventListener('drop', handleDrop);
+    return el;
 }
 
 function renderBranches(spinnerEl) {
     // Top Branch
-    if (game.board.topBranch.length > 0) {
-        const container = document.createElement('div');
-        container.className = 'branch-container top-branch';
+    const topContainer = document.createElement('div');
+    topContainer.className = 'branch-container top-branch';
 
-        game.board.topBranch.forEach(item => {
-            const tile = item.domino;
-            const el = createTileElement(tile);
+    game.board.topBranch.forEach(item => {
+        const tile = item.domino;
+        const el = createTileElement(tile);
 
-            // Branch Orientation: Perpendicular to Main Line?
-            // "Any double played after the spinner can only be played on the outside (the domino is placed perpendicular)."
-            // Main Line doubles are Vertical (Crosswise). Singles Horizontal.
-            // Vertical Branch: Singles should be Vertical (Line). Doubles Horizontal (Crosswise).
+        if (tile.isDouble()) {
+            el.classList.add('horizontal');
+        } else {
+            el.classList.add('vertical'); // Default, but explicit
+        }
 
-            if (tile.isDouble()) {
-                el.classList.add('horizontal');
-            } else {
-                el.classList.add('vertical'); // Default, but explicit
-            }
+        if (item.flipped) {
+            el.style.transform = 'rotate(180deg)';
+        }
+        topContainer.appendChild(el);
+    });
 
-            if (item.flipped) {
-                el.style.transform = 'rotate(180deg)';
-            }
-            container.appendChild(el);
-        });
-        spinnerEl.appendChild(container);
-    }
+    const topZone = createDropZone('top');
+    topContainer.appendChild(topZone);
+    spinnerEl.appendChild(topContainer);
 
     // Bottom Branch
-    if (game.board.bottomBranch.length > 0) {
-        const container = document.createElement('div');
-        container.className = 'branch-container bottom-branch';
+    const bottomContainer = document.createElement('div');
+    bottomContainer.className = 'branch-container bottom-branch';
 
-        game.board.bottomBranch.forEach(item => {
-            const tile = item.domino;
-            const el = createTileElement(tile);
+    game.board.bottomBranch.forEach(item => {
+        const tile = item.domino;
+        const el = createTileElement(tile);
 
-            if (tile.isDouble()) {
-                el.classList.add('horizontal');
-            } else {
-                el.classList.add('vertical');
-            }
+        if (tile.isDouble()) {
+            el.classList.add('horizontal');
+        } else {
+            el.classList.add('vertical');
+        }
 
-            if (item.flipped) {
-                el.style.transform = 'rotate(180deg)';
-            }
-            container.appendChild(el);
-        });
-        spinnerEl.appendChild(container);
+        if (item.flipped) {
+            el.style.transform = 'rotate(180deg)';
+        }
+        bottomContainer.appendChild(el);
+    });
+
+    const bottomZone = createDropZone('bottom');
+    bottomContainer.appendChild(bottomZone);
+    spinnerEl.appendChild(bottomContainer);
+}
+
+function handleDragStart(e, index) {
+    if (game.turnIndex !== 0) {
+        e.preventDefault();
+        return;
     }
+    draggedTileIndex = index;
+
+    // Highlight drop zones
+    const moves = game.board.getValidMoves(game.players[0].hand);
+    const tileMoves = moves.filter(m => m.index === index);
+
+    const zones = document.querySelectorAll('.drop-zone');
+    zones.forEach(zone => {
+        const side = zone.dataset.side;
+        const isValid = tileMoves.some(m => m.side === side);
+        if (isValid) {
+            zone.classList.add('highlight');
+        }
+    });
+}
+
+function handleDragOver(e) {
+    e.preventDefault(); // Allow drop
+    if (e.currentTarget.classList.contains('highlight')) {
+        e.currentTarget.classList.add('drag-over');
+    }
+}
+
+function handleDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    const side = e.currentTarget.dataset.side;
+
+    // Validate again just in case (client-side safety)
+    if (!e.currentTarget.classList.contains('highlight')) {
+        cleanupDrag();
+        return;
+    }
+
+    const moveInfo = { index: draggedTileIndex, side: side };
+    executeMove(moveInfo);
+    cleanupDrag();
+}
+
+function cleanupDrag() {
+    draggedTileIndex = null;
+    const zones = document.querySelectorAll('.drop-zone');
+    zones.forEach(zone => {
+        zone.classList.remove('highlight');
+        zone.classList.remove('drag-over');
+    });
 }
 
 function onPlayerTileClick(index) {

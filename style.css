@@ -262,3 +262,37 @@ button, select {
     flex-direction: column; /* Grow downwards */
     padding-top: 2px;
 }
+
+/* Drop Zones */
+.drop-zone {
+    box-sizing: border-box;
+    border-radius: 10px;
+    margin: 5px;
+    transition: all 0.2s;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.drop-zone.highlight {
+    opacity: 0.6;
+    border: 2px dashed yellow;
+    background: rgba(255, 255, 0, 0.1);
+    pointer-events: auto;
+}
+
+.drop-zone.drag-over {
+    opacity: 1;
+    background: rgba(255, 255, 0, 0.3);
+    box-shadow: 0 0 10px #ff0;
+    transform: scale(1.05);
+}
+
+.drop-zone[data-side="left"], .drop-zone[data-side="right"], .drop-zone[data-side="start"] {
+    width: 88px;
+    height: 44px;
+}
+
+.drop-zone[data-side="top"], .drop-zone[data-side="bottom"] {
+    width: 44px;
+    height: 88px;
+}
