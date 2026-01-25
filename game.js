@@ -177,10 +177,10 @@ class Board {
 
             if (domino.val1 === target) {
                 this.topOpen = domino.val2;
-                flipped = false; // val1 touches target (inner), val2 is outer
+                flipped = true; // val1 touches target (inner). Top branch grows up (Target is below). Default Top=v1. Need v1 at Bottom -> Flip.
             } else if (domino.val2 === target) {
                 this.topOpen = domino.val1;
-                flipped = true; // val2 touches target (inner), val1 is outer
+                flipped = false; // val2 touches target (inner). Default Top=v1, Bottom=v2. Need v2 at Bottom -> No Flip.
             } else {
                 throw new Error("Invalid move on top");
             }
