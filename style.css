@@ -63,70 +63,95 @@ body {
     transition: transform 0.3s ease;
 }
 
+/* 3D Domino Style */
 .domino {
-    width: 40px;
-    height: 80px;
-    background-color: #fff;
-    border-radius: 5px;
-    border: 1px solid #999;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.5);
+    width: 44px; /* Slightly wider for the hefty look */
+    height: 88px;
+    background: linear-gradient(135deg, #ffffff 0%, #e6e6e6 100%);
+    border-radius: 10px;
+    /* Complex shadow for 3D thickness */
+    box-shadow:
+        inset 1px 1px 2px rgba(255,255,255,0.8), /* Top-left highlight */
+        inset -1px -1px 2px rgba(0,0,0,0.1),    /* Bottom-right dim */
+        1px 1px 0 #bbb,                         /* Thickness layer 1 */
+        2px 2px 0 #aaa,                         /* Thickness layer 2 */
+        3px 3px 0 #999,                         /* Thickness layer 3 */
+        4px 4px 6px rgba(0,0,0,0.4);            /* Drop shadow */
+
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     position: relative;
     cursor: pointer;
     box-sizing: border-box;
+    /* border: 1px solid #ccc;  Removed border in favor of shadow definition */
 }
 
 .domino.horizontal {
-    width: 80px;
-    height: 40px;
+    width: 88px;
+    height: 44px;
     flex-direction: row;
+    box-shadow:
+        inset 1px 1px 2px rgba(255,255,255,0.8),
+        inset -1px -1px 2px rgba(0,0,0,0.1),
+        1px 1px 0 #bbb,
+        2px 2px 0 #aaa,
+        3px 3px 0 #999,
+        4px 4px 6px rgba(0,0,0,0.4);
 }
 
 .domino .half {
     flex: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
-}
-
-.domino .line {
-    border-bottom: 2px solid #000;
-    width: 100%;
-    height: 0;
-}
-.domino.horizontal .line {
-    border-bottom: none;
-    border-right: 2px solid #000;
-    width: 0;
-    height: 100%;
-}
-
-.pip {
-    width: 6px;
-    height: 6px;
-    background-color: black;
-    border-radius: 50%;
-    /* position: absolute; removed in favor of grid */
-    display: block;
-}
-
-.half {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     grid-template-rows: repeat(3, 1fr);
     width: 100%;
     height: 100%;
-    padding: 2px;
+    padding: 4px; /* More padding */
     box-sizing: border-box;
 }
 
-.pip {
-    margin: auto;
+/* Dividing Line */
+.domino .line {
+    background-color: #000;
+    /* Looks like an inset groove */
+    box-shadow: inset 1px 1px 1px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.5);
+    width: 80%; /* Don't touch edges like the photo */
+    height: 3px;
+    align-self: center;
+    border-radius: 2px;
+    border: none;
+    margin: 2px 0;
 }
 
+.domino.horizontal .line {
+    width: 3px;
+    height: 80%;
+    border-bottom: none;
+    border-right: none;
+    margin: 0 2px;
+}
+
+/* Pips */
+.pip {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: block;
+    margin: auto;
+
+    /* Shiny black bead look */
+    background: radial-gradient(circle at 35% 35%, #555 0%, #000 100%);
+
+    /* Inset look: Shadow on top-left inside, Highlight on bottom-right outside (on the tile) */
+    /* Wait, we can't do outside shadow on the tile easily from here. */
+    /* We can do a drop-shadow(white) to simulate the rim highlight at bottom-right */
+    box-shadow:
+        inset 1px 1px 3px rgba(0,0,0,0.9), /* Deepen the hole inside */
+        0 1px 0 rgba(255,255,255,0.8);     /* Highlight on the bottom rim of the hole */
+}
+
+/* Grid Positioning for Pips */
 .pip[data-pos="1"] { grid-column: 1; grid-row: 1; }
 .pip[data-pos="2"] { grid-column: 2; grid-row: 1; }
 .pip[data-pos="3"] { grid-column: 3; grid-row: 1; }
@@ -139,11 +164,16 @@ body {
 
 /* AI tiles face down */
 #ai-hand .domino {
-    background-color: #ddd;
+    background: linear-gradient(135deg, #ddd 0%, #ccc 100%);
     /* texture for back */
-    background-image: repeating-linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc), repeating-linear-gradient(45deg, #ccc 25%, #ddd 25%, #ddd 75%, #ccc 75%, #ccc);
+    background-image: repeating-linear-gradient(45deg, #bbb 25%, transparent 25%, transparent 75%, #bbb 75%, #bbb), repeating-linear-gradient(45deg, #bbb 25%, #ccc 25%, #ccc 75%, #bbb 75%, #bbb);
     background-position: 0 0, 10px 10px;
     background-size: 20px 20px;
+    box-shadow:
+        1px 1px 0 #999,
+        2px 2px 0 #888,
+        3px 3px 0 #777,
+        4px 4px 6px rgba(0,0,0,0.4);
 }
 #ai-hand .domino .pip, #ai-hand .domino .line {
     display: none;
@@ -194,5 +224,11 @@ button, select {
 
 /* Valid move highlight */
 .domino.valid {
-    box-shadow: 0 0 10px yellow;
+    /* Combine the existing 3D shadow with a yellow glow */
+    box-shadow:
+        inset 0 0 10px yellow,
+        1px 1px 0 #bbb,
+        2px 2px 0 #aaa,
+        3px 3px 0 #999,
+        4px 4px 6px rgba(0,0,0,0.4);
 }
