@@ -331,7 +331,7 @@ class LayoutWalker {
                 // Regular in Horizontal line -> Horizontal placement
                 width = TILE_H; // 88
                 height = TILE_W; // 44
-                rotation = 90; // Horizontal
+                rotation = 270; // Horizontal (Corrected for Logic)
             }
         } else {
             // Vertical movement (Up/Down)
@@ -438,7 +438,7 @@ function renderBoard() {
         centerRotation = 0; // Vertical
         centerWidth = TILE_W; centerHeight = TILE_H;
     } else {
-        centerRotation = 90; // Horizontal
+        centerRotation = 270; // Horizontal
         centerWidth = TILE_H; centerHeight = TILE_W;
     }
     if (centerTileObj.flipped) centerRotation += 180;
