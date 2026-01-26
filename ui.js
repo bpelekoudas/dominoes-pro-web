@@ -318,6 +318,7 @@ function createDropZone(side) {
     el.addEventListener('dragover', handleDragOver);
     el.addEventListener('dragleave', handleDragLeave);
     el.addEventListener('drop', handleDrop);
+    el.addEventListener('click', handleZoneClick);
     return el;
 }
 
@@ -398,6 +399,21 @@ function handleDrop(e) {
     cleanupDrag();
 }
 
+function handleZoneClick(e) {
+    e.preventDefault();
+    if (selectedTileIndex === null) return;
+
+    const side = e.currentTarget.dataset.side;
+    // Check if valid for selected tile
+    const moves = game.board.getValidMoves(game.players[0].hand);
+    const validMove = moves.find(m => m.index === selectedTileIndex && m.side === side);
+
+    if (validMove) {
+        executeMove(validMove);
+        cleanupSelection();
+    }
+}
+
 function cleanupDrag() {
     draggedTileIndex = null;
     const zones = document.querySelectorAll('.drop-zone');
@@ -407,35 +423,63 @@ function cleanupDrag() {
     });
 }
 
+function cleanupSelection() {
+    selectedTileIndex = null;
+    const zones = document.querySelectorAll('.drop-zone');
+    zones.forEach(zone => zone.classList.remove('highlight'));
+    const tiles = document.querySelectorAll('.domino');
+    tiles.forEach(t => t.classList.remove('selected'));
+}
+
 function onPlayerTileClick(index) {
     if (game.turnIndex !== 0) return;
     if (game.isGameOver) return;
+
+    // Toggle selection
+    if (selectedTileIndex === index) {
+        cleanupSelection();
+        return;
+    }
+
+    cleanupSelection();
+    selectedTileIndex = index;
 
     const moves = game.board.getValidMoves(game.players[0].hand);
     const tileMoves = moves.filter(m => m.index === index);
 
     if (tileMoves.length === 0) {
         showMessage("Invalid tile!");
+        selectedTileIndex = null;
         return;
     }
 
+    // Highlight tile
+    const handContainer = handContainers['bottom'];
+    const tileEl = handContainer.querySelector(`.domino[data-index="${index}"]`);
+    if (tileEl) tileEl.classList.add('selected');
+
     if (tileMoves.length === 1) {
+        // If single move, execute? Or require tap on zone?
+        // User might prefer tapping tile then zone to be sure.
+        // But for single move, tapping tile is faster.
+        // Let's stick to "highlight zone, wait for tap" if strict,
+        // OR execute immediately for speed.
+        // For mobile, immediate execution is nice.
+        // But consistent behavior (Tap Tile -> Tap Zone) prevents accidents.
+        // However, previous implementation executed immediately.
+        // Let's Execute Immediately for Single Move to preserve speed.
         executeMove(tileMoves[0]);
+        cleanupSelection();
     } else {
-        const sides = tileMoves.map(m => m.side);
-        const sideMap = { 'left': 'L', 'right': 'R', 'top': 'T', 'bottom': 'B' };
-        const options = sides.map(s => `${sideMap[s]}: ${s}`).join(', ');
-
-        let choice = prompt(`Play where? (${options})`).toUpperCase();
-        const keyMap = { 'L': 'left', 'R': 'right', 'T': 'top', 'B': 'bottom' };
-        let side = keyMap[choice] || choice.toLowerCase();
-
-        const move = tileMoves.find(m => m.side === side);
-        if (move) {
-            executeMove(move);
-        } else {
-            showMessage("Invalid choice.");
-        }
+        showMessage("Select a position.");
+        const zones = document.querySelectorAll('.drop-zone');
+        zones.forEach(zone => {
+            const side = zone.dataset.side;
+            const isValid = tileMoves.some(m => m.side === side);
+            if (isValid) {
+                zone.classList.add('highlight');
+            }
+        });
     }
 }
 
