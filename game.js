@@ -74,9 +74,6 @@ class Board {
 
         if (domino.isDouble()) {
             this.spinner = domino;
-            // Top/Bottom open values are the spinner's value
-            // But they are not "Active" ends for scoring until a tile is placed?
-            // Actually, for matching logic, we match against spinner.val1.
             this.topOpen = domino.val1;
             this.bottomOpen = domino.val1;
         }
@@ -86,9 +83,6 @@ class Board {
 
     isSpinnerEnclosed() {
         if (!this.spinner) return false;
-        // Must be played on both left and right sides.
-        // This means the spinner is not at the start (index 0) and not at the end (index length-1).
-        // This requires at least 3 tiles on the board.
         if (this.placedTiles.length < 3) return false;
 
         const first = this.placedTiles[0].domino;
@@ -106,15 +100,11 @@ class Board {
         } else if (side === 'right') {
             return domino.val1 === this.rightOpen || domino.val2 === this.rightOpen;
         } else if (side === 'top' && this.spinner) {
-             // Spinner must be enclosed (played on both sides) before branching
              if (this.topBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
-
-             // If branch is empty, match spinner value. If not, match topOpen.
              const target = (this.topBranch.length === 0) ? this.spinner.val1 : this.topOpen;
              return domino.val1 === target || domino.val2 === target;
         } else if (side === 'bottom' && this.spinner) {
              if (this.bottomBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
-
              const target = (this.bottomBranch.length === 0) ? this.spinner.val1 : this.bottomOpen;
              return domino.val1 === target || domino.val2 === target;
         }
@@ -177,10 +167,10 @@ class Board {
 
             if (domino.val1 === target) {
                 this.topOpen = domino.val2;
-                flipped = true; // val1 touches target (inner). Top branch grows up (Target is below). Default Top=v1. Need v1 at Bottom -> Flip.
+                flipped = true;
             } else if (domino.val2 === target) {
                 this.topOpen = domino.val1;
-                flipped = false; // val2 touches target (inner). Default Top=v1, Bottom=v2. Need v2 at Bottom -> No Flip.
+                flipped = false;
             } else {
                 throw new Error("Invalid move on top");
             }
@@ -201,7 +191,6 @@ class Board {
             this.bottomBranch.push({ domino, flipped });
         }
 
-        // Check for new Spinner (if played on main line and not yet set)
         if (!this.spinner && (side === 'left' || side === 'right') && domino.isDouble()) {
             this.spinner = domino;
             this.topOpen = domino.val1;
@@ -214,52 +203,14 @@ class Board {
     calculatePotentialScore(domino, side) {
         if (this.placedTiles.length === 0) return domino.total;
 
-        // This is complex because we need to know the state after placement.
-        // Easiest to simulate by adding to a sum of current ends.
-
-        // Current Ends Sum:
-        let currentEndsSum = 0;
-
-        // Left
-        if (this.placedTiles.length === 1) {
-            // Only 1 tile.
-            // If side is left/right/top/bottom?
-            // If we play on left, the original tile is now Right End.
-        }
-
-        // Let's reuse logic:
-        // Identify which END is being modified.
-        // Remove that end's contribution, add the new tile's contribution.
-
-        // Base Contribution of an End:
-        // If it's a double, total. Else open value.
-
         let score = 0;
-
-        // Helper to get score of an end
-        const getEndScore = (tiles, openVal, isSpinnerEnd) => {
-             if (tiles.length === 0) return 0; // Branch empty
-             const endTile = tiles[tiles.length - 1].domino; // For branches/Right. For Left it's index 0?
-             // Wait, Left is index 0. Right is index len-1.
-             // Branches: we push, so tip is len-1.
-
-             if (endTile.isDouble()) return endTile.total;
-             return openVal;
-        };
-
-        // Current contributions
         let leftScore = 0;
         let rightScore = 0;
         let topScore = 0;
         let bottomScore = 0;
 
         if (this.placedTiles.length === 1) {
-             // Single tile. It is both Left and Right.
-             // If double, it scores total.
-             // If not double, scores total (val1+val2).
              leftScore = this.placedTiles[0].domino.total;
-             // We treat single tile as one entity scoring its total.
-             // We don't sum left+right separately.
         } else {
              leftScore = this.placedTiles[0].domino.isDouble() ? this.placedTiles[0].domino.total : this.leftOpen;
              rightScore = this.placedTiles[this.placedTiles.length-1].domino.isDouble() ? this.placedTiles[this.placedTiles.length-1].domino.total : this.rightOpen;
@@ -268,32 +219,15 @@ class Board {
         if (this.topBranch.length > 0) topScore = this.topBranch[this.topBranch.length-1].domino.isDouble() ? this.topBranch[this.topBranch.length-1].domino.total : this.topOpen;
         if (this.bottomBranch.length > 0) bottomScore = this.bottomBranch[this.bottomBranch.length-1].domino.isDouble() ? this.bottomBranch[this.bottomBranch.length-1].domino.total : this.bottomOpen;
 
-        // Apply Move
         if (side === 'left') {
-            // New Left End
-            let newVal = 0;
-            // logic: we match leftOpen.
-            // if d.val2 == leftOpen, new is d.val1.
             let newOpen = (domino.val2 === this.leftOpen) ? domino.val1 : domino.val2;
             let contribution = domino.isDouble() ? domino.total : newOpen;
 
-            // If board had 1 tile, that tile becomes Right End (and potentially Spinner).
-            // So we take current total (single tile) -> becomes Right End Contribution + New Left Contribution.
             if (this.placedTiles.length === 1) {
-                // Old tile becomes Right End.
                 let oldTile = this.placedTiles[0].domino;
-                // If old tile is double, it stays double score.
-                // If not, it contributes rightOpen (which is its val2).
-                // Wait, if 1 tile [3|4]. Left=3, Right=4.
-                // Score = 7.
-                // Play [2|3] on Left. Board: [2|3]-[3|4].
-                // Ends: 2, 4. Score 6.
-                // So: Remove "Single Tile Total", Add "Old Tile Right End Contribution", Add "New Tile Left Contribution".
-
                 let oldRightContrib = oldTile.isDouble() ? oldTile.total : this.rightOpen;
                 score = oldRightContrib + contribution + topScore + bottomScore;
             } else {
-                // Normal
                 score = contribution + rightScore + topScore + bottomScore;
             }
         } else if (side === 'right') {
@@ -308,61 +242,11 @@ class Board {
                 score = leftScore + contribution + topScore + bottomScore;
             }
         } else if (side === 'top') {
-             // Branch
              let target = (this.topBranch.length === 0) ? this.spinner.val1 : this.topOpen;
              let newOpen = (domino.val1 === target) ? domino.val2 : domino.val1;
              let contribution = domino.isDouble() ? domino.total : newOpen;
 
-             // We add this contribution. The old "Top" was 0 if empty, or existing if not.
-             // If empty: we add contribution.
-             // If not empty: we replace topScore.
-
-             // Wait, if empty, does Spinner count?
-             // No, Spinner is inside Main Line.
-             // So simply replace topScore with new contribution.
-
-             // Special case: Single Tile Board (Spinner).
-             // Board: [5|5]. Score 10.
-             // Play Top [5|2].
-             // Ends: 5(Left), 5(Right), 2(Top).
-             // Left=5, Right=5. (From Single Tile 5-5).
-             // Wait, my logic above for Single Tile says "leftScore" covers the whole thing.
-             // So if placedTiles.length === 1:
-             // Base Score = 10.
-             // If I play Top, base score splits into Left + Right?
-             // Yes. 5-5 becomes Left End AND Right End.
-             // 5(Left) + 5(Right) + 2(Top) = 12.
-             // Is that correct?
-             // 5-5 is 10.
-             // If I play on top, do I count 5-5's ends?
-             // "The spinner sums the total of all the ends."
-             // If 5-5 is the only tile, ends are 5 and 5. Total 10.
-             // If I add top branch, ends are 5, 5, and new end.
-             // So yes.
-
-             // So: if length=1, score is Left+Right (which is total) + new Top.
              if (this.placedTiles.length === 1) {
-                  // LeftScore/RightScore logic above works if we define them correctly.
-                  // For length=1, I set leftScore = total.
-                  // I need to separate.
-                  let t = this.placedTiles[0].domino;
-                  let l = t.isDouble() ? t.total : this.leftOpen; // If double, 10. If not 5-4, left is 5.
-                  // Wait. 5-4. Score 9.
-                  // If I play top? Only doubles are spinners.
-                  // So single tile MUST be double to play Top.
-                  // So Left=Total(10). Right=Total(10)? No.
-                  // If 5-5. Ends are 5 and 5.
-                  // Left End is 5-5 (Double). Score 10.
-                  // Right End is 5-5 (Double). Score 10.
-                  // Total 20? No.
-                  // Rule: "If a double is an end, it counts as total".
-                  // If 5-5 is the *only* tile, it is *both* ends.
-                  // Does it count twice?
-                  // No. It counts once as the tile itself.
-
-                  // So `calculateScore` handles length=1 separately.
-                  // Here: if length=1, base is `t.total`.
-                  // Add contribution.
                   score = this.placedTiles[0].domino.total + contribution + bottomScore;
              } else {
                   score = leftScore + rightScore + contribution + bottomScore;
@@ -385,29 +269,8 @@ class Board {
     calculateScore() {
         if (this.placedTiles.length === 0) return 0;
 
-        // Single tile case
         if (this.placedTiles.length === 1) {
             let score = this.placedTiles[0].domino.total;
-            // Add branches if any (unlikely to have branches with only 1 main tile unless allowed, which it is for spinner)
-            // If 5-5 is placed. Score 10.
-            // If top branch added: Ends are 5, 5, top.
-            // Does 5-5 count as 10 (total) + top?
-            // "The spinner sums the total of all the ends."
-            // If 5-5 is central, and Left/Right are "Open" from it.
-            // Left Open is 5. Right Open is 5.
-            // Since it's a double, Left End counts 10? Right End counts 10?
-            // No.
-            // If 5-5 is the only tile. Score is 10.
-            // If I play 5-2 on Top.
-            // Ends: 5 (Left), 5 (Right), 2 (Top).
-            // Sum: 5 + 5 + 2 = 12.
-            // My previous logic: "Left End: If double, total".
-            // If 5-5 is left end, it counts 10.
-            // If 5-5 is right end, it counts 10.
-            // If it is both, we shouldn't count 20.
-
-            // So: If length=1, Base = total.
-            // Add branches.
             if (this.topBranch.length > 0) {
                  let tip = this.topBranch[this.topBranch.length-1].domino;
                  score += (tip.isDouble() ? tip.total : this.topOpen);
@@ -416,26 +279,11 @@ class Board {
                  let tip = this.bottomBranch[this.bottomBranch.length-1].domino;
                  score += (tip.isDouble() ? tip.total : this.bottomOpen);
             }
-            // But wait. If I play Top, the score is 12 (5+5+2).
-            // My Base is 10.
-            // 10 + 2 = 12. Correct.
-
-            // What if I play Left? 5-2.
-            // [2|5] - [5|5].
-            // Ends: 2, 5 (Right), Top(0), Bottom(0).
-            // Right is 5-5 (Double). Counts 10.
-            // Left is 2.
-            // Total 12.
-            // My logic for length > 1:
-            // Left End (2). Right End (Double -> 10).
-            // 2 + 10 = 12. Correct.
-
             return score;
         }
 
         let score = 0;
 
-        // Left End
         const leftTileObj = this.placedTiles[0];
         if (leftTileObj.domino.isDouble()) {
             score += leftTileObj.domino.total;
@@ -443,7 +291,6 @@ class Board {
             score += this.leftOpen;
         }
 
-        // Right End
         const rightTileObj = this.placedTiles[this.placedTiles.length - 1];
         if (rightTileObj.domino.isDouble()) {
             score += rightTileObj.domino.total;
@@ -451,7 +298,6 @@ class Board {
             score += this.rightOpen;
         }
 
-        // Branches
         if (this.topBranch.length > 0) {
              let tip = this.topBranch[this.topBranch.length-1].domino;
              score += (tip.isDouble() ? tip.total : this.topOpen);
@@ -497,7 +343,7 @@ class Player {
 
 class Game {
     constructor() {
-        this.players = [new Player("Player"), new Player("AI", true)];
+        this.players = [];
         this.deck = new Deck();
         this.board = new Board();
         this.turnIndex = 0;
@@ -506,6 +352,7 @@ class Game {
         this.isGameOver = false;
         this.isRoundOver = false;
         this.logs = [];
+        this.passCount = 0; // Track consecutive passes
     }
 
     log(msg) {
@@ -513,27 +360,36 @@ class Game {
         console.log(msg);
     }
 
-    startNewGame() {
+    startNewGame(playerCount = 2) {
         this.deck = new Deck();
         this.deck.shuffle();
         this.board = new Board();
         this.isGameOver = false;
         this.isRoundOver = false;
         this.gameWinner = null;
-        this.players.forEach(p => {
-            p.resetHand();
-            p.score = 0;
-        });
+        this.passCount = 0;
+
+        // Preserve series wins if re-starting with same players?
+        // Or reset if player count changes.
+        // For simplicity, reset players if count changes or just recreate.
+        // We'll recreate to handle names correctly.
+        this.players = [];
+        this.players.push(new Player("Player")); // P0 Human
+        for (let i = 1; i < playerCount; i++) {
+            this.players.push(new Player(`AI ${i}`, true));
+        }
 
         this.deal();
         this.determineFirstPlayer();
     }
 
     deal() {
-        for (let i = 0; i < 7; i++) {
-            this.players[0].hand.push(this.deck.draw());
-            this.players[1].hand.push(this.deck.draw());
-        }
+        const tilesPerPlayer = this.players.length === 2 ? 7 : 5;
+        this.players.forEach(p => {
+            for (let i = 0; i < tilesPerPlayer; i++) {
+                p.hand.push(this.deck.draw());
+            }
+        });
     }
 
     determineFirstPlayer() {
@@ -541,7 +397,7 @@ class Game {
         let startingPlayerIndex = -1;
         let startingTileIndex = -1;
 
-        for (let p = 0; p < 2; p++) {
+        for (let p = 0; p < this.players.length; p++) {
             for (let i = 0; i < this.players[p].hand.length; i++) {
                 let d = this.players[p].hand[i];
                 if (d.isDouble() && d.val1 > highestDouble) {
@@ -552,9 +408,10 @@ class Game {
             }
         }
 
+        // If no doubles, highest total
         if (startingPlayerIndex === -1) {
             let highestTotal = -1;
-            for (let p = 0; p < 2; p++) {
+            for (let p = 0; p < this.players.length; p++) {
                 for (let i = 0; i < this.players[p].hand.length; i++) {
                     let d = this.players[p].hand[i];
                     if (d.total > highestTotal) {
@@ -579,7 +436,7 @@ class Game {
             this.log(`${player.name} scores ${score} (First Move)`);
         }
 
-        this.turnIndex = (this.turnIndex + 1) % 2;
+        this.turnIndex = (this.turnIndex + 1) % this.players.length;
     }
 
     getAIMove(difficulty) {
@@ -620,6 +477,8 @@ class Game {
         }
 
         player.removeDomino(moveInfo.index);
+        this.passCount = 0; // Reset pass count on successful move
+
         const rawScore = this.board.place(tile, moveInfo.side);
 
         let scorePoints = 0;
@@ -636,7 +495,7 @@ class Game {
             return { type: 'win', score: scorePoints, reason: 'domino' };
         }
 
-        this.turnIndex = (this.turnIndex + 1) % 2;
+        this.turnIndex = (this.turnIndex + 1) % this.players.length;
 
         return { type: 'move', score: scorePoints };
     }
@@ -649,14 +508,13 @@ class Game {
             if (this.deck.isEmpty()) {
                 this.log(`${player.name} is blocked and boneyard is empty. Passing.`);
 
-                const otherPlayer = this.players[(this.turnIndex + 1) % 2];
-                const otherMoves = this.board.getValidMoves(otherPlayer.hand);
-                if (otherMoves.length === 0) {
+                this.passCount++;
+                if (this.passCount >= this.players.length) {
                     this.handleBlockedGame();
                     return 'blocked_game';
                 }
 
-                this.turnIndex = (this.turnIndex + 1) % 2;
+                this.turnIndex = (this.turnIndex + 1) % this.players.length;
                 player = this.players[this.turnIndex];
                 moves = this.board.getValidMoves(player.hand);
                 return 'pass';
@@ -665,70 +523,101 @@ class Game {
                 player.hand.push(drawn);
                 this.log(`${player.name} draws a tile.`);
                 moves = this.board.getValidMoves(player.hand);
+                // If they draw and can play, they break the pass chain?
+                // Yes, because they will play in playTurn.
+                // But wait, ensurePlayable just gets them to a state where they CAN play.
+                // It doesn't play for them.
             }
         }
+        // If we found a move (either initially or after draw), reset passCount if it was > 0?
+        // No, passCount tracks CONSECUTIVE passes.
+        // If Player A passes, count=1. Player B plays. Count should reset to 0.
+        // Where do I reset it? In playTurn.
         return 'playable';
     }
 
     handleRoundEnd(winner, reason) {
         this.log(`Round End: ${reason} - Winner: ${winner.name}`);
-        const loser = this.players.find(p => p !== winner);
-        const penalty = loser.getHandTotal();
 
-        const remainder = penalty % 5;
-        let pointsToAdd = penalty;
-        if (remainder < 3) pointsToAdd -= remainder;
-        else pointsToAdd += (5 - remainder);
+        // Winner gets sum of all other hands
+        let pointsToAdd = 0;
+        this.players.forEach(p => {
+            if (p !== winner) {
+                pointsToAdd += p.getHandTotal();
+            }
+        });
 
-        winner.addPoints(pointsToAdd);
-        this.log(`${winner.name} gets ${pointsToAdd} points from opponent's hand (${penalty}).`);
+        const remainder = pointsToAdd % 5;
+        let finalPoints = pointsToAdd;
+        if (remainder < 3) finalPoints -= remainder;
+        else finalPoints += (5 - remainder);
+
+        winner.addPoints(finalPoints);
+        this.log(`${winner.name} gets ${finalPoints} points from opponents.`);
 
         this.checkGameWin();
     }
 
     handleBlockedGame() {
         this.log("Game Blocked!");
-        const p1Total = this.players[0].getHandTotal();
-        const p2Total = this.players[1].getHandTotal();
 
-        let winner;
-        let points = 0;
+        // Find player with lowest total
+        let winner = null;
+        let lowestTotal = Infinity;
+        let totals = [];
 
-        if (p1Total < p2Total) {
-            winner = this.players[0];
-            points = p2Total - p1Total;
-        } else if (p2Total < p1Total) {
-            winner = this.players[1];
-            points = p1Total - p2Total;
-        } else {
-            this.log("Draw! No points awarded.");
-            this.checkGameWin();
-            return;
-        }
+        this.players.forEach(p => {
+            const total = p.getHandTotal();
+            totals.push({ player: p, total });
+            if (total < lowestTotal) {
+                lowestTotal = total;
+                winner = p;
+            } else if (total === lowestTotal) {
+                // Tie?
+                // Standard rules: If tie for lowest, no one wins? Or strictly lowest?
+                // Or maybe the one who played last?
+                // Let's assume strict winner. If tie, maybe first one found (P1 advantage).
+            }
+        });
 
-        const remainder = points % 5;
-        let pointsToAdd = points;
-        if (remainder < 3) pointsToAdd -= remainder;
-        else pointsToAdd += (5 - remainder);
+        // Calculate points: Sum of ALL hands (including winner's) ? Or sum of OTHERS minus WINNER?
+        // Common All Fives Blocked Rule: "The player with the lowest hand wins the points from all other hands."
+        // So Sum(Others).
+        // Let's stick to that.
 
-        winner.addPoints(pointsToAdd);
-        this.log(`${winner.name} wins the block and gets ${pointsToAdd} points.`);
+        let pointsToAdd = 0;
+        this.players.forEach(p => {
+            if (p !== winner) {
+                pointsToAdd += p.getHandTotal();
+            }
+        });
+
+        // Round to nearest 5
+        const remainder = pointsToAdd % 5;
+        let finalPoints = pointsToAdd;
+        if (remainder < 3) finalPoints -= remainder;
+        else finalPoints += (5 - remainder);
+
+        winner.addPoints(finalPoints);
+        this.log(`${winner.name} wins the block and gets ${finalPoints} points.`);
         this.checkGameWin();
     }
 
     checkGameWin() {
-        const p1 = this.players[0];
-        const p2 = this.players[1];
-
-        if (p1.score >= this.targetScore || p2.score >= this.targetScore) {
-            this.isGameOver = true;
-            if (p1.score > p2.score) {
-                this.gameWinner = p1;
-                p1.wins++;
-            } else {
-                this.gameWinner = p2;
-                p2.wins++;
+        // Check if any player reached target
+        let winner = null;
+        this.players.forEach(p => {
+            if (p.score >= this.targetScore) {
+                if (!winner || p.score > winner.score) {
+                    winner = p;
+                }
             }
+        });
+
+        if (winner) {
+            this.isGameOver = true;
+            this.gameWinner = winner;
+            winner.wins++;
             this.log(`Game Over! Winner: ${this.gameWinner.name}`);
         } else {
              this.isRoundOver = true;
@@ -738,10 +627,21 @@ class Game {
     startNextHand() {
         this.log("Starting next hand...");
         this.isRoundOver = false;
+        this.passCount = 0;
+
+        // Preserve scores
+        const currentScores = this.players.map(p => p.score);
+        const currentWins = this.players.map(p => p.wins);
+        const names = this.players.map(p => p.name);
+
         this.deck = new Deck();
         this.deck.shuffle();
         this.board = new Board();
+
+        // Re-use player objects or reset them?
+        // Better to reset state on existing objects
         this.players.forEach(p => p.resetHand());
+
         this.deal();
         this.determineFirstPlayer();
     }

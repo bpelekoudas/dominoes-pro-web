@@ -11,25 +11,38 @@
         <div id="hud">
             <div id="series-tracker">Series: Player 0 - 0 AI</div>
             <div id="game-info">
-                <span id="ai-score">AI: 0</span>
+                <!-- Scores will be injected here or use fixed slots -->
+                <span id="score-0" class="score-display">P1: 0</span>
+                <span id="score-1" class="score-display">P2: 0</span>
+                <span id="score-2" class="score-display hidden">P3: 0</span>
+                <span id="score-3" class="score-display hidden">P4: 0</span>
                 <span id="target-score">Target: 150</span>
-                <span id="player-score">Player: 0</span>
             </div>
             <div id="message-area">Starting Game...</div>
         </div>
 
-        <div id="ai-hand" class="hand"></div>
+        <div id="top-hand" class="hand"></div>
 
-        <div id="board-area">
-            <div id="board">
-                <!-- Dominoes will be placed here -->
+        <div id="middle-row">
+            <div id="left-hand" class="hand vertical hidden"></div>
+
+            <div id="board-area">
+                <div id="board">
+                    <!-- Dominoes will be placed here -->
+                </div>
             </div>
+
+            <div id="right-hand" class="hand vertical hidden"></div>
         </div>
 
-        <div id="player-hand" class="hand"></div>
+        <div id="bottom-hand" class="hand"></div>
 
         <div id="controls">
             <button id="start-btn">Start Game</button>
+            <select id="player-count">
+                <option value="2">2 Players</option>
+                <option value="4">4 Players</option>
+            </select>
             <select id="difficulty">
                 <option value="easy">Easy</option>
                 <option value="hard">Hard</option>
