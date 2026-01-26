@@ -125,12 +125,12 @@ body {
 }
 
 #board {
-    display: flex;
-    align-items: center;
-    justify-content: center;
     position: relative;
     transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
     min-height: 200px;
+    width: 0; /* Center point */
+    height: 0;
+    margin: auto; /* Center in board-area */
     transform-origin: center center;
 }
 
@@ -154,7 +154,17 @@ body {
     position: relative;
     cursor: pointer;
     box-sizing: border-box;
-    margin: 2px;
+    margin: 0; /* Positioned absolutely on board, margin handled by logic */
+}
+
+#board .domino {
+    position: absolute;
+    transform-origin: center center;
+    box-shadow:
+        1px 1px 0 #bbb,
+        2px 2px 0 #aaa,
+        3px 3px 0 #999,
+        4px 4px 6px rgba(0,0,0,0.4);
 }
 
 .domino.horizontal {
@@ -302,39 +312,15 @@ button, select {
     transform: translateY(-5px);
 }
 
-.branch-container {
-    position: absolute;
-    display: flex;
-    align-items: center;
-    pointer-events: none;
-}
-.branch-container > * {
-    pointer-events: auto;
-}
-
-.top-branch {
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    flex-direction: column-reverse;
-    padding-bottom: 2px;
-}
-
-.bottom-branch {
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    flex-direction: column;
-    padding-top: 2px;
-}
-
 .drop-zone {
     box-sizing: border-box;
     border-radius: 10px;
-    margin: 5px;
+    margin: 0;
     transition: all 0.2s;
     opacity: 0;
     pointer-events: none;
+    position: absolute;
+    transform-origin: center center;
 }
 
 .drop-zone.highlight {
@@ -351,15 +337,7 @@ button, select {
     transform: scale(1.05);
 }
 
-.drop-zone[data-side="left"], .drop-zone[data-side="right"], .drop-zone[data-side="start"] {
-    width: 88px;
-    height: 44px;
-}
-
-.drop-zone[data-side="top"], .drop-zone[data-side="bottom"] {
-    width: 44px;
-    height: 88px;
-}
+/* Drop zone sizing handled by inline styles or logic now */
 
 /* Orientation Warning Overlay */
 #orientation-warning {

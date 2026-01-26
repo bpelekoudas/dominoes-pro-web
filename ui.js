@@ -33,6 +33,12 @@ const handContainers = {
 let selectedTileIndex = null;
 let draggedTileIndex = null;
 
+// Constants
+const TILE_W = 44;
+const TILE_H = 88;
+const GAP = 2; // Reduced gap for cleaner connection
+const TURN_LIMIT_TILES = 5; // Turn after N tiles in a branch
+
 // Init
 startBtn.addEventListener('click', startGame);
 window.addEventListener('resize', updateZoom);
@@ -47,12 +53,11 @@ function startGame() {
 
 function nextTurn() {
     if (game.isGameOver) return;
-    if (game.isRoundOver) return; // Wait for round reset
+    if (game.isRoundOver) return;
 
     const player = game.players[game.turnIndex];
     messageAreaEl.textContent = `Turn: ${player.name}`;
 
-    // Highlight active player in HUD?
     updateActivePlayerDisplay();
 
     if (player.isAI) {
@@ -67,15 +72,12 @@ function checkHumanStatus() {
     render();
 
     if (status === 'blocked_game') {
-        // Handled by ensurePlayable? No, ensurePlayable calls handleBlockedGame internal logic but returns string.
-        // We need to show UI.
         handleRoundOver("Game Blocked!");
     } else if (status === 'pass') {
         showMessage("You are blocked. Passing...");
         setTimeout(nextTurn, 1500);
     } else {
         showMessage("Your Turn");
-        // Enable interaction (drag/click) handled by renderHands
     }
 }
 
@@ -99,7 +101,7 @@ function playAITurn() {
         return;
     }
 
-    render(); // Update hand if drew card
+    render();
 
     const diff = difficultySelect.value;
     const move = game.getAIMove(diff);
@@ -108,10 +110,6 @@ function playAITurn() {
         const result = game.playTurn(move);
         render();
         if (result.score > 0) {
-            showScorePopup(result.score, getHandContainerId(game.turnIndex)); // Use previous turn index? No, turnIndex updated in playTurn.
-            // We need the index of the player who JUST played.
-            // turnIndex is now next player.
-            // So (turnIndex - 1 + N) % N
             const prevIndex = (game.turnIndex - 1 + game.players.length) % game.players.length;
             showScorePopup(result.score, getHandContainerId(prevIndex));
         }
@@ -119,7 +117,6 @@ function playAITurn() {
         if (result.type === 'win') {
             handleRoundOver(`${player.name} Wins Round!`);
         } else {
-            // Next turn
             setTimeout(nextTurn, 1000);
         }
     } else {
@@ -135,10 +132,8 @@ function render() {
 }
 
 function renderHUD() {
-    // Hide all scores first
     Object.values(scoreContainers).forEach(el => el.classList.add('hidden'));
 
-    // Update scores for active players
     game.players.forEach((p, i) => {
         const side = getHandContainerId(i);
         const el = scoreContainers[side];
@@ -159,11 +154,6 @@ function renderHUD() {
 
     boneyardCountEl.textContent = game.deck.tiles.length;
 
-    // Series Tracker - just track P1 wins vs CPU wins (aggregate) for now?
-    // Or just "Match Wins".
-    // Let's list all wins? "Series: P1(0) AI1(0)..."
-    // Might be too long.
-    // "Wins: " + list
     const winsStr = game.players.map(p => `${p.name.substr(0,3)}:${p.wins}`).join(' ');
     seriesTrackerEl.textContent = `Series: ${winsStr}`;
 
@@ -184,20 +174,17 @@ function getHandContainerId(playerIndex) {
     if (game.players.length === 2) {
         return 'top';
     } else if (game.players.length === 3) {
-        // 3 Players: 0(Bottom), 1(Left), 2(Right)
         if (playerIndex === 1) return 'left';
         if (playerIndex === 2) return 'right';
     } else {
-        // 4 Players: 0(Bottom), 1(Left), 2(Top), 3(Right)
         if (playerIndex === 1) return 'left';
         if (playerIndex === 2) return 'top';
         if (playerIndex === 3) return 'right';
     }
-    return 'top'; // Fallback
+    return 'top';
 }
 
 function renderHands() {
-    // Clear all
     Object.values(handContainers).forEach(el => {
         el.innerHTML = '';
         el.classList.add('hidden');
@@ -208,7 +195,6 @@ function renderHands() {
         const container = handContainers[side];
         container.classList.remove('hidden');
 
-        // P0 (Human) logic
         if (i === 0) {
             p.hand.forEach((tile, index) => {
                 const tileEl = createTileElement(tile);
@@ -219,7 +205,6 @@ function renderHands() {
                 tileEl.addEventListener('dragstart', (e) => handleDragStart(e, index));
                 tileEl.addEventListener('click', () => onPlayerTileClick(index));
 
-                // Highlight valid moves only if it's player's turn
                 if (game.turnIndex === 0 && !game.isGameOver) {
                     const validMoves = game.board.getValidMoves(p.hand);
                     const isValid = validMoves.some(m => m.index === index);
@@ -229,17 +214,12 @@ function renderHands() {
                 container.appendChild(tileEl);
             });
         } else {
-            // AI Hands (Face Down)
             p.hand.forEach(() => {
                 const tileEl = document.createElement('div');
                 tileEl.className = 'domino';
-
-                // If side is left or right, we want them horizontal?
-                // User said: "The dominoes for the players on the left and the right sides of the screen should be horizontal, not vertical."
                 if (side === 'left' || side === 'right') {
                     tileEl.classList.add('horizontal');
                 }
-
                 container.appendChild(tileEl);
             });
         }
@@ -283,37 +263,6 @@ function createPips(val, container) {
     });
 }
 
-function renderBoard() {
-    boardEl.innerHTML = '';
-
-    if (game.board.placedTiles.length === 0) {
-        if (game.turnIndex === 0) boardEl.appendChild(createDropZone('start'));
-    } else {
-        if (game.turnIndex === 0) boardEl.appendChild(createDropZone('left'));
-    }
-
-    // Main Line
-    game.board.placedTiles.forEach(item => {
-        const tile = item.domino;
-        const el = createTileElement(tile);
-
-        if (tile.isDouble()) el.classList.add('vertical');
-        else el.classList.add('horizontal');
-
-        if (item.flipped) el.style.transform = 'rotate(180deg)';
-
-        if (game.board.spinner && tile === game.board.spinner) {
-            renderBranches(el);
-        }
-
-        boardEl.appendChild(el);
-    });
-
-    if (game.board.placedTiles.length > 0 && game.turnIndex === 0) {
-        boardEl.appendChild(createDropZone('right'));
-    }
-}
-
 function createDropZone(side) {
     const el = document.createElement('div');
     el.className = 'drop-zone';
@@ -325,37 +274,260 @@ function createDropZone(side) {
     return el;
 }
 
-function renderBranches(spinnerEl) {
-    const topContainer = document.createElement('div');
-    topContainer.className = 'branch-container top-branch';
+// ---------------------------------------------------------
+// Layout Engine for Turning Branches
+// ---------------------------------------------------------
 
-    game.board.topBranch.forEach(item => {
-        const tile = item.domino;
-        const el = createTileElement(tile);
-        if (tile.isDouble()) el.classList.add('horizontal');
-        else el.classList.add('vertical');
-        if (item.flipped) el.style.transform = 'rotate(180deg)';
-        topContainer.appendChild(el);
-    });
+class LayoutWalker {
+    constructor(startX, startY, direction) {
+        this.x = startX;
+        this.y = startY;
+        this.dir = direction; // 'left', 'right', 'up', 'down'
+        this.count = 0;
+    }
 
-    if (game.turnIndex === 0) topContainer.appendChild(createDropZone('top'));
-    spinnerEl.appendChild(topContainer);
+    turn(newDir) {
+        this.dir = newDir;
+    }
 
-    const bottomContainer = document.createElement('div');
-    bottomContainer.className = 'branch-container bottom-branch';
+    place(tileObj, nextEl) {
+        // tileObj: {domino, flipped}
+        const tile = tileObj.domino;
+        const isDouble = tile.isDouble();
 
-    game.board.bottomBranch.forEach(item => {
-        const tile = item.domino;
-        const el = createTileElement(tile);
-        if (tile.isDouble()) el.classList.add('horizontal');
-        else el.classList.add('vertical');
-        if (item.flipped) el.style.transform = 'rotate(180deg)';
-        bottomContainer.appendChild(el);
-    });
+        let width = 0, height = 0;
+        let rotation = 0;
 
-    if (game.turnIndex === 0) bottomContainer.appendChild(createDropZone('bottom'));
-    spinnerEl.appendChild(bottomContainer);
+        // Determine Tile Dimensions and Rotation based on Walker Direction
+        if (this.dir === 'left' || this.dir === 'right') {
+            // Horizontal movement
+            if (isDouble) {
+                // Double in Horizontal line -> Vertical placement
+                width = TILE_W; // 44
+                height = TILE_H; // 88
+                rotation = 0; // Vertical
+            } else {
+                // Regular in Horizontal line -> Horizontal placement
+                width = TILE_H; // 88
+                height = TILE_W; // 44
+                rotation = 90; // Horizontal
+            }
+        } else {
+            // Vertical movement (Up/Down)
+            if (isDouble) {
+                // Double in Vertical line -> Horizontal placement
+                width = TILE_H; // 88
+                height = TILE_W; // 44
+                rotation = 90; // Horizontal
+            } else {
+                // Regular in Vertical line -> Vertical placement
+                width = TILE_W; // 44
+                height = TILE_H; // 88
+                rotation = 0; // Vertical
+            }
+        }
+
+        // Flipped logic handled by rotation adjust?
+        // Standard rotation 0 is Vertical. 90 is Horizontal (Top is Left).
+        // If 90 (Horizontal): Top is Left.
+        // If flipped, rotate 180.
+        // BUT logic depends on connection.
+        // Simple hack: apply visual rotation based on `flipped` flag.
+        // The `flipped` flag from Board logic assumes a linear connection.
+        // If we turn, `flipped` might need re-interpretation, but let's trust Board logic.
+        // Just add 180 to rotation if flipped.
+        if (tileObj.flipped) rotation += 180;
+
+        // Calculate Center Position
+        // Move half-dimension from current tip
+        let dx = 0, dy = 0;
+
+        if (this.dir === 'left') dx = -width/2 - GAP;
+        if (this.dir === 'right') dx = width/2 + GAP;
+        if (this.dir === 'up') dy = -height/2 - GAP;
+        if (this.dir === 'down') dy = height/2 + GAP;
+
+        this.x += dx;
+        this.y += dy;
+
+        // Apply styles
+        nextEl.style.left = `${this.x}px`;
+        nextEl.style.top = `${this.y}px`;
+        // Centering
+        nextEl.style.marginLeft = `-${TILE_W/2}px`; // Pivot is center of unrotated element
+        nextEl.style.marginTop = `-${TILE_H/2}px`;
+        nextEl.style.transform = `rotate(${rotation}deg)`;
+
+        // Remove flex classes as we use absolute
+        nextEl.classList.remove('horizontal', 'vertical');
+
+        // Advance tip to other side of tile
+        if (this.dir === 'left') this.x -= (width/2);
+        if (this.dir === 'right') this.x += (width/2);
+        if (this.dir === 'up') this.y -= (height/2);
+        if (this.dir === 'down') this.y += (height/2);
+
+        this.count++;
+        return { x: this.x, y: this.y };
+    }
 }
+
+function renderBoard() {
+    boardEl.innerHTML = '';
+
+    // --- Render Spinner ---
+    // If no tiles, just start drop zone
+    if (game.board.placedTiles.length === 0) {
+        if (game.turnIndex === 0) {
+            const dz = createDropZone('start');
+            centerElement(dz, 0, 0);
+            boardEl.appendChild(dz);
+        }
+        return;
+    }
+
+    // Find Spinner
+    const spinner = game.board.spinner;
+    let spinnerEl = null;
+
+    // Helper to find spinner index in main array
+    let spinnerIndex = -1;
+    if (spinner) {
+        spinnerIndex = game.board.placedTiles.findIndex(t => t.domino === spinner);
+    } else {
+        // No spinner yet (only line)
+        // Treat index 0 as start? Or center logic?
+        // We need a reference point.
+        // If no spinner, let's treat the first tile placed as center (0,0).
+        spinnerIndex = 0;
+    }
+
+    // 1. Render Center Tile (Spinner or First Tile)
+    const centerTileObj = game.board.placedTiles[spinnerIndex];
+    spinnerEl = createTileElement(centerTileObj.domino);
+
+    // Center is usually Vertical (if double) or Horizontal (if not)?
+    // Rules: First double is spinner.
+    // If first play is not double, it's horizontal.
+    // If first play IS double, it's vertical.
+    let centerRotation = 0;
+    let centerWidth = TILE_W, centerHeight = TILE_H;
+
+    if (centerTileObj.domino.isDouble()) {
+        centerRotation = 0; // Vertical
+        centerWidth = TILE_W; centerHeight = TILE_H;
+    } else {
+        centerRotation = 90; // Horizontal
+        centerWidth = TILE_H; centerHeight = TILE_W;
+    }
+    if (centerTileObj.flipped) centerRotation += 180;
+
+    centerElement(spinnerEl, 0, 0, centerRotation);
+    boardEl.appendChild(spinnerEl);
+
+    // 2. Render Left Branch (Tiles BEFORE center, in reverse)
+    const leftBranchTiles = game.board.placedTiles.slice(0, spinnerIndex).reverse();
+    renderBranch(leftBranchTiles, 'left', -centerWidth/2, 0, 'up'); // Left -> Turns Up
+
+    // 3. Render Right Branch (Tiles AFTER center)
+    const rightBranchTiles = game.board.placedTiles.slice(spinnerIndex + 1);
+    renderBranch(rightBranchTiles, 'right', centerWidth/2, 0, 'down'); // Right -> Turns Down
+
+    // 4. Render Top Branch
+    if (game.board.topBranch.length > 0 || (spinner && game.turnIndex === 0)) {
+        renderBranch(game.board.topBranch, 'up', 0, -centerHeight/2, 'left'); // Up -> Turns Left
+    }
+
+    // 5. Render Bottom Branch
+    if (game.board.bottomBranch.length > 0 || (spinner && game.turnIndex === 0)) {
+        renderBranch(game.board.bottomBranch, 'down', 0, centerHeight/2, 'right'); // Down -> Turns Right
+    }
+}
+
+function renderBranch(tiles, startDir, startX, startY, turnDir) {
+    const walker = new LayoutWalker(startX, startY, startDir);
+
+    tiles.forEach(tileObj => {
+        // Check for Turn
+        if (walker.count >= TURN_LIMIT_TILES) {
+             walker.turn(turnDir);
+        }
+
+        const el = createTileElement(tileObj.domino);
+        walker.place(tileObj, el);
+        boardEl.appendChild(el);
+    });
+
+    // Render Drop Zone at tip
+    if (game.turnIndex === 0) {
+        // Determine side name based on startDir?
+        // Wait, game logic uses 'left', 'right', 'top', 'bottom'.
+        // We need to map `startDir` back to game logic side.
+        let side = startDir; // 'left', 'right', 'up'->'top', 'down'->'bottom'
+        if (startDir === 'up') side = 'top';
+        if (startDir === 'down') side = 'bottom';
+
+        // Wait, if tiles is empty, we still render drop zone if it's a spinner branch?
+        // Logic in renderBoard handles empty array call.
+        // But only if spinner exists.
+
+        // Special Case: Main line ends (Left/Right) always have drop zones if not blocked.
+        // But game.board.getValidMoves checks logic.
+        // We just place DropZone at the end of the branch.
+
+        // Is this DropZone valid?
+        // We assume renderBranch is called for a valid logical branch.
+        // Main line branches (left/right) exist.
+        // Spinner branches (top/bottom) exist only if spinner exists.
+
+        const dz = createDropZone(side);
+
+        // Position Drop Zone
+        // Drop Zone should look like a slot for the next tile.
+        // If walker direction is horizontal, DropZone is Horizontal (88x44).
+        // If vertical, Vertical (44x88).
+        // BUT DropZone dimensions in CSS were fixed. We should adjust.
+
+        let dzW = 0, dzH = 0;
+        if (walker.dir === 'left' || walker.dir === 'right') {
+            dz.style.width = '88px';
+            dz.style.height = '44px';
+            dzW = 88; dzH = 44;
+        } else {
+            dz.style.width = '44px';
+            dz.style.height = '88px';
+            dzW = 44; dzH = 88;
+        }
+
+        let dx = 0, dy = 0;
+        if (walker.dir === 'left') dx = -dzW/2 - GAP;
+        if (walker.dir === 'right') dx = dzW/2 + GAP;
+        if (walker.dir === 'up') dy = -dzH/2 - GAP;
+        if (walker.dir === 'down') dy = dzH/2 + GAP;
+
+        const dzX = walker.x + dx;
+        const dzY = walker.y + dy;
+
+        dz.style.left = `${dzX}px`;
+        dz.style.top = `${dzY}px`;
+        dz.style.marginLeft = `-${dzW/2}px`;
+        dz.style.marginTop = `-${dzH/2}px`;
+
+        boardEl.appendChild(dz);
+    }
+}
+
+function centerElement(el, x, y, rotation=0) {
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    el.style.marginLeft = `-${TILE_W/2}px`;
+    el.style.marginTop = `-${TILE_H/2}px`;
+    if (rotation !== 0) el.style.transform = `rotate(${rotation}deg)`;
+    el.classList.remove('horizontal', 'vertical'); // Ensure base 44x88
+}
+
+
+// --- Rest of Event Handlers ---
 
 function handleDragStart(e, index) {
     if (game.turnIndex !== 0) {
@@ -407,7 +579,6 @@ function handleZoneClick(e) {
     if (selectedTileIndex === null) return;
 
     const side = e.currentTarget.dataset.side;
-    // Check if valid for selected tile
     const moves = game.board.getValidMoves(game.players[0].hand);
     const validMove = moves.find(m => m.index === selectedTileIndex && m.side === side);
 
@@ -438,7 +609,6 @@ function onPlayerTileClick(index) {
     if (game.turnIndex !== 0) return;
     if (game.isGameOver) return;
 
-    // Toggle selection
     if (selectedTileIndex === index) {
         cleanupSelection();
         return;
@@ -456,21 +626,11 @@ function onPlayerTileClick(index) {
         return;
     }
 
-    // Highlight tile
     const handContainer = handContainers['bottom'];
     const tileEl = handContainer.querySelector(`.domino[data-index="${index}"]`);
     if (tileEl) tileEl.classList.add('selected');
 
     if (tileMoves.length === 1) {
-        // If single move, execute? Or require tap on zone?
-        // User might prefer tapping tile then zone to be sure.
-        // But for single move, tapping tile is faster.
-        // Let's stick to "highlight zone, wait for tap" if strict,
-        // OR execute immediately for speed.
-        // For mobile, immediate execution is nice.
-        // But consistent behavior (Tap Tile -> Tap Zone) prevents accidents.
-        // However, previous implementation executed immediately.
-        // Let's Execute Immediately for Single Move to preserve speed.
         executeMove(tileMoves[0]);
         cleanupSelection();
     } else {
@@ -509,7 +669,6 @@ function executeMove(moveInfo) {
          return;
     }
 
-    // Trigger next turn
     nextTurn();
 }
 
@@ -533,7 +692,6 @@ function showMessage(msg) {
 }
 
 function showScorePopup(points, side) {
-    // Positioning based on side
     let top = '50%', left = '50%';
     if (side === 'bottom') { top = '80%'; left = '50%'; }
     if (side === 'top') { top = '20%'; left = '50%'; }
@@ -567,43 +725,107 @@ function updateZoom() {
         return;
     }
 
+    // BoardEl is at center of boardArea (absolute position logic).
+    // The elements are positioned relative to boardEl's (0,0).
+    // We need the bounding box of the elements in boardEl's local space.
+
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
     elements.forEach(el => {
-        const rect = el.getBoundingClientRect();
-        if (rect.left < minX) minX = rect.left;
-        if (rect.top < minY) minY = rect.top;
-        if (rect.right > maxX) maxX = rect.right;
-        if (rect.bottom > maxY) maxY = rect.bottom;
+        // We use offsetLeft/Top because they are positioned absolutely relative to boardEl
+        // BUT transform might affect bounding rect if we used that.
+        // Let's use computed style left/top values?
+        // Actually, elements have 'left' and 'top' set explicitly.
+        // We also need to account for width/height and transforms.
+
+        // Simpler: Use getBoundingClientRect of elements and compare to boardEl's center.
+        // BUT current transform of boardEl affects rects.
+        // We want the unscaled bounds.
+
+        // Since we know the layout logic (x,y), we could just track min/max X/Y in the walker.
+        // But doing it via DOM is robust.
+
+        // Strategy:
+        // 1. Reset scale to 1.
+        // 2. Measure.
+        // 3. Apply new scale.
+        // BUT this causes flickering.
+
+        // Better Strategy:
+        // Use the explicit Left/Top/Width/Height we set.
+        // Left/Top are center points in my logic?
+        // No, in my logic:
+        // style.left = x
+        // style.marginLeft = -w/2
+        // So x is center.
+        // Bounds are x - w/2, x + w/2.
+
+        const x = parseFloat(el.style.left) || 0;
+        const y = parseFloat(el.style.top) || 0;
+        // W/H depends on rotation.
+        // I set w=44, h=88 base.
+        // If rotated 90 or 270, w becomes 88.
+        // But I use CSS transform rotate.
+        // Bounding box of rotated element:
+        // If 44x88 rotated 90deg, it occupies 88x44.
+
+        let w = 44, h = 88;
+        // Check transform
+        const transform = el.style.transform;
+        if (transform.includes('rotate(90deg)') || transform.includes('rotate(270deg)')) {
+            w = 88; h = 44;
+        }
+
+        // Check my manual override for horizontal tiles in LayoutWalker
+        // "nextEl.classList.remove('horizontal')"
+        // "width = TILE_H; rotation=90"
+
+        // Just use a safe box size of 88x88 for each tile to avoid clipping?
+        // Or calculate accurately.
+
+        if (x - w/2 < minX) minX = x - w/2;
+        if (x + w/2 > maxX) maxX = x + w/2;
+        if (y - h/2 < minY) minY = y - h/2;
+        if (y + h/2 > maxY) maxY = y + h/2;
     });
 
-    const computedStyle = window.getComputedStyle(boardEl);
-    const matrix = new DOMMatrix(computedStyle.transform);
-    const currentScale = matrix.a;
+    const width = maxX - minX;
+    const height = maxY - minY;
 
-    const distLeft = centerX - minX;
-    const distRight = maxX - centerX;
-    const distTop = centerY - minY;
-    const distBottom = maxY - centerY;
+    // Add padding
+    const padding = 40;
+    const reqW = width + padding * 2;
+    const reqH = height + padding * 2;
 
-    const maxDistX = Math.max(distLeft, distRight);
-    const maxDistY = Math.max(distTop, distBottom);
+    const availW = areaRect.width;
+    const availH = areaRect.height;
 
-    const padding = 20;
-    const availX = (areaRect.width / 2) - padding;
-    const availY = (areaRect.height / 2) - padding;
-
-    let scaleX = (availX * currentScale) / maxDistX;
-    let scaleY = (availY * currentScale) / maxDistY;
-
-    if (maxDistX === 0) scaleX = 1;
-    if (maxDistY === 0) scaleY = 1;
+    const scaleX = availW / reqW;
+    const scaleY = availH / reqH;
 
     let newScale = Math.min(scaleX, scaleY);
-    if (newScale > 1) newScale = 1;
-    if (newScale < 0.1) newScale = 0.1;
+    if (newScale > 1) newScale = 1; // Don't zoom in too much
+    if (newScale < 0.2) newScale = 0.2; // Min zoom limit
 
     boardEl.style.transform = `scale(${newScale})`;
+
+    // Center alignment?
+    // boardEl is centered in area.
+    // But the content (tiles) might be off-center relative to (0,0).
+    // e.g. Left branch is long, Right is short.
+    // (0,0) is at center of screen. Content is shifted Left.
+    // Visually it looks unbalanced.
+    // We should translate boardEl to center the content.
+
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+
+    // We want contentCenterX to be at screen center (0,0 of boardEl).
+    // So shift boardEl by -contentCenterX.
+    // But boardEl's transform origin is center.
+    // We can add translate to the transform string.
+
+    boardEl.style.transform = `scale(${newScale}) translate(${-contentCenterX}px, ${-contentCenterY}px)`;
 }
 
 // Initial
