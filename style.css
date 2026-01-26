@@ -402,7 +402,7 @@ button, select {
 
     .hand.vertical .domino {
         transform: scale(0.6);
-        margin-bottom: -50px;
+        margin-bottom: 5px;
     }
 
     .hand.vertical .domino:last-child {
@@ -461,7 +461,7 @@ button, select {
     }
 
     .hand.vertical .domino {
-        margin-bottom: -30px;
+        margin-bottom: 2px;
     }
 
     .hand.vertical .domino:last-child {

@@ -102,11 +102,15 @@ class Board {
         } else if (side === 'top' && this.spinner) {
              if (this.topBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
              const target = (this.topBranch.length === 0) ? this.spinner.val1 : this.topOpen;
-             return domino.val1 === target || domino.val2 === target;
+             const isValid = domino.val1 === target || domino.val2 === target;
+             if (!isValid) console.log(`Invalid Top Move: ${domino.val1}-${domino.val2} on Target ${target}`);
+             return isValid;
         } else if (side === 'bottom' && this.spinner) {
              if (this.bottomBranch.length === 0 && !this.isSpinnerEnclosed()) return false;
              const target = (this.bottomBranch.length === 0) ? this.spinner.val1 : this.bottomOpen;
-             return domino.val1 === target || domino.val2 === target;
+             const isValid = domino.val1 === target || domino.val2 === target;
+             if (!isValid) console.log(`Invalid Bottom Move: ${domino.val1}-${domino.val2} on Target ${target}`);
+             return isValid;
         }
         return false;
     }
@@ -172,6 +176,7 @@ class Board {
                 this.topOpen = domino.val1;
                 flipped = false;
             } else {
+                console.error(`Logic Error: Top Target=${target}, Tile=${domino.val1}-${domino.val2}`);
                 throw new Error("Invalid move on top");
             }
             this.topBranch.push({ domino, flipped });
@@ -186,6 +191,7 @@ class Board {
                 this.bottomOpen = domino.val1;
                 flipped = true;
             } else {
+                console.error(`Logic Error: Bottom Target=${target}, Tile=${domino.val1}-${domino.val2}`);
                 throw new Error("Invalid move on bottom");
             }
             this.bottomBranch.push({ domino, flipped });
