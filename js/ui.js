@@ -304,6 +304,7 @@ class LayoutWalker {
         this.x = startX;
         this.y = startY;
         this.dir = direction; // 'left', 'right', 'up', 'down'
+        this.prevDir = direction; // Track previous direction for turns
         this.count = 0;
     }
 
@@ -348,28 +349,50 @@ class LayoutWalker {
             }
         }
 
-        // Flipped logic handled by rotation adjust?
-        // Standard rotation 0 is Vertical. 90 is Horizontal (Top is Left).
-        // If 90 (Horizontal): Top is Left.
-        // If flipped, rotate 180.
-        // BUT logic depends on connection.
-        // Simple hack: apply visual rotation based on `flipped` flag.
-        // The `flipped` flag from Board logic assumes a linear connection.
-        // If we turn, `flipped` might need re-interpretation, but let's trust Board logic.
-        // Just add 180 to rotation if flipped.
         if (tileObj.flipped) rotation += 180;
 
         // Calculate Center Position
-        // Move half-dimension from current tip
         let dx = 0, dy = 0;
 
+        // Standard advancement (Center relative to Tip)
         if (this.dir === 'left') dx = -width/2 - GAP;
         if (this.dir === 'right') dx = width/2 + GAP;
         if (this.dir === 'up') dy = -height/2 - GAP;
         if (this.dir === 'down') dy = height/2 + GAP;
 
+        // CORNER CORRECTION: If turning, we need to shift the tile so it corners correctly
+        // instead of centering on the tip (which causes T-bone overlap).
+        if (this.dir !== this.prevDir) {
+            const shiftAmt = 22; // Half of standard width/quarter of height
+
+            // Left -> Up
+            if (this.prevDir === 'left' && this.dir === 'up') {
+                dx = -shiftAmt; // Shift Left to align Right Edge to Tip
+                dy = -shiftAmt; // Shift Up to align Bottom Half Center to Tip
+            }
+            // Right -> Down
+            else if (this.prevDir === 'right' && this.dir === 'down') {
+                dx = shiftAmt;
+                dy = shiftAmt;
+            }
+            // Up -> Left
+            else if (this.prevDir === 'up' && this.dir === 'left') {
+                dx = -shiftAmt;
+                dy = -shiftAmt;
+            }
+            // Down -> Right
+            else if (this.prevDir === 'down' && this.dir === 'right') {
+                dx = shiftAmt;
+                dy = shiftAmt;
+            }
+            // Note: Other turns (Right->Up etc) not used in standard logic but follow similar pattern
+        }
+
         this.x += dx;
         this.y += dy;
+
+        // Update prevDir after placement logic uses it
+        this.prevDir = this.dir;
 
         // Apply styles
         nextEl.style.left = `${this.x}px`;
@@ -815,8 +838,8 @@ function updateZoom() {
     const width = maxX - minX;
     const height = maxY - minY;
 
-    // Add padding
-    const padding = 40;
+    // Add padding (increased to avoid hand overlap)
+    const padding = 80;
     const reqW = width + padding * 2;
     const reqH = height + padding * 2;
 
