@@ -344,3 +344,84 @@ button, select {
     width: 44px;
     height: 88px;
 }
+
+/* Orientation Warning Overlay */
+#orientation-warning {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #1a1a1a;
+    z-index: 1000;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    color: #0f0;
+}
+
+#orientation-warning .icon {
+    font-size: 5rem;
+    margin-bottom: 20px;
+    animation: rotate 2s infinite linear;
+}
+
+#orientation-warning .text {
+    font-size: 1.5rem;
+    padding: 20px;
+}
+
+@keyframes rotate {
+    0% { transform: rotate(0deg); }
+    25% { transform: rotate(-90deg); }
+    100% { transform: rotate(-90deg); }
+}
+
+/* Mobile Portrait Detection */
+@media screen and (orientation: portrait) and (max-width: 1024px) {
+    #orientation-warning {
+        display: flex;
+    }
+    #game-container {
+        display: none;
+    }
+}
+
+/* Mobile Landscape Optimization */
+@media screen and (orientation: landscape) and (max-height: 600px) {
+    #game-container {
+        width: 98vw;
+        height: 96vh;
+        padding: 5px;
+        border-width: 2px;
+    }
+
+    #controls {
+        padding: 2px;
+        gap: 10px;
+    }
+
+    button, select {
+        padding: 5px 10px;
+        font-size: 0.8rem;
+    }
+
+    .domino {
+        transform: scale(0.8);
+        margin: 1px;
+    }
+
+    .score-display {
+        font-size: 0.9rem;
+        padding: 2px 5px;
+    }
+
+    #match-scores {
+        top: 5px;
+        left: 5px;
+        font-size: 0.8rem;
+        padding: 5px;
+    }
+}

@@ -369,14 +369,20 @@ class Game {
         this.gameWinner = null;
         this.passCount = 0;
 
-        // Preserve series wins if re-starting with same players?
-        // Or reset if player count changes.
-        // For simplicity, reset players if count changes or just recreate.
-        // We'll recreate to handle names correctly.
-        this.players = [];
-        this.players.push(new Player("Player")); // P0 Human
-        for (let i = 1; i < playerCount; i++) {
-            this.players.push(new Player(`AI ${i}`, true));
+        // Preserve series wins if re-starting with same players
+        if (this.players.length === playerCount) {
+            // Reuse players, just reset hand and score
+            this.players.forEach(p => {
+                p.resetHand();
+                p.score = 0;
+            });
+        } else {
+            // New set of players
+            this.players = [];
+            this.players.push(new Player("Player")); // P0 Human
+            for (let i = 1; i < playerCount; i++) {
+                this.players.push(new Player(`AI ${i}`, true));
+            }
         }
 
         this.deal();
