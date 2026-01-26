@@ -86,6 +86,7 @@ body {
     position: relative;
     cursor: pointer;
     box-sizing: border-box;
+    margin: 2px;
     /* border: 1px solid #ccc;  Removed border in favor of shadow definition */
 }
 
