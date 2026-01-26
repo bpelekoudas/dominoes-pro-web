@@ -395,13 +395,63 @@ button, select {
     100% { transform: rotate(-90deg); }
 }
 
-/* Mobile Portrait Detection */
-@media screen and (orientation: portrait) and (max-width: 1024px) {
+/* Mobile Portrait Optimization */
+@media screen and (orientation: portrait) {
     #orientation-warning {
-        display: flex;
+        display: none !important;
     }
+
     #game-container {
-        display: none;
+        display: flex !important;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        margin: 0;
+        padding: 5px;
+        border: none;
+        border-radius: 0;
+    }
+
+    /* Compact layout for narrow screens */
+    .side-section {
+        min-width: 60px;
+    }
+
+    .hand.vertical {
+        width: 60px;
+        padding: 5px;
+    }
+
+    .hand.vertical .domino {
+        transform: scale(0.6);
+        margin-bottom: -50px;
+    }
+
+    .hand.vertical .domino:last-child {
+        margin-bottom: 0;
+    }
+
+    /* Top and bottom hands */
+    .hand:not(.vertical) .domino {
+        transform: scale(0.8);
+        margin: 0 -5px;
+    }
+
+    #match-scores {
+        font-size: 0.7rem;
+        padding: 4px;
+        top: 5px;
+        left: 5px;
+    }
+
+    #controls {
+        gap: 10px;
+        padding: 5px;
+    }
+
+    button {
+        padding: 8px 12px;
+        font-size: 0.9rem;
     }
 }
 
@@ -428,13 +478,12 @@ button, select {
     }
 
     .domino {
-        transform: scale(0.8);
+        transform: scale(0.7);
         margin: 1px;
     }
 
     .hand.vertical .domino {
-        margin-bottom: -25px;
-        /* Ensure z-index allows stacking context if needed, though DOM order usually suffices */
+        margin-bottom: -30px;
     }
 
     .hand.vertical .domino:last-child {
@@ -442,14 +491,19 @@ button, select {
     }
 
     .score-display {
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         padding: 2px 5px;
     }
 
     #match-scores {
-        top: 5px;
-        left: 5px;
-        font-size: 0.8rem;
-        padding: 5px;
+        top: 2px;
+        left: 2px;
+        font-size: 0.7rem;
+        padding: 4px;
+    }
+
+    /* Allow board to shrink more on very short screens */
+    #board {
+        min-height: 120px;
     }
 }
