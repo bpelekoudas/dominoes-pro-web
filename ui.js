@@ -180,6 +180,10 @@ function getHandContainerId(playerIndex) {
 
     if (game.players.length === 2) {
         return 'top';
+    } else if (game.players.length === 3) {
+        // 3 Players: 0(Bottom), 1(Left), 2(Right)
+        if (playerIndex === 1) return 'left';
+        if (playerIndex === 2) return 'right';
     } else {
         // 4 Players: 0(Bottom), 1(Left), 2(Top), 3(Right)
         if (playerIndex === 1) return 'left';

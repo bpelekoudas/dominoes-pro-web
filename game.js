@@ -384,7 +384,7 @@ class Game {
     }
 
     deal() {
-        const tilesPerPlayer = this.players.length === 2 ? 7 : 5;
+        const tilesPerPlayer = 7;
         this.players.forEach(p => {
             for (let i = 0; i < tilesPerPlayer; i++) {
                 p.hand.push(this.deck.draw());
