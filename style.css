@@ -432,6 +432,15 @@ button, select {
         margin: 1px;
     }
 
+    .hand.vertical .domino {
+        margin-bottom: -25px;
+        /* Ensure z-index allows stacking context if needed, though DOM order usually suffices */
+    }
+
+    .hand.vertical .domino:last-child {
+        margin-bottom: 0;
+    }
+
     .score-display {
         font-size: 0.9rem;
         padding: 2px 5px;

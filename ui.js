@@ -8,6 +8,7 @@ const seriesTrackerEl = document.getElementById('series-tracker');
 const messageAreaEl = document.getElementById('message-area');
 const boneyardCountEl = document.getElementById('boneyard-count');
 const startBtn = document.getElementById('start-btn');
+const controlsEl = document.getElementById('controls');
 const difficultySelect = document.getElementById('difficulty');
 const playerCountSelect = document.getElementById('player-count');
 const scorePopupEl = document.getElementById('score-popup');
@@ -39,6 +40,7 @@ window.addEventListener('resize', updateZoom);
 function startGame() {
     const count = parseInt(playerCountSelect.value);
     game.startNewGame(count);
+    controlsEl.classList.add('hidden');
     render();
     nextTurn();
 }
@@ -168,6 +170,7 @@ function renderHUD() {
     if (game.isGameOver) {
         messageAreaEl.textContent = `Game Over! Winner: ${game.gameWinner.name}`;
         startBtn.textContent = "Next Game";
+        controlsEl.classList.remove('hidden');
     }
 }
 
