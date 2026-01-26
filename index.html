@@ -8,23 +8,26 @@
 </head>
 <body>
     <div id="game-container">
-        <div id="hud">
-            <div id="series-tracker">Series: Player 0 - 0 AI</div>
-            <div id="game-info">
-                <!-- Scores will be injected here or use fixed slots -->
-                <span id="score-0" class="score-display">P1: 0</span>
-                <span id="score-1" class="score-display">P2: 0</span>
-                <span id="score-2" class="score-display hidden">P3: 0</span>
-                <span id="score-3" class="score-display hidden">P4: 0</span>
-                <span id="target-score">Target: 150</span>
-            </div>
+
+        <!-- Top Left Match Scores -->
+        <div id="match-scores">
+            <div id="series-tracker">Series: P1:0 AI:0</div>
+            <div id="target-score">Target: 150</div>
             <div id="message-area">Starting Game...</div>
         </div>
 
-        <div id="top-hand" class="hand"></div>
+        <!-- Top Section: Top Hand and Score -->
+        <div id="top-section" class="player-section">
+            <div id="score-top" class="score-display hidden">Top: 0</div>
+            <div id="top-hand" class="hand"></div>
+        </div>
 
         <div id="middle-row">
-            <div id="left-hand" class="hand vertical hidden"></div>
+            <!-- Left Section -->
+            <div id="left-section" class="player-section side-section">
+                <div id="score-left" class="score-display hidden">Left: 0</div>
+                <div id="left-hand" class="hand vertical hidden"></div>
+            </div>
 
             <div id="board-area">
                 <div id="board">
@@ -32,10 +35,18 @@
                 </div>
             </div>
 
-            <div id="right-hand" class="hand vertical hidden"></div>
+            <!-- Right Section -->
+            <div id="right-section" class="player-section side-section">
+                <div id="score-right" class="score-display hidden">Right: 0</div>
+                <div id="right-hand" class="hand vertical hidden"></div>
+            </div>
         </div>
 
-        <div id="bottom-hand" class="hand"></div>
+        <!-- Bottom Section: Player Hand and Score -->
+        <div id="bottom-section" class="player-section">
+            <div id="score-bottom" class="score-display">Player: 0</div>
+            <div id="bottom-hand" class="hand"></div>
+        </div>
 
         <div id="controls">
             <button id="start-btn">Start Game</button>

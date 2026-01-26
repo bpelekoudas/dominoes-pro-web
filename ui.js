@@ -12,13 +12,13 @@ const difficultySelect = document.getElementById('difficulty');
 const playerCountSelect = document.getElementById('player-count');
 const scorePopupEl = document.getElementById('score-popup');
 
-// Score Elements
-const scoreEls = [
-    document.getElementById('score-0'),
-    document.getElementById('score-1'),
-    document.getElementById('score-2'),
-    document.getElementById('score-3')
-];
+// Score Elements (by position)
+const scoreContainers = {
+    bottom: document.getElementById('score-bottom'),
+    top: document.getElementById('score-top'),
+    left: document.getElementById('score-left'),
+    right: document.getElementById('score-right')
+};
 
 // Hand Containers
 const handContainers = {
@@ -133,19 +133,25 @@ function render() {
 }
 
 function renderHUD() {
-    scoreEls.forEach((el, i) => {
-        if (i < game.players.length) {
-            el.textContent = `${game.players[i].name}: ${game.players[i].score}`;
+    // Hide all scores first
+    Object.values(scoreContainers).forEach(el => el.classList.add('hidden'));
+
+    // Update scores for active players
+    game.players.forEach((p, i) => {
+        const side = getHandContainerId(i);
+        const el = scoreContainers[side];
+
+        if (el) {
+            el.textContent = `${p.name}: ${p.score}`;
             el.classList.remove('hidden');
+
             if (i === game.turnIndex) {
-                el.style.color = '#0f0'; // Highlight active
+                el.style.color = '#0f0';
                 el.style.textShadow = '0 0 5px #0f0';
             } else {
                 el.style.color = 'white';
                 el.style.textShadow = 'none';
             }
-        } else {
-            el.classList.add('hidden');
         }
     });
 
@@ -220,6 +226,13 @@ function renderHands() {
             p.hand.forEach(() => {
                 const tileEl = document.createElement('div');
                 tileEl.className = 'domino';
+
+                // If side is left or right, we want them horizontal?
+                // User said: "The dominoes for the players on the left and the right sides of the screen should be horizontal, not vertical."
+                if (side === 'left' || side === 'right') {
+                    tileEl.classList.add('horizontal');
+                }
+
                 container.appendChild(tileEl);
             });
         }

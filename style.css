@@ -25,23 +25,42 @@ body {
     padding: 20px;
 }
 
-#hud {
-    display: flex;
-    justify-content: space-between;
-    padding: 10px;
+/* Match Scores at Top Left */
+#match-scores {
+    position: absolute;
+    top: 20px;
+    left: 20px;
     background: rgba(0, 0, 0, 0.3);
+    padding: 10px;
     border-radius: 10px;
-    font-size: 1.2rem;
     font-weight: bold;
+    z-index: 10;
 }
 
-#game-info {
+#hud {
+    /* Deprecated, splitting up */
+    display: none;
+}
+
+/* Player Sections */
+.player-section {
     display: flex;
-    gap: 15px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.score-display {
+    font-size: 1.2rem;
+    font-weight: bold;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 10px;
+    border-radius: 5px;
+    margin: 5px;
 }
 
 .hand {
-    height: 100px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -51,18 +70,44 @@ body {
     border-radius: 10px;
 }
 
-.hand.vertical {
-    width: 100px;
-    height: auto;
-    flex-direction: column;
+/* Top Section */
+#top-section {
+    margin-bottom: 10px;
 }
 
+/* Bottom Section */
+#bottom-section {
+    margin-top: 10px;
+}
+#bottom-section .score-display {
+    order: -1; /* Score above hand */
+}
+
+/* Middle Row Layout */
 #middle-row {
     flex-grow: 1;
     display: flex;
     justify-content: space-between;
     align-items: stretch;
     overflow: hidden;
+    position: relative;
+}
+
+/* Side Sections */
+.side-section {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 100px;
+}
+
+/* Side Hands Vertical Container */
+.hand.vertical {
+    width: 100px;
+    height: auto;
+    flex-direction: column;
+    /* If tiles are horizontal (88x44), we stack them */
 }
 
 #board-area {
@@ -173,7 +218,6 @@ body {
 .pip[data-pos="9"] { grid-column: 3; grid-row: 3; }
 
 /* AI/Other Player tiles face down */
-/* Target all hands except #bottom-hand (Player) */
 .hand:not(#bottom-hand) .domino {
     background: linear-gradient(135deg, #ddd 0%, #ccc 100%);
     background-image: repeating-linear-gradient(45deg, #bbb 25%, transparent 25%, transparent 75%, #bbb 75%, #bbb), repeating-linear-gradient(45deg, #bbb 25%, #ccc 25%, #ccc 75%, #bbb 75%, #bbb);
@@ -188,15 +232,6 @@ body {
 .hand:not(#bottom-hand) .domino .pip, .hand:not(#bottom-hand) .domino .line {
     display: none;
 }
-
-/* Specific styling for Left/Right hands to make tiles look better in vertical container */
-/* Since .domino defaults to vertical (44x88), they stack nicely in a column */
-/* Rotate them to be horizontal? Usually hands on side are stacked horizontally but rotated 90deg?
-   Or stacked vertically? */
-/* If stacked vertically (column), they are 44 wide, 88 high. */
-/* If we want them to look like they are "held" on the side, usually they are 88 wide (horizontal) and stacked?
-   No, usually side players have tiles vertical relative to themselves, so horizontal relative to screen.
-   Let's keep them vertical (44x88) and stacked vertically for now. It uses less width. */
 
 #controls {
     display: flex;
