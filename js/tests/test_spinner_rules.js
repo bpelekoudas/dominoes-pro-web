@@ -1,4 +1,4 @@
-const { Game, Domino } = require('./game.js');
+const { Game, Domino } = require('../game.js');
 
 function assert(condition, message) {
     if (!condition) {

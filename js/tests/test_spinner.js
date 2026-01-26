@@ -1,5 +1,5 @@
 // test_spinner.js
-const { Game, Board, Domino } = require('./game.js');
+const { Game, Board, Domino } = require('../game.js');
 
 function assert(condition, message) {
     if (!condition) {

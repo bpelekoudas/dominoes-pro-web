@@ -39,11 +39,30 @@ const TILE_H = 88;
 const GAP = 2; // Reduced gap for cleaner connection
 const TURN_LIMIT_TILES = 5; // Turn after N tiles in a branch
 
+// Audio
+const audio = {
+    thud: new Audio('assets/thud.mp3'),
+    chime: new Audio('assets/chime.mp3')
+};
+// Preload
+audio.thud.load();
+audio.chime.load();
+
+function playSound(type) {
+    if (audio[type]) {
+        audio[type].currentTime = 0;
+        audio[type].play().catch(e => console.log("Audio play failed (user interaction needed):", e));
+    }
+}
+
 // Init
 startBtn.addEventListener('click', startGame);
 window.addEventListener('resize', updateZoom);
 
 function startGame() {
+    // Reveal logo on start if hidden? Or maybe in HUD?
+    const logo = document.getElementById('game-logo');
+    if (logo) logo.style.display = 'inline-block';
     const count = parseInt(playerCountSelect.value);
     game.startNewGame(count);
     controlsEl.classList.add('hidden');
@@ -108,8 +127,10 @@ function playAITurn() {
 
     if (move) {
         const result = game.playTurn(move);
+        playSound('thud');
         render();
         if (result.score > 0) {
+            playSound('chime');
             const prevIndex = (game.turnIndex - 1 + game.players.length) % game.players.length;
             showScorePopup(result.score, getHandContainerId(prevIndex));
         }
@@ -654,9 +675,11 @@ function executeMove(moveInfo) {
         return;
     }
 
+    playSound('thud');
     render();
 
     if (result.score > 0) {
+        playSound('chime');
         showScorePopup(result.score, 'bottom');
     }
 
