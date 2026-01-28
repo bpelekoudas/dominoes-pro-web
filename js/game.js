@@ -359,6 +359,11 @@ class Game {
         this.isRoundOver = false;
         this.logs = [];
         this.passCount = 0; // Track consecutive passes
+
+        // Series Tracking
+        this.matchGameCount = 0;
+        this.lastHandWinner = null;
+        this.lastGameWinner = null;
     }
 
     log(msg) {
@@ -374,6 +379,7 @@ class Game {
         this.isRoundOver = false;
         this.gameWinner = null;
         this.passCount = 0;
+        this.lastHandWinner = null; // Reset hand winner for new game
 
         // Preserve series wins if re-starting with same players
         if (this.players.length === playerCount) {
@@ -382,17 +388,35 @@ class Game {
                 p.resetHand();
                 p.score = 0;
             });
+            this.matchGameCount++;
         } else {
-            // New set of players
+            // New set of players (New Match)
             this.players = [];
             this.players.push(new Player("Player")); // P0 Human
             for (let i = 1; i < playerCount; i++) {
                 this.players.push(new Player(`AI ${i}`, true));
             }
+            this.matchGameCount = 1;
+            this.lastGameWinner = null;
         }
 
         this.deal();
-        this.determineFirstPlayer();
+
+        // Starting Logic
+        if (this.matchGameCount > 1 && this.lastGameWinner) {
+             // Subsequent Game: Previous Game Winner leads any tile
+             const winnerIndex = this.players.indexOf(this.lastGameWinner);
+             if (winnerIndex !== -1) {
+                 this.turnIndex = winnerIndex;
+                 this.log(`${this.lastGameWinner.name} starts Game ${this.matchGameCount} (Winner of previous game).`);
+                 // Do not auto-play. Wait for input.
+             } else {
+                 this.forceHighestDoubleStart();
+             }
+        } else {
+             // Game 1 (or fallback): Highest Double leads (Auto-play)
+             this.forceHighestDoubleStart();
+        }
     }
 
     deal() {
@@ -404,7 +428,7 @@ class Game {
         });
     }
 
-    determineFirstPlayer() {
+    forceHighestDoubleStart() {
         let highestDouble = -1;
         let startingPlayerIndex = -1;
         let startingTileIndex = -1;
@@ -550,6 +574,7 @@ class Game {
 
     handleRoundEnd(winner, reason) {
         this.log(`Round End: ${reason} - Winner: ${winner.name}`);
+        this.lastHandWinner = winner;
 
         // Winner gets sum of all other hands
         let pointsToAdd = 0;
@@ -611,6 +636,7 @@ class Game {
         else finalPoints += (5 - remainder);
 
         winner.addPoints(finalPoints);
+        this.lastHandWinner = winner; // Block winner wins hand
         this.log(`${winner.name} wins the block and gets ${finalPoints} points.`);
         this.checkGameWin();
     }
@@ -629,6 +655,7 @@ class Game {
         if (winner) {
             this.isGameOver = true;
             this.gameWinner = winner;
+            this.lastGameWinner = winner;
             winner.wins++;
             this.log(`Game Over! Winner: ${this.gameWinner.name}`);
         } else {
@@ -641,21 +668,27 @@ class Game {
         this.isRoundOver = false;
         this.passCount = 0;
 
-        // Preserve scores
-        const currentScores = this.players.map(p => p.score);
-        const currentWins = this.players.map(p => p.wins);
-        const names = this.players.map(p => p.name);
-
         this.deck = new Deck();
         this.deck.shuffle();
         this.board = new Board();
 
-        // Re-use player objects or reset them?
-        // Better to reset state on existing objects
+        // Reset hands
         this.players.forEach(p => p.resetHand());
 
         this.deal();
-        this.determineFirstPlayer();
+
+        if (this.lastHandWinner) {
+             const winnerIndex = this.players.indexOf(this.lastHandWinner);
+             if (winnerIndex !== -1) {
+                 this.turnIndex = winnerIndex;
+                 this.log(`${this.lastHandWinner.name} starts (Winner of previous hand).`);
+                 // Do not auto-play. Wait for input.
+             } else {
+                 this.forceHighestDoubleStart();
+             }
+        } else {
+             this.forceHighestDoubleStart();
+        }
     }
 }
 
