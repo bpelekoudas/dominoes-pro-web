@@ -306,6 +306,7 @@ class LayoutWalker {
         this.dir = direction; // 'left', 'right', 'up', 'down'
         this.prevDir = direction; // Track previous direction for turns
         this.count = 0;
+        this.lastTileMetrics = { width: 0, height: 0 };
     }
 
     turn(newDir) {
@@ -360,32 +361,37 @@ class LayoutWalker {
         if (this.dir === 'up') dy = -height/2 - GAP;
         if (this.dir === 'down') dy = height/2 + GAP;
 
-        // CORNER CORRECTION: If turning, we need to shift the tile so it corners correctly
-        // instead of centering on the tip (which causes T-bone overlap).
+        // CORNER CORRECTION: If turning, we need to shift the tile so it corners correctly.
+        // We backtrack to the center of the previous tile, then move to the edge in the new direction.
         if (this.dir !== this.prevDir) {
-            const shiftAmt = 22; // Half of standard width/quarter of height
+            let centerX = this.x;
+            let centerY = this.y;
 
-            // Left -> Up
-            if (this.prevDir === 'left' && this.dir === 'up') {
-                dx = -shiftAmt; // Shift Left to align Right Edge to Tip
-                dy = -shiftAmt; // Shift Up to align Bottom Half Center to Tip
+            const lw = this.lastTileMetrics.width;
+            const lh = this.lastTileMetrics.height;
+
+            // Backtrack from current edge to center of previous tile
+            if (this.prevDir === 'left') centerX += lw / 2;
+            else if (this.prevDir === 'right') centerX -= lw / 2;
+            else if (this.prevDir === 'up') centerY += lh / 2;
+            else if (this.prevDir === 'down') centerY -= lh / 2;
+
+            // Move to the new edge based on new direction
+            // (Note: we use the previous tile's dimensions because we are moving to *its* other edge)
+            // Wait, lw/lh are dimensions relative to screen.
+            // If previous tile was Vertical Double (44x88), lw=44, lh=88.
+            // If we turn Up, we want to go to Top Edge. Distance is lh/2 = 44.
+            // Correct.
+
+            if (this.dir === 'left') this.x = centerX - lw / 2;
+            else if (this.dir === 'right') this.x = centerX + lw / 2;
+            else if (this.dir === 'up') this.y = centerY - lh / 2;
+            else if (this.dir === 'down') this.y = centerY + lh / 2;
+            else {
+                // Should not happen, but reset x/y
+                this.x = centerX;
+                this.y = centerY;
             }
-            // Right -> Down
-            else if (this.prevDir === 'right' && this.dir === 'down') {
-                dx = shiftAmt;
-                dy = shiftAmt;
-            }
-            // Up -> Left
-            else if (this.prevDir === 'up' && this.dir === 'left') {
-                dx = -shiftAmt;
-                dy = -shiftAmt;
-            }
-            // Down -> Right
-            else if (this.prevDir === 'down' && this.dir === 'right') {
-                dx = shiftAmt;
-                dy = shiftAmt;
-            }
-            // Note: Other turns (Right->Up etc) not used in standard logic but follow similar pattern
         }
 
         this.x += dx;
@@ -410,6 +416,8 @@ class LayoutWalker {
         if (this.dir === 'right') this.x += (width/2);
         if (this.dir === 'up') this.y -= (height/2);
         if (this.dir === 'down') this.y += (height/2);
+
+        this.lastTileMetrics = { width, height };
 
         this.count++;
         return { x: this.x, y: this.y };
