@@ -376,22 +376,15 @@ class LayoutWalker {
             else if (this.prevDir === 'up') centerY += lh / 2;
             else if (this.prevDir === 'down') centerY -= lh / 2;
 
-            // Move to the new edge based on new direction
-            // (Note: we use the previous tile's dimensions because we are moving to *its* other edge)
-            // Wait, lw/lh are dimensions relative to screen.
-            // If previous tile was Vertical Double (44x88), lw=44, lh=88.
-            // If we turn Up, we want to go to Top Edge. Distance is lh/2 = 44.
-            // Correct.
+            // Reset position to center of previous tile before applying new offset
+            this.x = centerX;
+            this.y = centerY;
 
-            if (this.dir === 'left') this.x = centerX - lw / 2;
-            else if (this.dir === 'right') this.x = centerX + lw / 2;
-            else if (this.dir === 'up') this.y = centerY - lh / 2;
-            else if (this.dir === 'down') this.y = centerY + lh / 2;
-            else {
-                // Should not happen, but reset x/y
-                this.x = centerX;
-                this.y = centerY;
-            }
+            // Move to the new edge based on new direction
+            if (this.dir === 'left') this.x -= lw / 2;
+            else if (this.dir === 'right') this.x += lw / 2;
+            else if (this.dir === 'up') this.y -= lh / 2;
+            else if (this.dir === 'down') this.y += lh / 2;
         }
 
         this.x += dx;
@@ -501,7 +494,8 @@ function renderBranch(tiles, startDir, startX, startY, turnDir) {
 
     tiles.forEach(tileObj => {
         // Check for Turn
-        if (walker.count >= TURN_LIMIT_TILES) {
+        // Delay turn if the current tile is a double to ensure perpendicular placement
+        if (walker.count >= TURN_LIMIT_TILES && !tileObj.domino.isDouble()) {
              walker.turn(turnDir);
         }
 
