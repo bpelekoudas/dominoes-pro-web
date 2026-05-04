@@ -1,0 +1,23 @@
+
+/* Push top hand up */
+#top-section {
+    margin-top: -40px; /* Push into padding/border */
+    margin-bottom: 0;
+}
+#top-section .score-display {
+    order: 1; /* Move score below the hand so it remains visible */
+    margin-top: 5px;
+}
+
+/* Push left hand left */
+#left-section {
+    margin-left: -50px;
+}
+#left-section .score-display {
+    /* To keep score visible, maybe absolute positioning or writing-mode? */
+}
+
+/* Push right hand right */
+#right-section {
+    margin-right: -50px;
+}

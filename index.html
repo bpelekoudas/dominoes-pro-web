@@ -4,51 +4,76 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Straight Dominoes (All Fives)</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="game-container">
-        <div id="hud">
-            <div class="score-box us">
-                <div class="team-name">US</div>
-                <div class="score-text"><span id="player-score">0</span> / 150</div>
-            </div>
-            <div class="score-x">X</div>
-            <div class="score-box rivals">
-                <div class="team-name">RIVALS</div>
-                <div class="score-text"><span id="ai-score">0</span> / 150</div>
-            </div>
+
+        <!-- Top Left Match Scores -->
+        <div id="match-scores">
+            <img src="assets/logo.png" id="game-logo" alt="Dominoes Logo" style="max-height: 40px; vertical-align: middle; margin-right: 10px; display: none;">
+            <div id="series-tracker">Series: P1:0 AI:0</div>
+            <div id="target-score">Target: 150</div>
+            <div id="boneyard-display">Boneyard: <span id="boneyard-count">0</span></div>
+            <div id="message-area">Press Start to Begin</div>
         </div>
 
-        <div id="ai-hand" class="hand"></div>
+        <!-- Top Section: Top Hand and Score -->
+        <div id="top-section" class="player-section">
+            <div id="score-top" class="score-display hidden">Top: 0</div>
+            <div id="top-hand" class="hand"></div>
+        </div>
 
-        <div id="series-tracker">Series: Player 0 - 0 AI</div>
-        <div id="message-area">Starting Game...</div>
+        <div id="middle-row">
+            <!-- Left Section -->
+            <div id="left-section" class="player-section side-section">
+                <div id="score-left" class="score-display hidden">Left: 0</div>
+                <div id="left-hand" class="hand vertical hidden"></div>
+            </div>
 
-        <div id="table-ring">
             <div id="board-area">
                 <div id="board">
                     <!-- Dominoes will be placed here -->
                 </div>
             </div>
+
+            <!-- Right Section -->
+            <div id="right-section" class="player-section side-section">
+                <div id="score-right" class="score-display hidden">Right: 0</div>
+                <div id="right-hand" class="hand vertical hidden"></div>
+            </div>
         </div>
 
-        <div id="player-hand" class="hand"></div>
+        <!-- Bottom Section: Player Hand and Score -->
+        <div id="bottom-section" class="player-section">
+            <div id="score-bottom" class="score-display">Player: 0</div>
+            <div id="bottom-hand" class="hand"></div>
+        </div>
 
         <div id="controls">
             <button id="start-btn">Start Game</button>
+            <select id="player-count">
+                <option value="2">2 Players</option>
+                <option value="3">3 Players</option>
+                <option value="4">4 Players</option>
+            </select>
             <select id="difficulty">
                 <option value="easy">Easy</option>
                 <option value="hard">Hard</option>
             </select>
-            <div id="boneyard-info">Boneyard: <span id="boneyard-count">0</span></div>
         </div>
     </div>
 
     <!-- Score Popup Template -->
     <div id="score-popup" class="hidden">+0</div>
 
-    <script src="game.js"></script>
-    <script src="ui.js"></script>
+    <!-- Orientation Warning -->
+    <div id="orientation-warning">
+        <div class="icon">↻</div>
+        <div class="text">Please rotate your device to landscape mode for the best experience.</div>
+    </div>
+
+    <script src="js/game.js"></script>
+    <script src="js/ui.js"></script>
 </body>
 </html>
