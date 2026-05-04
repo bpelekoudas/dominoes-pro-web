@@ -43,8 +43,8 @@ function render() {
 }
 
 function renderHUD() {
-    playerScoreEl.textContent = `Player: ${game.players[0].score}`;
-    aiScoreEl.textContent = `AI: ${game.players[1].score}`;
+    playerScoreEl.textContent = game.players[0].score;
+    aiScoreEl.textContent = game.players[1].score;
     boneyardCountEl.textContent = game.deck.tiles.length;
     seriesTrackerEl.textContent = `Series: Player ${game.players[0].wins} - ${game.players[1].wins} AI`;
 

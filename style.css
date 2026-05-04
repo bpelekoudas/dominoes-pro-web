@@ -6,50 +6,100 @@ body {
     color: white;
     display: flex;
     justify-content: center;
-    align-items: center;
     height: 100vh;
     overflow: hidden;
 }
 
 #game-container {
-    width: 90vw;
-    height: 90vh;
-    background: radial-gradient(#35654d, #244232);
-    border-radius: 20px;
-    border: 5px solid #444;
-    box-shadow: 0 0 20px #0f0, inset 0 0 50px rgba(0,0,0,0.5); /* Neon Green Glow */
+    width: 100vw;
+    max-width: 500px;
+    height: 100vh;
+    background: #0d8a7c;
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
     position: relative;
-    padding: 20px;
 }
 
 #hud {
     display: flex;
     justify-content: space-between;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 10px;
+    align-items: center;
+    padding: 10px 20px;
+    background: #153835;
     font-size: 1.2rem;
     font-weight: bold;
+    border-bottom: 2px solid #0a6b60;
+}
+
+.score-box {
+    text-align: center;
+    padding: 5px 15px;
+    border: 2px solid #0d8a7c;
+    border-radius: 5px;
+    flex-grow: 1;
+}
+
+.team-name {
+    color: #4db8b8;
+    font-size: 1rem;
+    margin-bottom: 2px;
+}
+
+.score-text {
+    font-size: 1.5rem;
+    color: white;
+}
+
+.score-x {
+    color: #ffd700;
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0 15px;
+}
+
+#series-tracker, #message-area {
+    text-align: center;
+    padding: 5px;
+    background: rgba(0, 0, 0, 0.2);
 }
 
 .hand {
-    height: 100px;
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 10px;
+    gap: 5px;
     padding: 10px;
+}
+
+#ai-hand {
+    height: 30px;
+    padding: 0;
+    margin-top: 5px;
+}
+
+#player-hand {
+    height: 100px;
     background: rgba(0,0,0,0.1);
-    border-radius: 10px;
+}
+
+#table-ring {
+    flex-grow: 1;
+    margin: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
 }
 
 #board-area {
     flex-grow: 1;
     position: relative;
-    overflow: hidden; /* Or auto if we want scroll bars */
+    overflow: hidden;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -64,8 +114,8 @@ body {
 }
 
 .domino {
-    width: 40px;
-    height: 80px;
+    width: 45px;
+    height: 90px;
     background-color: #fff;
     border-radius: 5px;
     border: 1px solid #999;
@@ -139,11 +189,14 @@ body {
 
 /* AI tiles face down */
 #ai-hand .domino {
-    background-color: #ddd;
-    /* texture for back */
-    background-image: repeating-linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc), repeating-linear-gradient(45deg, #ccc 25%, #ddd 25%, #ddd 75%, #ccc 75%, #ccc);
-    background-position: 0 0, 10px 10px;
-    background-size: 20px 20px;
+    width: 30px;
+    height: 30px;
+    background-color: #fff;
+    border-radius: 5px;
+    border: 1px solid #999;
+    background-image: none;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+    margin-top: -15px; /* peek out */
 }
 #ai-hand .domino .pip, #ai-hand .domino .line {
     display: none;

@@ -9,20 +9,27 @@
 <body>
     <div id="game-container">
         <div id="hud">
-            <div id="series-tracker">Series: Player 0 - 0 AI</div>
-            <div id="game-info">
-                <span id="ai-score">AI: 0</span>
-                <span id="target-score">Target: 150</span>
-                <span id="player-score">Player: 0</span>
+            <div class="score-box us">
+                <div class="team-name">US</div>
+                <div class="score-text"><span id="player-score">0</span> / 150</div>
             </div>
-            <div id="message-area">Starting Game...</div>
+            <div class="score-x">X</div>
+            <div class="score-box rivals">
+                <div class="team-name">RIVALS</div>
+                <div class="score-text"><span id="ai-score">0</span> / 150</div>
+            </div>
         </div>
+
+        <div id="series-tracker">Series: Player 0 - 0 AI</div>
+        <div id="message-area">Starting Game...</div>
 
         <div id="ai-hand" class="hand"></div>
 
-        <div id="board-area">
-            <div id="board">
-                <!-- Dominoes will be placed here -->
+        <div id="table-ring">
+            <div id="board-area">
+                <div id="board">
+                    <!-- Dominoes will be placed here -->
+                </div>
             </div>
         </div>
 
