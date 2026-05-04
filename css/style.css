@@ -77,7 +77,7 @@ body {
 
 /* Top Section */
 #top-section {
-    margin-top: -60px; /* Push into padding/border */
+    margin-top: -85px; /* Push into padding/border */
     margin-bottom: 10px;
 }
 #top-section .score-display {
@@ -113,11 +113,11 @@ body {
 }
 
 #left-section {
-    margin-left: -50px;
+    margin-left: -70px;
 }
 
 #right-section {
-    margin-right: -50px;
+    margin-right: -70px;
 }
 
 #left-section .score-display {
@@ -453,6 +453,16 @@ button, select {
     button {
         padding: 8px 12px;
         font-size: 0.9rem;
+    }
+
+    #top-section {
+        margin-top: -65px;
+    }
+    #left-section {
+        margin-left: -30px;
+    }
+    #right-section {
+        margin-right: -30px;
     }
 }
 
