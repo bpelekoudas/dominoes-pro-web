@@ -121,13 +121,17 @@ body {
 }
 
 #left-section .score-display {
-    position: absolute;
-    right: -80px;
+    order: 1;
+    margin-top: 10px;
+    transform: translateX(40px);
+    white-space: nowrap;
 }
 
 #right-section .score-display {
-    position: absolute;
-    left: -80px;
+    order: -1;
+    margin-bottom: 10px;
+    transform: translateX(-40px);
+    white-space: nowrap;
 }
 
 /* Side Hands Vertical Container */
@@ -135,7 +139,7 @@ body {
     width: 100px;
     height: auto;
     flex-direction: column;
-    /* If tiles are horizontal (88x44), we stack them */
+    gap: 10px;
 }
 
 #board-area {
@@ -423,19 +427,11 @@ button, select {
         padding: 5px;
     }
 
-    .hand.vertical .domino {
-        transform: scale(0.6);
-        margin-bottom: 5px;
-    }
-
-    .hand.vertical .domino:last-child {
-        margin-bottom: 0;
-    }
-
-    /* Top and bottom hands */
-    .hand:not(.vertical) .domino {
+    .hand .domino {
         transform: scale(0.8);
-        margin: 0 -5px;
+    }
+    .hand {
+        gap: -5px;
     }
 
     #match-scores {
@@ -464,6 +460,18 @@ button, select {
     #right-section {
         margin-right: -30px;
     }
+    #left-section .score-display {
+    order: 1;
+    margin-top: 10px;
+    transform: translateX(40px);
+    white-space: nowrap;
+}
+    #right-section .score-display {
+    order: -1;
+    margin-bottom: 10px;
+    transform: translateX(-40px);
+    white-space: nowrap;
+}
 }
 
 /* Mobile Landscape Optimization */
@@ -493,13 +501,7 @@ button, select {
         margin: 1px;
     }
 
-    .hand.vertical .domino {
-        margin-bottom: 2px;
-    }
 
-    .hand.vertical .domino:last-child {
-        margin-bottom: 0;
-    }
 
     .score-display {
         font-size: 0.8rem;
