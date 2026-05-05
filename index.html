@@ -9,18 +9,21 @@
 <body>
     <div id="game-container">
 
-        <!-- Top Left Match Scores -->
-        <div id="match-scores">
-            <img src="assets/logo.png" id="game-logo" alt="Dominoes Logo" style="max-height: 40px; vertical-align: middle; margin-right: 10px; display: none;">
-            <div id="series-tracker">Series: P1:0 AI:0</div>
-            <div id="target-score">Target: 150</div>
-            <div id="boneyard-display">Boneyard: <span id="boneyard-count">0</span></div>
-            <div id="message-area">Press Start to Begin</div>
+
+        <!-- Top Banner for Scores -->
+        <div id="top-banner">
+            <div id="match-info">
+                <img src="assets/logo.png" id="game-logo" alt="Dominoes Logo" style="max-height: 40px; vertical-align: middle; margin-right: 10px; display: none;">
+                <span id="series-tracker">Series: P1:0 AI:0</span> |
+                <span id="target-score">Target: 150</span> |
+                <span id="boneyard-display">Boneyard: <span id="boneyard-count">0</span></span> |
+                <span id="message-area">Press Start to Begin</span>
+            </div>
+            <div id="score-top" class="score-display hidden">AI 2: 0</div>
         </div>
 
         <!-- Top Section: Top Hand and Score -->
         <div id="top-section" class="player-section">
-            <div id="score-top" class="score-display hidden">Top: 0</div>
             <div id="top-hand" class="hand"></div>
         </div>
 

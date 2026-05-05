@@ -1,3 +1,42 @@
+
+
+/* Top Banner */
+#top-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 5px 10px;
+    color: white;
+    font-weight: bold;
+    z-index: 100;
+    width: 100%;
+    box-sizing: border-box;
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 0.8rem;
+}
+
+#match-info {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    flex-wrap: wrap; /* Allows wrapping on small screens */
+}
+
+#top-banner .score-display {
+    margin: 0;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 5px;
+    font-size: 0.9rem;
+}
+
+#top-section {
+    margin-top: -65px; /* Adjust top section position slightly */
+}
+
+
 *, *::before, *::after {
     box-sizing: border-box;
 }
@@ -31,16 +70,7 @@ body {
 }
 
 /* Match Scores at Top Left */
-#match-scores {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 10px;
-    border-radius: 10px;
-    font-weight: bold;
-    z-index: 10;
-}
+
 
 #hud {
     /* Deprecated, splitting up */
@@ -260,6 +290,12 @@ body {
 .pip[data-pos="9"] { grid-column: 3; grid-row: 3; }
 
 /* AI/Other Player tiles face down */
+
+.hand:not(#bottom-hand) .domino {
+    transform: scale(0.75);
+    /* Adjust margin to account for visual scale down if necessary, but transform handles visual shrinking. */
+}
+
 .hand:not(#bottom-hand) .domino {
     background: linear-gradient(135deg, #ddd 0%, #ccc 100%);
     background-image: repeating-linear-gradient(45deg, #bbb 25%, transparent 25%, transparent 75%, #bbb 75%, #bbb), repeating-linear-gradient(45deg, #bbb 25%, #ccc 25%, #ccc 75%, #bbb 75%, #bbb);
@@ -418,6 +454,17 @@ button, select {
     }
 
     /* Compact layout for narrow screens */
+    #top-banner {
+        padding: 5px;
+        font-size: 0.8rem;
+    }
+    #match-info {
+        gap: 5px;
+    }
+    #game-container {
+        padding-top: 40px !important;
+    }
+
     .side-section {
         min-width: 60px;
     }
@@ -434,12 +481,7 @@ button, select {
         gap: -5px;
     }
 
-    #match-scores {
-        font-size: 0.7rem;
-        padding: 4px;
-        top: 5px;
-        left: 5px;
-    }
+
 
     #controls {
         gap: 10px;
@@ -508,12 +550,7 @@ button, select {
         padding: 2px 5px;
     }
 
-    #match-scores {
-        top: 2px;
-        left: 2px;
-        font-size: 0.7rem;
-        padding: 4px;
-    }
+
 
     /* Allow board to shrink more on very short screens */
     #board {
