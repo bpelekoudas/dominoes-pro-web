@@ -69,7 +69,7 @@ That serves the site and the socket on port 8787. The database file is `data/uho
 
 ## Deploy
 
-Any host that runs Node 22 can take this. Give it a persistent disk for the SQLite file, or the hands disappear when the machine restarts.
+Any host that runs Node 22 can take this. Give it a persistent disk for the SQLite file, or the hands disappear when the machine restarts. The server listens on the `PORT` it is given (8787 when that variable is unset) and on every network interface, which is what a host's proxy expects.
 
 ```bash
 npm ci
@@ -84,7 +84,24 @@ docker build -t uhoh-dominoes .
 docker run -p 8080:8080 -v uhoh-data:/data uhoh-dominoes
 ```
 
-Fly.io, Railway, Render, or a small VPS are all enough. Put the disk on `/data`. Turn on HTTPS at the host so the phone can reconnect cleanly. Leave the current static site alone until you are ready to send the domain here.
+The phone opens the live connection on the same address as the page, using `wss` whenever the page is `https`. If that connection drops, the phone tries again on its own and comes back to the same seat. Leave the current static site alone until you are ready to send the domain here.
+
+## Put a test table on Render
+
+This costs **$7.25 per month**: $7 for the smallest web service that stays on, plus $0.25 for a 1 GB disk. Render bills by the second, so a few days of testing is a few dollars. The Render account itself (the Hobby workspace) is free. A card is required, because this is a paid service. Outbound traffic past the 5 GB included each month is $0.15 per GB. A game among friends will not get near that.
+
+The free service is $0, and it is the wrong place for this test. It cannot have a disk, so every room and every hand is wiped whenever the service restarts, redeploys, or goes to sleep. It goes to sleep after 15 minutes with nobody connected, then takes about a minute to wake up. The live connection works only while it is awake. Each workspace also gets 750 free hours a month; when those run out, the free service stops until the next month.
+
+`render.yaml` already chooses the paid service, Node 22, the build and start commands, the `/health` check, and the disk. You do not fill those in by hand.
+
+1. Sign up at [render.com](https://render.com). Signing in with GitHub is the shortest path.
+2. If Render asks to connect GitHub, allow it to see the `dominoes-pro-web` repository.
+3. In the Render dashboard, choose **New**, then **Blueprint**.
+4. Pick the `dominoes-pro-web` repository, then pick the branch `cursor/multiplayer-rebuild-238c`. After that branch is merged, pick `main` instead.
+5. Render shows the service from `render.yaml`. The name is `uhoh-dominoes`, the plan is the $7 instance, and the disk is 1 GB. Apply it. The first build takes a few minutes.
+6. When the service says it is live, open the `onrender.com` address Render shows. Create a room on your phone and send the link.
+
+A new deploy stops the old copy for a few seconds before the new one starts. That is how a disk stays consistent. Phones show "Reconnecting…" and sit back down by themselves. The game file lives on the disk at `/var/data`, so rooms survive that restart.
 
 ## What is deliberately not here yet
 

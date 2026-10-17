@@ -1,0 +1,30 @@
+# Test table for friends. Render reads this file when you create a Blueprint.
+#
+# This is the cheapest setup that stays awake and keeps the game file:
+#   web service  0.5 CPU / 512 MB   $7.00 / month   (plan id 0.5c-512mb)
+#   disk         1 GB               $0.25 / month
+#   total                           $7.25 / month
+# Render bills this by the second. A Hobby workspace itself costs nothing.
+# The free web service cannot have a disk, and it sleeps after 15 idle minutes.
+services:
+  - type: web
+    name: uhoh-dominoes
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      # Pin Node 22. An open ">=22" range would otherwise follow Render's newest Node.
+      - key: NODE_VERSION
+        value: "22"
+      # Skip Render's extra install. The build command runs npm ci, which includes the build tools.
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+      # The disk is mounted here. Render sets PORT itself; the server listens on that port.
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: uhoh-sqlite
+      mountPath: /var/data
+      sizeGB: 1

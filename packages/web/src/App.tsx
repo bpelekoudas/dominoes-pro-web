@@ -32,6 +32,7 @@ export function App() {
   const [leaveArmed, setLeaveArmed] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const leaveRef = useRef(false);
+  const connectRef = useRef<(first?: object) => void>(() => undefined);
 
   const send = (message: object) => {
     const socket = socketRef.current;
@@ -40,42 +41,70 @@ export function App() {
 
   useEffect(() => {
     let stopped = false;
-    let retry = 400;
-    let socket: WebSocket | null = null;
+    let retryMs = 400;
     let timer = 0;
+    let attempt = 0;
+    let socket: WebSocket | null = null;
+    // The first message of a new seat (create or join). Cleared once the server welcomes us,
+    // so a later drop reconnects the same seat instead of opening another room.
+    let pending: object | null = null;
 
     const connect = () => {
       if (stopped || leaveRef.current) return;
       const token = localStorage.getItem(TOKEN_KEY);
-      const room = roomFromLocation();
-      if (!token && !room) {
+      if (!pending && !token) {
         setStatus("idle");
         return;
       }
-      if (!token) {
-        setStatus("idle");
-        return;
-      }
+      const mine = ++attempt;
       setStatus("connecting");
-      socket = new WebSocket(socketUrl());
-      socketRef.current = socket;
-      socket.onopen = () => {
-        retry = 400;
+      const next = new WebSocket(socketUrl());
+      socket = next;
+      socketRef.current = next;
+      next.onopen = () => {
+        if (mine !== attempt) return;
+        retryMs = 400;
         setStatus("live");
-        socket?.send(JSON.stringify({ type: "reconnect", token }));
+        const currentToken = localStorage.getItem(TOKEN_KEY);
+        if (pending) next.send(JSON.stringify(pending));
+        else if (currentToken) next.send(JSON.stringify({ type: "reconnect", token: currentToken }));
       };
-      socket.onmessage = (event) => handleMessage(String(event.data), setView, setChat, setError);
-      socket.onclose = () => {
-        if (stopped || leaveRef.current) return;
+      next.onmessage = (event) => {
+        if (mine !== attempt) return;
+        const message = handleMessage(String(event.data), setView, setChat, setError);
+        if (message?.type === "welcome") {
+          pending = null;
+          localStorage.setItem(TOKEN_KEY, message.token);
+          const url = `/r/${message.roomCode}`;
+          if (location.pathname !== url) history.replaceState(null, "", url);
+        }
+      };
+      next.onclose = () => {
+        if (mine !== attempt || stopped || leaveRef.current) return;
+        if (!pending && !localStorage.getItem(TOKEN_KEY)) {
+          setStatus("idle");
+          return;
+        }
         setStatus("connecting");
-        timer = window.setTimeout(connect, retry);
-        retry = Math.min(retry * 2, 4000);
+        timer = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 2, 4_000);
       };
+    };
+
+    connectRef.current = (first?: object) => {
+      leaveRef.current = false;
+      if (first) pending = first;
+      retryMs = 400;
+      window.clearTimeout(timer);
+      attempt += 1;
+      socket?.close();
+      connect();
     };
 
     if (localStorage.getItem(TOKEN_KEY)) connect();
     return () => {
       stopped = true;
+      attempt += 1;
       window.clearTimeout(timer);
       socket?.close();
     };
@@ -86,26 +115,8 @@ export function App() {
   }, [view?.turnPlayerId, view?.handNumber, view?.gameNumber, view?.you.hand.length]);
 
   const openSocket = (first: object) => {
-    leaveRef.current = false;
     setError(null);
-    setStatus("connecting");
-    const socket = new WebSocket(socketUrl());
-    socketRef.current = socket;
-    socket.onopen = () => {
-      setStatus("live");
-      socket.send(JSON.stringify(first));
-    };
-    socket.onmessage = (event) => {
-      const message = handleMessage(String(event.data), setView, setChat, setError);
-      if (message?.type === "welcome") {
-        localStorage.setItem(TOKEN_KEY, message.token);
-        const url = `/r/${message.roomCode}`;
-        if (location.pathname !== url) history.replaceState(null, "", url);
-      }
-    };
-    socket.onclose = () => {
-      if (!leaveRef.current && localStorage.getItem(TOKEN_KEY)) setStatus("connecting");
-    };
+    connectRef.current(first);
   };
 
   const leave = () => {

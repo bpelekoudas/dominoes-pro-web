@@ -18,7 +18,11 @@ if (!process.env.DB_FILE && !existsSync(dataDir)) {
 
 const store = new Store(dbFile);
 const hub = new Hub(store);
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  // Render terminates HTTPS and forwards the original host and protocol.
+  trustProxy: true,
+});
 
 await app.register(websocket);
 
@@ -26,6 +30,25 @@ app.get("/health", async () => ({ ok: true }));
 
 app.get("/ws", { websocket: true }, (socket) => {
   let session: { playerId: string; generation: number } | null = null;
+  // A quiet table still has to send traffic, or the proxy treats the socket as idle and drops it.
+  let sawPong = true;
+  const beat = setInterval(() => {
+    if (socket.readyState !== 1) return;
+    if (!sawPong) {
+      socket.terminate();
+      return;
+    }
+    sawPong = false;
+    socket.ping();
+  }, 20_000);
+  beat.unref?.();
+  socket.on("pong", () => {
+    sawPong = true;
+  });
+  socket.on("close", () => clearInterval(beat));
+  socket.on("error", () => {
+    // The close handler tells the table this seat dropped. The phone reconnects.
+  });
 
   const send = (message: ServerMessage): void => {
     if (socket.readyState === 1) socket.send(JSON.stringify(message));
