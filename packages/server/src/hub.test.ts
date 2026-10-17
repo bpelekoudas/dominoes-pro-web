@@ -1,0 +1,163 @@
+import { describe, expect, it } from "vitest";
+import type { PlayerView } from "@uhoh/rules";
+import { Store } from "./db.js";
+import { Hub, type ServerMessage } from "./hub.js";
+
+function latestView(messages: ServerMessage[]): PlayerView | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.type === "state") return message.view;
+  }
+  return null;
+}
+
+function setup() {
+  const store = new Store(":memory:");
+  const hub = new Hub(store, 30);
+  const connect = (message: Parameters<Hub["connect"]>[0]) => {
+    const messages: ServerMessage[] = [];
+    const result = hub.connect(
+      message,
+      (outgoing) => messages.push(outgoing),
+      () => undefined,
+    );
+    if (!result.ok) throw new Error(result.error);
+    return { ...result.session, messages };
+  };
+  return { store, hub, connect };
+}
+
+describe("rooms", () => {
+  it("deals a private hand, hides the seed, and replays after a restart", () => {
+    const { store, hub, connect } = setup();
+    const alex = connect({
+      type: "create",
+      name: "Alex",
+      playerCount: 2,
+      boneyardMode: "draw_one",
+      seriesLength: 3,
+    });
+    const code = latestView(alex.messages)?.roomCode ?? "";
+    const sam = connect({ type: "join", code, name: "Sam" });
+    expect(hub.command).toBeTypeOf("function");
+    hub.command(sam.playerId, { type: "start" });
+    const refused = sam.messages.at(-1);
+    expect(refused?.type).toBe("error");
+
+    hub.command(alex.playerId, { type: "start" });
+    const alexView = latestView(alex.messages);
+    const samView = latestView(sam.messages);
+    expect(alexView?.status).toBe("playing");
+    expect(alexView?.settings.targetScore).toBe(150);
+    expect(alexView?.boneyardCount).toBe(14);
+    expect(alexView?.you.hand).toHaveLength(7);
+    expect(samView?.you.hand).toHaveLength(7);
+    expect(alexView?.you.hand.map((tile) => tile.id).sort()).not.toEqual(
+      samView?.you.hand.map((tile) => tile.id).sort(),
+    );
+
+    const hands = store.handsForSeries(
+      store.roomByCode(code)!.id,
+      store.roomByCode(code)!.series_id,
+    );
+    const seed = hands[0]?.seed ?? "";
+    const deck = JSON.parse(hands[0]?.deck_json ?? "[]") as string[];
+    const wire = JSON.stringify([...alex.messages, ...sam.messages]);
+    expect(seed.length).toBe(64);
+    expect(wire).not.toContain(seed);
+    expect(wire).not.toContain(hands[0]?.deck_json ?? "missing");
+
+    const hiddenFromSam = new Set(deck);
+    for (const tile of samView?.you.hand ?? []) hiddenFromSam.delete(tile.id);
+    for (const id of boardIds(samView)) hiddenFromSam.delete(id);
+    for (const id of hiddenFromSam) expect(JSON.stringify(sam.messages)).not.toContain(id);
+
+    for (let step = 0; step < 16; step += 1) {
+      const turn = [alex, sam].find((player) => latestView(player.messages)?.turnPlayerId === player.playerId);
+      const view = turn ? latestView(turn.messages) : null;
+      if (!turn || !view) break;
+      if (view.legalPlays[0]) {
+        hub.command(turn.playerId, { type: "intent", intent: { type: "play", ...view.legalPlays[0] } });
+      } else if (view.canDraw) {
+        hub.command(turn.playerId, { type: "intent", intent: { type: "draw" } });
+      } else if (view.canKnock) {
+        hub.command(turn.playerId, { type: "intent", intent: { type: "knock" } });
+      } else break;
+    }
+
+    hub.command(alex.playerId, { type: "chat", kind: "preset", packId: "table", tauntId: "uh-oh" });
+    hub.command(sam.playerId, {
+      type: "chat",
+      kind: "preset",
+      packId: "sample-character",
+      tauntId: "later",
+    });
+    expect(sam.messages.at(-1)?.type).toBe("error");
+    hub.command(sam.playerId, { type: "chat", kind: "text", text: "x".repeat(81) });
+    expect(sam.messages.at(-1)?.type).toBe("error");
+    const heard = alex.messages.filter((message) => message.type === "chat");
+    expect(heard.some((message) => message.type === "chat" && message.line.text === "Uh oh.")).toBe(true);
+
+    const alexToken = alex.messages.find((message) => message.type === "welcome");
+    const samToken = sam.messages.find((message) => message.type === "welcome");
+    const restored = new Hub(store, 30);
+    const alexAgain = {
+      messages: [] as ServerMessage[],
+    };
+    const samAgain = {
+      messages: [] as ServerMessage[],
+    };
+    restored.connect(
+      { type: "reconnect", token: alexToken?.type === "welcome" ? alexToken.token : "" },
+      (message) => alexAgain.messages.push(message),
+      () => undefined,
+    );
+    restored.connect(
+      { type: "reconnect", token: samToken?.type === "welcome" ? samToken.token : "" },
+      (message) => samAgain.messages.push(message),
+      () => undefined,
+    );
+    expect(latestView(alexAgain.messages)?.you.hand).toEqual(latestView(alex.messages)?.you.hand);
+    expect(latestView(samAgain.messages)?.you.hand).toEqual(latestView(sam.messages)?.you.hand);
+    expect(latestView(alexAgain.messages)?.players.map((player) => player.score)).toEqual(
+      latestView(alex.messages)?.players.map((player) => player.score),
+    );
+    expect(latestView(alexAgain.messages)?.openEquation).toBe(latestView(alex.messages)?.openEquation);
+  });
+
+  it("rejects a third player and a bad code", () => {
+    const { hub, connect } = setup();
+    const alex = connect({
+      type: "create",
+      name: "Alex",
+      playerCount: 2,
+      boneyardMode: "draw_until",
+      seriesLength: 5,
+    });
+    const code = latestView(alex.messages)?.roomCode ?? "";
+    connect({ type: "join", code, name: "Sam" });
+    const messages: ServerMessage[] = [];
+    const blocked = hub.connect(
+      { type: "join", code, name: "Jo" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    expect(blocked.ok).toBe(false);
+    const missing = hub.connect(
+      { type: "join", code: "ZZZZZZ", name: "Jo" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    expect(missing.ok).toBe(false);
+  });
+});
+
+function boardIds(view: PlayerView | null): string[] {
+  if (!view?.board) return [];
+  const ids: string[] = [];
+  if (view.board.center) ids.push(view.board.center.tileId);
+  for (const arm of Object.values(view.board.arms)) {
+    for (const tile of arm) ids.push(tile.tileId);
+  }
+  return ids;
+}
