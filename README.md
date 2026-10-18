@@ -67,7 +67,9 @@ npm start
 
 That serves the site and the socket on port 8787. The database file is `data/uhoh.sqlite`. Override the location with `DATA_DIR` or `DB_FILE`, and the port with `PORT`.
 
-While a hand is going, the table can show the addition across the open ends, such as `2 + 2 + 6 + 5 = 15`. That line is on by default so a test table can be checked by eye. The result next to it (`Scored 15` or `No score`) stays either way. To hide the addition, set `SHOW_SCORE_MATH` to `0` (`false`, `off`, and `no` also hide it) and restart the server. Unset, empty, or `1` leaves it on. The page reads the flag from `/config.js` when it loads, so changing it does not need a rebuild.
+While a hand is going, a scoring play floats `+N` in gold from that end for about a second. The addition across the open ends, such as `2+2+6+5=15`, stays on by default as a compact line so a test table can be checked by eye. To hide the addition, set `SHOW_SCORE_MATH` to `0` (`false`, `off`, and `no` also hide it) and restart the server. Unset, empty, or `1` leaves it on. The page reads the flag from `/config.js` when it loads, so changing it does not need a rebuild.
+
+The copy link uses that same `/config.js` address: `PUBLIC_URL` if you set it, otherwise the host the request came in on. A phone on the Render table copies an `onrender.com` link. Set `PUBLIC_URL` only when that host header is not the address friends should open (a tunnel, for example).
 
 ## Deploy
 

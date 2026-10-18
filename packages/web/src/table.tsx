@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, type LayoutBox } from "../../rules/src/layout.js";
+import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import {
   chooseDropEnd,
   type DropBox,
@@ -10,6 +10,8 @@ import {
   GHOST_HEIGHT,
   GHOST_WIDTH,
 } from "./drop.js";
+
+const NO_SLOTS: Array<LayoutBox & { id: string }> = [];
 
 const PIPS: Record<number, number[]> = {
   0: [],
@@ -75,6 +77,7 @@ export function Table({
   const board = view.board;
   const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
   useLayoutEffect(() => {
@@ -94,10 +97,21 @@ export function Table({
   }, [layout]);
 
   const focusTile = dragTileId ?? selectedTile;
-  const hotEnds = new Set(
-    focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile).map((play) => play.endId) : [],
-  );
+  const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];
+  // A drag shows every legal end. A tap shows them only when the tile fits more than one.
+  const armed = dragTileId !== null || focusPlays.length > 1;
+  const hotEnds = new Set(armed ? focusPlays.map((play) => play.endId) : []);
   const dropLead = dragTileId !== null && hotEnds.has("lead");
+  const slotKey = armed ? [...hotEnds].sort().join(",") : "";
+  const slotBoxes = useMemo(() => {
+    if (!layout || !slotKey) return NO_SLOTS;
+    const ids = new Set(slotKey.split(","));
+    return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end), id: end.id }));
+  }, [layout, slotKey]);
+  const slots = useScreenBoxes(stageRef, layout, scale, slotBoxes);
+  const pop = useScorePop(view.lastPlay);
+  const popAt = useAnchor(stageRef, layout, scale, pop?.tileId ?? null, pop?.endId ?? null);
+  const lastTileId = view.lastPlay?.tileId ?? null;
 
   return (
     <div
@@ -113,10 +127,16 @@ export function Table({
         <div className="board-scaler" style={{ width: layout.fit.w * scale, height: layout.fit.h * scale }}>
           <div
             className="board-stage"
+            ref={stageRef}
             style={{ width: layout.fit.w, height: layout.fit.h, transform: `scale(${scale})` }}
           >
             {layout.tiles.map((tile) => (
-              <div key={tile.tileId} className="board-tile" style={place(tile, layout.fit)}>
+              <div
+                key={tile.tileId}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}`}
+                style={place(tile, layout.fit)}
+                data-board-tile={tile.tileId}
+              >
                 <Domino a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
               </div>
             ))}
@@ -132,13 +152,32 @@ export function Table({
                   data-end-id={end.id}
                   data-hot={hot ? "true" : "false"}
                   onClick={() => chooseEnd(end.id)}
-                  aria-label={`Open ${end.id} end, match ${end.match}, counts ${end.scorePips}`}
+                  aria-label={`Open ${end.id} end, match ${end.match}`}
                 />
               );
             })}
           </div>
         </div>
       )}
+      {slots.map((slot) =>
+        createPortal(
+          <div
+            key={slot.id}
+            className="ghost-slot"
+            data-end-id={slot.id}
+            style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
+          />,
+          document.body,
+        ),
+      )}
+      {pop && popAt
+        ? createPortal(
+            <p className="score-pop" style={{ left: popAt.left, top: popAt.top }} data-awarded={pop.awarded}>
+              +{pop.awarded}
+            </p>,
+            document.body,
+          )
+        : null}
     </div>
   );
 
@@ -147,6 +186,102 @@ export function Table({
     onPlay(selectedTile, endId);
     onSelect(null);
   }
+}
+
+function nextSlotBox(layout: BoardLayout, end: PlacedEnd): LayoutBox {
+  const tip = [...layout.tiles].reverse().find((tile) => tile.arm === end.id);
+  if (tip) return straightBox(tip, tip.direction, false);
+  const center = layout.tiles[0];
+  if (!center) return end;
+  return straightBox(center, end.id, false);
+}
+
+interface ScreenBox {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function useScreenBoxes(
+  stageRef: { current: HTMLDivElement | null },
+  layout: BoardLayout | null,
+  scale: number,
+  boxes: Array<LayoutBox & { id: string }>,
+): ScreenBox[] {
+  const [placed, setPlaced] = useState<ScreenBox[]>([]);
+  const key = boxes.map((box) => `${box.id}:${box.x}:${box.y}:${box.w}:${box.h}`).join("|");
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !layout || boxes.length === 0) {
+      setPlaced([]);
+      return;
+    }
+    const origin = stage.getBoundingClientRect();
+    setPlaced(
+      boxes.map((box) => {
+        const local = place(box, layout.fit);
+        return {
+          id: box.id,
+          left: origin.left + local.left * scale,
+          top: origin.top + local.top * scale,
+          width: local.width * scale,
+          height: local.height * scale,
+        };
+      }),
+    );
+  }, [stageRef, layout, scale, key, boxes]);
+  return placed;
+}
+
+function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string } | null {
+  const seq = lastPlay && lastPlay.awarded > 0 ? lastPlay.seq : -1;
+  const awarded = lastPlay?.awarded ?? 0;
+  const tileId = lastPlay?.tileId ?? "";
+  const endId = lastPlay?.endId ?? "";
+  const [pop, setPop] = useState<{ seq: number; awarded: number; tileId: string; endId: string } | null>(null);
+  useEffect(() => {
+    if (seq < 0 || awarded <= 0) {
+      setPop(null);
+      return;
+    }
+    setPop({ seq, awarded, tileId, endId });
+    const timer = window.setTimeout(() => setPop(null), 1200);
+    return () => window.clearTimeout(timer);
+  }, [seq, awarded, tileId, endId]);
+  return pop;
+}
+
+function useAnchor(
+  stageRef: { current: HTMLDivElement | null },
+  layout: BoardLayout | null,
+  scale: number,
+  tileId: string | null,
+  endId: string | null,
+): { left: number; top: number } | null {
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !layout || !tileId) {
+      setAt(null);
+      return;
+    }
+    const tile = layout.tiles.find((item) => item.tileId === tileId);
+    const end = layout.ends.find((item) => item.id === endId);
+    const box = tile ?? end;
+    if (!box) {
+      setAt(null);
+      return;
+    }
+    const origin = stage.getBoundingClientRect();
+    const local = place(box, layout.fit);
+    setAt({
+      left: origin.left + (local.left + local.width / 2) * scale,
+      top: origin.top + local.top * scale,
+    });
+  }, [stageRef, layout, scale, tileId, endId]);
+  return at;
 }
 
 function place(box: LayoutBox, fit: LayoutBox): { left: number; top: number; width: number; height: number } {

@@ -2,6 +2,7 @@
 
 interface UhOhConfig {
   showScoreMath?: boolean;
+  publicUrl?: string;
 }
 
 interface Window {

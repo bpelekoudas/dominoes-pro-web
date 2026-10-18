@@ -6,6 +6,7 @@ import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { Hub, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Store } from "./db.js";
+import { publicBase } from "./public-url.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
@@ -31,11 +32,18 @@ app.get("/health", async () => ({ ok: true }));
 // The open-end addition ("2 + 2 + 6 = 10") stays on until this is turned off.
 // Unset or empty means on. 0, false, off, and no mean off. Read at each request
 // so a restart is enough — the page does not need a rebuild.
-app.get("/config.js", async (_request, reply) => {
+app.get("/config.js", async (request, reply) => {
   const raw = (process.env.SHOW_SCORE_MATH ?? "").trim().toLowerCase();
   const showScoreMath = raw !== "0" && raw !== "false" && raw !== "off" && raw !== "no";
+  const forwarded = request.headers["x-forwarded-host"];
+  const hostHeader = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  const publicUrl = publicBase({
+    publicUrl: process.env.PUBLIC_URL,
+    proto: request.protocol,
+    host: hostHeader ?? request.hostname,
+  });
   reply.type("application/javascript; charset=utf-8").header("cache-control", "no-store");
-  return `window.__UHOH__=${JSON.stringify({ showScoreMath })};\n`;
+  return `window.__UHOH__=${JSON.stringify({ showScoreMath, publicUrl })};\n`;
 });
 
 app.get("/ws", { websocket: true }, (socket) => {

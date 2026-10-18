@@ -306,6 +306,8 @@ export class Hub {
     if (!room || !seat) return { ok: false, error: "This device isn't at a table. Join with a code." };
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
+    // Everyone else still had this seat marked away. Tell them the player is back.
+    this.broadcast(room);
     return { ok: true, session: { playerId: seat.id, generation } };
   }
 

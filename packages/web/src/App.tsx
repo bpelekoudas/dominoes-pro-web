@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
+import { tableLink } from "./link.js";
 import { Logo } from "./logo.js";
+import { seatAround, type SeatEdge } from "./seats.js";
 import { Hand, Table } from "./table";
 
 interface ChatLine {
@@ -9,6 +11,7 @@ interface ChatLine {
   name: string;
   kind: "preset" | "text";
   text: string;
+  at?: string;
 }
 
 type ServerMessage =
@@ -372,60 +375,53 @@ function Game({
   onLeave: () => void;
   onSend: (message: object) => void;
 }) {
-  const link = `${location.origin}/r/${view.roomCode}`;
+  const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const showResult = view.lastHand && dismissedHand !== handKey(view) && !view.lastPlay;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
+  const bubble = useTalkBubble(chat);
+  const unread = useUnread(chat, chatOpen);
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
+  const around = seatAround(view.players);
+  const left = around.find((seat) => seat.edge === "left") ?? null;
+  const top = around.find((seat) => seat.edge === "top") ?? null;
+  const right = around.find((seat) => seat.edge === "right") ?? null;
+  const you = around.find((seat) => seat.edge === "bottom") ?? null;
+  const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby";
 
   const playing = view.status !== "lobby";
   return (
     <main className={`felt-app${chatOpen ? " chat-open" : ""}`} data-skin="ivory">
       <div className="felt-column">
-      {playing ? (
-        <header className="playbar">
-          <PlayMark />
+      <header className="playbar">
+        <PlayMark />
+        {playing ? (
           <button type="button" className="code-chip play-code" data-room-code={view.roomCode} onClick={() => copyText(link)}>
             {view.roomCode}
           </button>
-          <p className="series-line">
-            Bo{view.settings.seriesLength} · G{view.gameNumber} · H{view.handNumber} · to {view.settings.targetScore}
-          </p>
-          <button type="button" className="icon-button mobile-only" aria-label={chatOpen ? "Close chat" : "Talk"} onClick={onToggleChat}>
-            <TalkIcon />
-          </button>
-          <button
-            type="button"
-            className={`icon-button${leaveArmed ? " armed" : ""}`}
-            aria-label={leaveArmed ? "Leave now" : "Leave"}
-            onClick={leaveArmed ? onLeave : onLeaveArm}
-          >
-            {leaveArmed ? "Leave" : <LeaveIcon />}
-          </button>
-        </header>
-      ) : (
-        <header className="topbar">
-          <div>
-            <Logo compact />
-            <button type="button" className="code-chip" data-room-code={view.roomCode} onClick={() => copyText(link)}>
-              {view.roomCode}
-            </button>
-          </div>
-          <div className="series-note">
-            <span>
-              Best of {view.settings.seriesLength} · first to {view.winsNeeded}
-            </span>
-            <span>Lobby</span>
-          </div>
-          <div className="top-actions">
-            <button type="button" className="text-button mobile-only" onClick={onToggleChat}>
-              {chatOpen ? "Close" : "Talk"}
-            </button>
-            <button type="button" className="text-button" onClick={leaveArmed ? onLeave : onLeaveArm}>
-              {leaveArmed ? "Leave now" : "Leave"}
-            </button>
-          </div>
-        </header>
-      )}
+        ) : null}
+        <p className="series-line">
+          {playing
+            ? `Bo${view.settings.seriesLength} · G${view.gameNumber} · H${view.handNumber} · to ${view.settings.targetScore}`
+            : "Lobby"}
+        </p>
+        <button
+          type="button"
+          className="icon-button mobile-only"
+          aria-label={chatOpen ? "Close chat" : unread ? "Talk, new messages" : "Talk"}
+          onClick={onToggleChat}
+        >
+          <TalkIcon />
+          {unread ? <span className="unread-dot" data-unread="true" /> : null}
+        </button>
+        <button
+          type="button"
+          className={`icon-button${leaveArmed ? " armed" : ""}`}
+          aria-label={leaveArmed ? "Leave now" : "Leave"}
+          onClick={leaveArmed ? onLeave : onLeaveArm}
+        >
+          {leaveArmed ? "Leave" : <LeaveIcon />}
+        </button>
+      </header>
 
       {status !== "live" ? <p className="banner">Reconnecting…</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
@@ -443,54 +439,48 @@ function Game({
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
-          <SeatStrip view={view} />
-          <StatusLine view={view} />
-          <Table
-            view={view}
-            selectedTile={selectedTile}
-            dragTileId={drag?.tileId ?? null}
-            aimEndId={drag?.aimEndId ?? null}
-            onPlay={play}
-            onSelect={onSelect}
-          />
-          {drag ? (
-            <p className="hint">Drop on a lit end.</p>
-          ) : selectedTile ? (
-            <p className="hint">Tap a lit end to play that tile.</p>
-          ) : null}
-          <div className="actions">
-            {view.canDraw ? (
-              <button type="button" className="primary" data-action="draw" onClick={() => onSend({ type: "intent", intent: { type: "draw" } })}>
-                {view.settings.boneyardMode === "draw_one" ? "Draw one" : "Draw until you can play"}
-              </button>
-            ) : null}
-            {view.canKnock ? (
-              <button type="button" className="primary knock" data-action="knock" onClick={() => onSend({ type: "intent", intent: { type: "knock" } })}>
-                Knock
-              </button>
-            ) : null}
-            {view.canRematch ? (
+          <div className="table-frame" data-opponents={around.length - 1}>
+            {top ? <SeatRail edge="top" player={top.player} bubble={bubbleText(bubble, top.player.id)} /> : null}
+            <div className="table-middle">
+              {left ? <SeatRail edge="left" player={left.player} bubble={bubbleText(bubble, left.player.id)} /> : null}
+              <Table
+                view={view}
+                selectedTile={selectedTile}
+                dragTileId={drag?.tileId ?? null}
+                aimEndId={drag?.aimEndId ?? null}
+                onPlay={play}
+                onSelect={onSelect}
+              />
+              {right ? <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} /> : null}
+            </div>
+          </div>
+          {view.canRematch ? (
+            <div className="actions">
               <button type="button" className="primary" onClick={() => onSend({ type: "rematch" })}>
                 Play another series
               </button>
-            ) : null}
-          </div>
-          {view.lastDraw ? (
-            <p className="draw-note">
-              {view.lastDraw.playerId === view.yourId
-                ? view.lastDraw.tileIds && view.lastDraw.tileIds.length === 1
-                  ? `You drew ${pretty(view.lastDraw.tileIds[0] ?? "")}.`
-                  : `You drew ${view.lastDraw.count} tile${view.lastDraw.count === 1 ? "" : "s"}.`
-                : `${nameOf(view, view.lastDraw.playerId)} drew ${view.lastDraw.count}.`}
-            </p>
+            </div>
           ) : null}
-          <Hand
-            view={view}
-            selectedTile={selectedTile}
-            onSelect={onSelect}
-            onPlay={play}
-            onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
-          />
+          <div className="hand-tray">
+            <div className="you-float">
+              {you ? <SeatChip player={you.player} /> : null}
+              {you && bubbleText(bubble, you.player.id) ? <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p> : null}
+            </div>
+            {yourTurn ? <p className="your-turn">Your turn</p> : null}
+            <StatusLine view={view} />
+            <Hand
+              view={view}
+              selectedTile={selectedTile}
+              onSelect={onSelect}
+              onPlay={play}
+              onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
+            />
+            <YardPile
+              view={view}
+              onDraw={() => onSend({ type: "intent", intent: { type: "draw" } })}
+              onKnock={() => onSend({ type: "intent", intent: { type: "knock" } })}
+            />
+          </div>
         </>
       )}
       </div>
@@ -530,7 +520,7 @@ function Lobby({
       </p>
       <label className="link-row">
         Link
-        <input readOnly value={link} onFocus={(event) => event.currentTarget.select()} />
+        <input readOnly value={link} data-share-link={link} onFocus={(event) => event.currentTarget.select()} />
       </label>
       <button type="button" className="primary" onClick={() => copyText(link)}>
         Copy link
@@ -591,7 +581,7 @@ function Lobby({
         </div>
       ) : null}
       <p className="rules-note">
-        {mode} First to {view.settings.targetScore}. {view.prompt}
+        Best of {view.settings.seriesLength}. {mode} First to {view.settings.targetScore}. {view.prompt}
       </p>
       {view.canStart ? (
         <button type="button" className="primary" data-action="start" onClick={onStart}>
@@ -602,61 +592,117 @@ function Lobby({
   );
 }
 
-function SeatStrip({ view }: { view: PlayerView }) {
+function SeatRail({
+  edge,
+  player,
+  bubble,
+}: {
+  edge: Exclude<SeatEdge, "bottom">;
+  player: PlayerView["players"][number];
+  bubble: string | null;
+}) {
   return (
-    <div className="seat-strip">
-      {view.players.map((player) => (
-        <article
-          key={player.id}
-          className={`seat${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
-          data-player-id={player.id}
-        >
-          <div className="seat-top">
-            <span className="seat-name">{player.isYou ? "You" : player.name}</span>
-            {!player.connected && !player.bot ? <em className="away">away</em> : null}
-            <strong>{player.score}</strong>
-          </div>
-          <div className="seat-backs" aria-label={`${player.bot ? "Computer, " : ""}${player.tileCount} tiles`}>
-            {player.bot ? <BotMark /> : null}
-            {Array.from({ length: player.tileCount }, (_, index) => (
-              <i key={index} className="tile-back" />
-            ))}
-            <span className="seat-count">{player.tileCount}</span>
-          </div>
-        </article>
-      ))}
-      <article className="seat bone" aria-label={`${view.boneyardCount} in the boneyard`}>
-        <span className="seat-name">Bone</span>
-        <strong>{view.boneyardCount}</strong>
-      </article>
+    <div
+      className={`rail rail-${edge}${player.isTurn ? " turn" : ""}`}
+      data-edge={edge}
+      data-player-id={player.id}
+      data-tiles={player.tileCount}
+    >
+      <div className={`backs backs-${edge}`} aria-hidden="true">
+        {Array.from({ length: player.tileCount }, (_, index) => (
+          <i key={index} className="tile-back" />
+        ))}
+      </div>
+      <SeatChip player={player} />
+      {bubble ? <p className="talk-bubble">{bubble}</p> : null}
     </div>
   );
 }
 
-function StatusLine({ view }: { view: PlayerView }) {
-  const busy = view.phase === "draw" || view.phase === "knock" || view.phase === "over";
-  if (busy) {
+function SeatChip({ player }: { player: PlayerView["players"][number] }) {
+  const initial = player.name.trim().charAt(0).toUpperCase() || "?";
+  return (
+    <div
+      className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+      data-player-id={player.id}
+      data-turn={player.isTurn ? "true" : "false"}
+    >
+      <span className="avatar" aria-hidden="true">
+        {player.bot ? <BotMark /> : initial}
+      </span>
+      <span className="chip-text">
+        <span className="chip-name">
+          {player.isYou ? "You" : player.name}
+          {!player.connected && !player.bot ? <em className="away"> away</em> : null}
+        </span>
+        <span className="chip-meta">
+          <strong>{player.score}</strong>
+          {player.isYou ? null : <span className="tile-label">{player.tileCount} tiles</span>}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function YardPile({
+  view,
+  onDraw,
+  onKnock,
+}: {
+  view: PlayerView;
+  onDraw: () => void;
+  onKnock: () => void;
+}) {
+  if (view.canKnock) {
     return (
-      <p className="status-line" data-phase={view.phase}>
-        {view.prompt}
-      </p>
+      <button type="button" className="bone-pile knock" data-action="knock" onClick={onKnock}>
+        Knock
+      </button>
     );
   }
+  const draw = view.canDraw;
+  return (
+    <button
+      type="button"
+      className={`bone-pile${draw ? " pulse" : ""}`}
+      data-action={draw ? "draw" : "boneyard"}
+      data-boneyard={view.boneyardCount}
+      disabled={!draw}
+      aria-label={draw ? `Draw from the boneyard, ${view.boneyardCount} left` : `${view.boneyardCount} in the boneyard`}
+      onClick={draw ? onDraw : undefined}
+    >
+      <span className="pile" aria-hidden="true">
+        <i className="tile-back" />
+        <i className="tile-back" />
+        <i className="tile-back" />
+      </span>
+      <strong>{view.boneyardCount}</strong>
+      {draw ? <em>Draw</em> : null}
+    </button>
+  );
+}
+
+function StatusLine({ view }: { view: PlayerView }) {
   const math = scoreMathOn() && view.openEquation ? view.openEquation.replaceAll(" ", "") : null;
-  const spinner = view.board?.center?.isSpinner ? (view.board.spinnerOpen ? "Spinner open" : "Long sides first") : null;
-  const awarded = view.lastPlay?.awarded ?? null;
+  const note = drawNote(view);
+  const prompt = view.prompt === "Your turn." ? null : view.prompt;
+  const text = note ?? prompt;
+  if (!math && !text) return null;
   return (
     <p className="status-line" data-phase={view.phase}>
-      <span>{view.prompt}</span>
       {math ? <span className="status-math">{math}</span> : null}
-      {awarded !== null ? (
-        <span className={awarded > 0 ? "status-scored" : undefined} data-awarded={awarded}>
-          {awarded > 0 ? `Scored ${awarded}` : "No score"}
-        </span>
-      ) : null}
-      {spinner ? <span>{spinner}</span> : null}
+      {text ? <span className="status-prompt">{text}</span> : null}
     </p>
   );
+}
+
+function drawNote(view: PlayerView): string | null {
+  if (!view.lastDraw) return null;
+  if (view.lastDraw.playerId === view.yourId) {
+    if (view.lastDraw.tileIds && view.lastDraw.tileIds.length === 1) return `You drew ${pretty(view.lastDraw.tileIds[0] ?? "")}.`;
+    return `You drew ${view.lastDraw.count} tile${view.lastDraw.count === 1 ? "" : "s"}.`;
+  }
+  return `${nameOf(view, view.lastDraw.playerId)} drew ${view.lastDraw.count}.`;
 }
 
 function PlayMark() {
@@ -727,6 +773,8 @@ function ChatPanel({
   }, [chat.length, open]);
 
   return (
+    <>
+    {open ? <button type="button" className="chat-scrim" aria-label="Close chat" onClick={onClose} /> : null}
     <aside className={`chat-panel${open ? " open" : ""}`}>
       <header>
         <h2>Table talk</h2>
@@ -734,6 +782,13 @@ function ChatPanel({
           Close
         </button>
       </header>
+      <div className="taunts">
+        {view.taunts.map((taunt) => (
+          <button type="button" key={`${taunt.packId}:${taunt.id}`} onClick={() => onPreset(taunt.packId, taunt.id)}>
+            {taunt.text}
+          </button>
+        ))}
+      </div>
       <div className="chat-log" ref={listRef}>
         {chat.length === 0 ? <p className="muted">The table is quiet. For now.</p> : null}
         {chat.map((line) => (
@@ -741,13 +796,6 @@ function ChatPanel({
             <span>{line.playerId === view.yourId ? "You" : line.name}</span>
             {line.text}
           </p>
-        ))}
-      </div>
-      <div className="taunts">
-        {view.taunts.map((taunt) => (
-          <button type="button" key={`${taunt.packId}:${taunt.id}`} onClick={() => onPreset(taunt.packId, taunt.id)}>
-            {taunt.text}
-          </button>
         ))}
       </div>
       <form
@@ -771,7 +819,48 @@ function ChatPanel({
         </button>
       </form>
     </aside>
+    </>
   );
+}
+
+function useTalkBubble(chat: ChatLine[]): ChatLine | null {
+  const [bubble, setBubble] = useState<ChatLine | null>(null);
+  const seenId = useRef<number | null>(null);
+  useEffect(() => {
+    const last = chat.at(-1);
+    if (!last || last.id === seenId.current) return;
+    const firstLook = seenId.current === null;
+    seenId.current = last.id;
+    if (firstLook) {
+      const at = last.at ? Date.parse(last.at) : Number.NaN;
+      if (!Number.isFinite(at) || Date.now() - at > 4_000) return;
+    }
+    setBubble(last);
+    const timer = window.setTimeout(() => {
+      setBubble((current) => (current?.id === last.id ? null : current));
+    }, 3_000);
+    return () => window.clearTimeout(timer);
+  }, [chat]);
+  return bubble;
+}
+
+function useUnread(chat: ChatLine[], chatOpen: boolean): boolean {
+  const seen = useRef(0);
+  const [unread, setUnread] = useState(false);
+  useEffect(() => {
+    if (chatOpen) {
+      seen.current = chat.length;
+      setUnread(false);
+      return;
+    }
+    setUnread(chat.length > seen.current);
+  }, [chat, chatOpen]);
+  return unread;
+}
+
+function bubbleText(bubble: ChatLine | null, playerId: string): string | null {
+  if (!bubble || bubble.playerId !== playerId) return null;
+  return bubble.text;
 }
 
 function handKey(view: PlayerView): string {
