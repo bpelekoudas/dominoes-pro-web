@@ -14,11 +14,13 @@ import { ARM_IDS, openEnds } from "./board.js";
  * Width is 416 so the tile forced straight off an early double still
  * lands inside: spinner, one tile, a double, then a full tile.
  *
- * An arm leaves the spinner and stays in its own quadrant: east in the
- * bottom-right, south in the bottom-left, west in the top-left, north in
- * the top-right. It goes straight until the next tile would leave that
- * quadrant, then bends clockwise and snakes there. It does not cross the
- * spinner or run into another arm.
+ * An arm leaves the spinner and stays in its own quadrant. It runs
+ * straight, then bends once in a clockwise pinwheel: up turns right,
+ * right turns down, down turns left, left turns up. A second bend is
+ * allowed only when it turns further away from the spinner and keeps a
+ * full tile of clearance. The chain never folds back toward the middle.
+ * If a bend would crowd another chain, the arm stays straight and the
+ * felt zooms out.
  *
  * A double sits crosswise to the chain. The next tile continues in the
  * same direction, its short end centred on the double's long side.
@@ -29,8 +31,8 @@ import { ARM_IDS, openEnds } from "./board.js";
 export const TILE_SHORT = 36;
 export const TILE_LONG = 72;
 export const TILE_GAP = 2;
-/** Clear space required between tiles that belong to different arms. */
-export const ARM_GAP = TILE_SHORT / 2;
+/** Clear space between different chains, and between separate runs of one chain. */
+export const ARM_GAP = TILE_SHORT;
 export const END_CAP = 44;
 export const FIT_MARGIN = 14;
 
@@ -45,8 +47,8 @@ export const PHONE_HEIGHT = 700;
  * double, tile, double, tile may pass the bend edge. It still has to
  * stay on the table. The view scales that wider picture down.
  */
-export const HARD_WIDTH = 1440;
-export const HARD_HEIGHT = 1440;
+export const HARD_WIDTH = 4000;
+export const HARD_HEIGHT = 4000;
 
 export type LayoutDir = ArmId;
 
@@ -90,12 +92,7 @@ interface Cursor {
   box: LayoutBox;
   dir: LayoutDir;
   prevDouble: boolean;
-}
-
-interface Step {
-  box: LayoutBox;
-  dir: LayoutDir;
-  tile: OrientedTile;
+  bends: number;
 }
 
 export function layoutBoard(board: BoardState): BoardLayout {
@@ -116,35 +113,28 @@ export function layoutBoard(board: BoardState): BoardLayout {
     const placed = toTile(first, box, arm, arm);
     tiles.push(placed);
     occupants.push({ box: placed, arm });
-    cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high });
+    cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high, bends: 0 });
   }
 
   for (const arm of ARM_IDS) {
-    const cursor = cursors.get(arm);
+    let cursor = cursors.get(arm);
     const chain = board.arms[arm];
     if (!cursor || chain.length < 2) continue;
-    const steps: Step[] = [];
-    const found = searchArm(chain.slice(1), cursor, arm, occupants, centre, steps, { left: 8000 });
-    if (found) {
-      let last = cursor;
-      for (const step of steps) {
-        tiles.push(toTile(step.tile, step.box, step.dir, arm));
-        occupants.push({ box: step.box, arm });
-        last = { box: step.box, dir: step.dir, prevDouble: step.tile.low === step.tile.high };
-      }
-      cursors.set(arm, last);
-      continue;
-    }
-    let last = cursor;
-    for (let i = 1; i < chain.length; i += 1) {
-      const upcoming = chain.slice(i);
+    for (let index = 1; index < chain.length; index += 1) {
+      const upcoming = chain.slice(index);
       const tile = upcoming[0]!;
-      const choice = chooseStep(tile, upcoming, last, arm, occupants, centre);
-      tiles.push(toTile(tile, choice.box, choice.dir, arm));
-      occupants.push({ box: choice.box, arm });
-      last = { box: choice.box, dir: choice.dir, prevDouble: tile.low === tile.high };
+      const choice = chooseStep(tile, upcoming, cursor, arm, occupants, centre);
+      const placed = toTile(tile, choice.box, choice.dir, arm);
+      tiles.push(placed);
+      occupants.push({ box: placed, arm });
+      cursor = {
+        box: placed,
+        dir: choice.dir,
+        prevDouble: tile.low === tile.high,
+        bends: choice.bends,
+      };
     }
-    cursors.set(arm, last);
+    cursors.set(arm, cursor);
   }
 
   const ends: PlacedEnd[] = [];
@@ -158,65 +148,12 @@ export function layoutBoard(board: BoardState): BoardLayout {
   return { tiles, ends, fit: fitAround([...tiles, ...ends]) };
 }
 
-/** Prefer a straight run. Backtrack when that run would trap the rest of the arm. */
-function searchArm(
-  rest: readonly OrientedTile[],
-  cursor: Cursor,
-  home: ArmId,
-  occupants: Occupant[],
-  centre: LayoutBox,
-  steps: Step[],
-  budget: { left: number },
-): boolean {
-  if (rest.length === 0) return true;
-  if (budget.left-- <= 0) return false;
-  const tile = rest[0]!;
-  for (const choice of optionsFor(tile, rest, cursor, home, occupants, centre)) {
-    occupants.push({ box: choice.box, arm: home });
-    steps.push({ box: choice.box, dir: choice.dir, tile });
-    const next: Cursor = { box: choice.box, dir: choice.dir, prevDouble: tile.low === tile.high };
-    if (searchArm(rest.slice(1), next, home, occupants, centre, steps, budget)) return true;
-    steps.pop();
-    occupants.pop();
-  }
-  return false;
-}
-
-function optionsFor(
-  tile: OrientedTile,
-  upcoming: readonly OrientedTile[],
-  cursor: Cursor,
-  home: ArmId,
-  occupants: readonly Occupant[],
-  centre: LayoutBox,
-): Array<{ box: LayoutBox; dir: LayoutDir }> {
-  const isDouble = tile.low === tile.high;
-  const lock = cursor.prevDouble || isDouble;
-  const others = occupants.filter((item) => item.arm !== home);
-  const straight = straightBox(cursor.box, cursor.dir, isDouble);
-  const options: Array<{ box: LayoutBox; dir: LayoutDir }> = [];
-  const consider = (box: LayoutBox, dir: LayoutDir, loose: boolean) => {
-    if (!fits(box, home, occupants, others, centre, loose)) return;
-    if (!loose && !roomForDouble(upcoming, dir, box, home, occupants, centre)) return;
-    options.push({ box, dir });
-  };
-  consider(straight, cursor.dir, false);
-  if (lock) {
-    consider(straight, cursor.dir, true);
-    return options;
-  }
-  for (const dir of [clockwise(cursor.dir), counter(cursor.dir)]) {
-    for (const box of bendChoices(cursor.box, cursor.dir, dir, isDouble)) consider(box, dir, false);
-  }
-  return options;
-}
-
-function bendChoices(prev: LayoutBox, from: LayoutDir, to: LayoutDir, isDouble: boolean): LayoutBox[] {
-  const all = bendCandidates(prev, from, to, isDouble);
-  const picked = [all[0], all[Math.min(9, all.length - 1)], all[all.length - 1]];
-  return picked.filter((box, index) => box && picked.findIndex((other) => other && other.x === box.x && other.y === box.y) === index) as LayoutBox[];
-}
-
+/**
+ * Go straight. Bend once, clockwise, when the straight tile would leave
+ * the phone or crowd another run. A second bend only turns further away
+ * from the spinner. Otherwise stay straight and let the view zoom out.
+ * A double, and the tile centred on it, never bend.
+ */
 function chooseStep(
   tile: OrientedTile,
   upcoming: readonly OrientedTile[],
@@ -224,74 +161,50 @@ function chooseStep(
   home: ArmId,
   occupants: readonly Occupant[],
   centre: LayoutBox,
-): { box: LayoutBox; dir: LayoutDir } {
+): { box: LayoutBox; dir: LayoutDir; bends: number } {
   const isDouble = tile.low === tile.high;
-  const straight = straightBox(cursor.box, cursor.dir, isDouble);
-  const others = occupants.filter((item) => item.arm !== home);
-  // A double is crosswise, and the tile after it stays on that line.
-  // Neither one is allowed to turn.
   const lock = cursor.prevDouble || isDouble;
-  const rest = upcoming.slice(1);
+  const straight = straightBox(cursor.box, cursor.dir, isDouble);
+  const keep = { box: straight, dir: cursor.dir, bends: cursor.bends };
 
-  const straightOk = fits(straight, home, occupants, others, centre) && roomForDouble(upcoming, cursor.dir, straight, home, occupants, centre);
-  if (lock) {
-    // Stay on the bend line when the centred tile fits. A run of doubles
-    // can be longer than the line; only then does it pass the edge.
-    if (straightOk) return { box: straight, dir: cursor.dir };
-    if (fits(straight, home, occupants, others, centre, true)) return { box: straight, dir: cursor.dir };
-    return emergency(tile, cursor, home, occupants, others, centre, true);
-  }
+  if (lock) return keep;
 
-  if (straightOk && hasContinuation(straight, cursor.dir, isDouble, rest, home, occupants, centre)) {
-    return { box: straight, dir: cursor.dir };
-  }
+  const straightOk = fits(straight, home, occupants, centre, true, cursor.box)
+    && roomForDouble(upcoming, cursor.dir, straight, home, occupants, centre, true);
+  if (straightOk) return keep;
 
-  for (const dir of [clockwise(cursor.dir), counter(cursor.dir)]) {
-    for (const box of bendCandidates(cursor.box, cursor.dir, dir, isDouble)) {
-      if (!fits(box, home, occupants, others, centre)) continue;
-      if (!roomForDouble(upcoming, dir, box, home, occupants, centre)) continue;
-      if (!hasContinuation(box, dir, isDouble, rest, home, occupants, centre)) continue;
-      return { box, dir };
-    }
+  if (cursor.bends >= 2) return keep;
+  const turn: LayoutDir = cursor.dir === home ? clockwise(home) : home;
+  const secondBend = cursor.bends >= 1;
+  for (const box of bendChoices(cursor.box, cursor.dir, turn, isDouble)) {
+    if (secondBend && !pointsAway(box, turn)) continue;
+    if (!fits(box, home, occupants, centre, true, cursor.box)) continue;
+    // The next run is parallel to this arm's first run. A double sits
+    // crosswise and is wider than a normal tile, so the lane has to
+    // clear a full double, not just the tile in hand.
+    if (secondBend && !laneFitsDouble(turn, box, home, occupants, centre)) continue;
+    // The double stays centred on the new line. It may hang past the
+    // phone edge; the view zooms out. It may not crowd another chain.
+    if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false)) continue;
+    return { box, dir: turn, bends: cursor.bends + 1 };
   }
-
-  if (straightOk) return { box: straight, dir: cursor.dir };
-  for (const dir of [clockwise(cursor.dir), counter(cursor.dir)]) {
-    for (const box of bendCandidates(cursor.box, cursor.dir, dir, isDouble)) {
-      if (!fits(box, home, occupants, others, centre)) continue;
-      if (!roomForDouble(upcoming, dir, box, home, occupants, centre)) continue;
-      return { box, dir };
-    }
-  }
-  return emergency(tile, cursor, home, occupants, others, centre, false);
+  return keep;
 }
 
-/** The tile we are about to commit still leaves a legal spot for the one after it. */
-function hasContinuation(
-  box: LayoutBox,
-  dir: LayoutDir,
-  placedIsDouble: boolean,
-  rest: readonly OrientedTile[],
-  home: ArmId,
-  occupants: readonly Occupant[],
-  centre: LayoutBox,
-): boolean {
-  const next = rest[0];
-  if (!next) return true;
-  const nextDouble = next.low === next.high;
-  const owned: Occupant[] = [...occupants, { box, arm: home }];
-  const others = owned.filter((item) => item.arm !== home);
-  const straight = straightBox(box, dir, nextDouble);
-  if (placedIsDouble || nextDouble) return fits(straight, home, owned, others, centre);
-  if (fits(straight, home, owned, others, centre) && roomForDouble(rest, dir, straight, home, owned, centre)) return true;
-  for (const turn of [clockwise(dir), counter(dir)]) {
-    for (const bent of bendCandidates(box, dir, turn, nextDouble)) {
-      if (!fits(bent, home, owned, others, centre)) continue;
-      if (!roomForDouble(rest, turn, bent, home, owned, centre)) continue;
-      return true;
-    }
-  }
-  return false;
+function bendChoices(prev: LayoutBox, from: LayoutDir, to: LayoutDir, isDouble: boolean): LayoutBox[] {
+  const all = bendCandidates(prev, from, to, isDouble);
+  const picked = [all[0], all[Math.min(9, all.length - 1)], all[all.length - 1]];
+  return picked.filter((box, index): box is LayoutBox => Boolean(box) && picked.findIndex((other) => other && other.x === box.x && other.y === box.y) === index);
+}
+
+/** The direction moves away from the spinner, not back toward its row or column. */
+function pointsAway(box: LayoutBox, dir: LayoutDir): boolean {
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  if (dir === "east") return cx >= 0;
+  if (dir === "west") return cx <= 0;
+  if (dir === "north") return cy <= 0;
+  return cy >= 0;
 }
 
 function roomForDouble(
@@ -301,41 +214,41 @@ function roomForDouble(
   home: ArmId,
   occupants: readonly Occupant[],
   centre: LayoutBox,
+  phone: boolean,
 ): boolean {
   const next = upcoming[1];
   if (!next || next.low !== next.high) return true;
   const owned: Occupant[] = [...occupants, { box, arm: home }];
   const doubleBox = straightBox(box, dir, true);
-  const others = owned.filter((item) => item.arm !== home);
-  if (!fits(doubleBox, home, owned, others, centre)) return false;
+  if (!fits(doubleBox, home, owned, centre, phone, box)) return false;
   const after = upcoming[2];
   if (!after) return true;
   const afterBox = straightBox(doubleBox, dir, after.low === after.high);
   const withDouble: Occupant[] = [...owned, { box: doubleBox, arm: home }];
-  return fits(afterBox, home, withDouble, withDouble.filter((item) => item.arm !== home), centre);
+  return fits(afterBox, home, withDouble, centre, phone, doubleBox);
 }
 
-function emergency(
-  tile: OrientedTile,
-  cursor: Cursor,
+/**
+ * A double centred on the line that leaves `box` must keep a full tile
+ * of clearance. Used before a second bend, which runs parallel to the
+ * arm's first leg.
+ */
+function laneFitsDouble(
+  dir: LayoutDir,
+  box: LayoutBox,
   home: ArmId,
   occupants: readonly Occupant[],
-  others: readonly Occupant[],
   centre: LayoutBox,
-  lockStraight: boolean,
-): { box: LayoutBox; dir: LayoutDir } {
-  const isDouble = tile.low === tile.high;
-  const options: Array<{ box: LayoutBox; dir: LayoutDir }> = [
-    { box: straightBox(cursor.box, cursor.dir, isDouble), dir: cursor.dir },
-  ];
-  if (!lockStraight) {
-    for (const dir of [clockwise(cursor.dir), counter(cursor.dir)]) {
-      for (const box of bendCandidates(cursor.box, cursor.dir, dir, isDouble)) options.push({ box, dir });
-    }
+): boolean {
+  const doubleBox = straightBox(box, dir, true);
+  if (!inQuadrant(doubleBox, home) || !insideHard(doubleBox)) return false;
+  if (overlapsAny(doubleBox, occupants.map((item) => item.box))) return false;
+  if (intersectsBox(doubleBox, centre)) return false;
+  for (const other of occupants) {
+    if (other.arm === null || sameBox(other.box, box)) continue;
+    if (boxGap(doubleBox, other.box) < ARM_GAP) return false;
   }
-  const inside = options.find((option) => fits(option.box, home, occupants, others, centre, lockStraight));
-  if (inside) return inside;
-  return options[0]!;
+  return true;
 }
 
 /** Tuck against the leading corner, then slide inward along that tile so a wider double still fits. */
@@ -366,18 +279,23 @@ function fits(
   box: LayoutBox,
   home: ArmId,
   occupants: readonly Occupant[],
-  others: readonly Occupant[],
   centre: LayoutBox,
-  loose = false,
+  phone: boolean,
+  prev: LayoutBox,
 ): boolean {
-  if (!(loose ? insideHard(box) : insidePhone(box)) || !inQuadrant(box, home)) return false;
+  if (!insideHard(box) || !inQuadrant(box, home)) return false;
+  if (phone && !insidePhone(box)) return false;
   if (overlapsAny(box, occupants.map((item) => item.box))) return false;
   if (intersectsBox(box, centre)) return false;
-  for (const other of others) {
-    if (other.arm === null) continue;
+  for (const other of occupants) {
+    if (other.arm === null || sameBox(other.box, prev)) continue;
     if (boxGap(box, other.box) < ARM_GAP) return false;
   }
   return true;
+}
+
+function sameBox(a: LayoutBox, b: LayoutBox): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 }
 
 function extents(isDouble: boolean): { along: number; across: number } {
@@ -485,13 +403,6 @@ function clockwise(dir: LayoutDir): LayoutDir {
   if (dir === "east") return "south";
   if (dir === "south") return "west";
   if (dir === "west") return "north";
-  return "east";
-}
-
-function counter(dir: LayoutDir): LayoutDir {
-  if (dir === "east") return "north";
-  if (dir === "north") return "west";
-  if (dir === "west") return "south";
   return "east";
 }
 

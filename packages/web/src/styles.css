@@ -227,33 +227,34 @@ input {
 }
 .seat-strip {
   display: flex;
-  gap: 4px;
-  padding: 2px 8px 0;
+  gap: 3px;
+  padding: 2px 6px 0;
 }
 .seat {
   flex: 1 1 0;
   min-width: 0;
   background: rgba(0, 0, 0, 0.4);
   border-radius: 10px;
-  padding: 3px 4px 4px;
+  padding: 3px 3px 4px;
   border: 1px solid transparent;
 }
 .seat.turn { border-color: var(--gold); }
-.seat.bone { flex: 0 0 42px; text-align: center; }
-.seat-top { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
+.seat.bone { flex: 0 0 36px; text-align: center; }
+.seat-top { display: flex; align-items: baseline; gap: 2px; min-width: 0; }
 .seat-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  font-weight: 600;
 }
 .seat.bone .seat-name { flex: none; }
-.seat strong { font-size: 0.95rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.seat strong { flex: none; font-size: 0.82rem; line-height: 1; font-variant-numeric: tabular-nums; }
 .seat.you strong { color: var(--gold); }
-.seat .bot-pill { font-size: 0.55rem; padding: 0 4px; flex: none; }
 .seat .away { font-style: normal; font-size: 0.6rem; color: var(--muted); flex: none; }
+.seat .bot-mark { width: 8px; height: 12px; }
 .seat-backs {
   display: flex;
   align-items: flex-end;

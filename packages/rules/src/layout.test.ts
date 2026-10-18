@@ -104,6 +104,7 @@ function assertLaidOut(board: BoardState, label: string, phone: boolean): void {
   expect(layout.fit.h).toBeLessThanOrEqual(limitH + FIT_MARGIN * 2 + 4);
   assertArmsSeparated(board, layout, label);
   assertDoublesCentered(board, layout, label);
+  assertPinwheel(board, layout, label);
 }
 
 /** First tiles of each arm meet beside the spinner, so the gap rule starts after them. */
@@ -130,6 +131,41 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
       if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
       expect(boxGap(a, b), `${label} ${a.tileId} near ${b.tileId}`).toBeGreaterThanOrEqual(ARM_GAP);
     }
+  }
+  for (const arm of ARM_IDS) {
+    const placed = board.arms[arm].map((tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!);
+    for (let i = 0; i < placed.length; i += 1) {
+      for (let j = i + 2; j < placed.length; j += 1) {
+        expect(
+          boxGap(placed[i]!, placed[j]!),
+          `${label} ${arm} ${placed[i]!.tileId} runs beside ${placed[j]!.tileId}`,
+        ).toBeGreaterThanOrEqual(ARM_GAP);
+      }
+    }
+  }
+}
+
+/** Up turns right, right turns down, down turns left, left turns up. Never back toward the spinner. */
+const PINWHEEL: Record<ArmId, readonly string[]> = {
+  north: ["north", "east"],
+  east: ["east", "south"],
+  south: ["south", "west"],
+  west: ["west", "north"],
+};
+
+function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): void {
+  for (const arm of ARM_IDS) {
+    const dirs: string[] = [];
+    for (const tile of board.arms[arm]) {
+      const placed = layout.tiles.find((item) => item.tileId === tile.tileId);
+      expect(placed, `${label} missing ${tile.tileId}`).toBeTruthy();
+      if (!placed) continue;
+      expect(PINWHEEL[arm], `${label} ${arm} ${tile.tileId} turned ${placed.direction}`).toContain(placed.direction);
+      if (dirs[dirs.length - 1] !== placed.direction) dirs.push(placed.direction);
+    }
+    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(3);
+    if (dirs.length >= 2) expect(dirs[1], `${label} ${arm}`).toBe(PINWHEEL[arm][1]);
+    if (dirs.length === 3) expect(dirs[2], `${label} ${arm} folded back`).toBe(arm);
   }
 }
 
@@ -218,6 +254,34 @@ function chainFrom(start: Tile, limit: number): Tile[] {
   return path;
 }
 
+/**
+ * The shape from the owner's phone. The up arm and the left arm are both
+ * long, which is where the up arm used to turn back down and land on the
+ * left arm's corner.
+ */
+function ownersCrowdedBoard(): BoardState {
+  let board = placeTile(
+    { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
+    "lead",
+    tileById("6-6"),
+  );
+  board = placeTile(board, "west", tileById("5-6"));
+  board = placeTile(board, "east", tileById("3-6"));
+  for (const id of ["5-5", "4-5", "3-4", "2-3", "1-2", "0-1", "0-0"]) {
+    board = placeTile(board, "west", tileById(id));
+  }
+  for (const id of ["4-6", "1-4", "1-1", "1-3", "0-3", "0-2", "2-2"]) {
+    board = placeTile(board, "north", tileById(id));
+  }
+  for (const id of ["3-5", "2-5", "2-6"]) {
+    board = placeTile(board, "east", tileById(id));
+  }
+  for (const id of ["0-6", "0-4", "4-4"]) {
+    board = placeTile(board, "south", tileById(id));
+  }
+  return board;
+}
+
 function boardFromChain(tiles: Tile[], arm: "east" | "west" | "north" | "south"): BoardState {
   let board = placeTile(
     { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
@@ -295,13 +359,14 @@ describe("board layout", () => {
     assertLaidOut(bent, "double at a bend", true);
   });
 
-  it("bends a long arm and keeps every tile inside the phone felt", () => {
+  it("bends a long arm outward and zooms out instead of folding back", () => {
     const tiles = chainFrom(tileById("0-0"), 16);
     const board = boardFromChain(tiles, "east");
     const layout = layoutBoard(board);
-    const dirs = new Set(layout.tiles.map((tile) => tile.direction));
-    expect(dirs.size).toBeGreaterThan(1);
-    assertLaidOut(board, "long east", true);
+    const dirs = new Set(layout.tiles.filter((tile) => tile.arm === "east").map((tile) => tile.direction));
+    expect(dirs.has("south")).toBe(true);
+    expect([...dirs].every((dir) => dir === "east" || dir === "south")).toBe(true);
+    assertLaidOut(board, "long east", false);
   });
 
   it("lays out spinner arms without overlaps", () => {
@@ -327,7 +392,11 @@ describe("board layout", () => {
     expect(board.spinnerOpen).toBe(true);
     expect(board.arms.north.length).toBeGreaterThan(0);
     expect(board.arms.south.length).toBeGreaterThan(0);
-    assertLaidOut(board, "spinner", true);
+    assertLaidOut(board, "spinner", false);
+    const westDirs = new Set(
+      board.arms.west.map((tile) => layoutBoard(board).tiles.find((item) => item.tileId === tile.tileId)!.direction),
+    );
+    expect(westDirs.has("north")).toBe(true);
   });
 
   it("keeps simulated hands inside the fit, with and without a spinner", () => {
@@ -366,10 +435,78 @@ describe("board layout", () => {
     }
     expect(line.center?.isSpinner).toBe(false);
     expect(line.arms.east.length + line.arms.west.length).toBeGreaterThan(3);
-    assertLaidOut(line, "non-spinner line", true);
+    assertLaidOut(line, "non-spinner line", false);
 
     expect(boards).toBeGreaterThan(20);
     expect(sawSpinner).toBe(true);
+  });
+
+  it("demands a full tile of clearance, the short side of a domino", () => {
+    expect(ARM_GAP).toBe(TILE_SHORT);
+    expect(ARM_GAP).toBeGreaterThan(TILE_SHORT / 2);
+  });
+
+  /**
+   * The owner's phone: the up arm ran up, turned, then came back down
+   * until its tip sat against the left arm's corner. That fold is rejected.
+   * The up arm may turn right, and only then further up. The left arm may
+   * turn up. Neither comes back toward the spinner.
+   */
+  it("does not fold the up arm back down beside the left arm", () => {
+    const board = ownersCrowdedBoard();
+    expect(board.arms.north.length).toBeGreaterThanOrEqual(4);
+    expect(board.arms.west.length).toBeGreaterThanOrEqual(4);
+    expect(board.arms.east.length).toBeGreaterThanOrEqual(3);
+    expect(board.arms.south.length).toBeGreaterThanOrEqual(3);
+    const layout = layoutBoard(board);
+    const northDirs = board.arms.north.map(
+      (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
+    );
+    expect(northDirs).not.toContain("south");
+    expect(northDirs).not.toContain("west");
+    const westDirs = board.arms.west.map(
+      (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
+    );
+    expect(westDirs).not.toContain("south");
+    expect(westDirs).not.toContain("east");
+    assertLaidOut(board, "up arm beside left arm", false);
+
+    let nearest = Infinity;
+    const north = layout.tiles.filter((tile) => tile.arm === "north");
+    const west = layout.tiles.filter((tile) => tile.arm === "west");
+    const stems = new Set([board.arms.north[0]!.tileId, board.arms.west[0]!.tileId]);
+    for (const a of north) {
+      for (const b of west) {
+        if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
+        nearest = Math.min(nearest, boxGap(a, b));
+      }
+    }
+    expect(nearest).toBeGreaterThanOrEqual(ARM_GAP);
+  });
+
+  it("keeps a full tile between arms across long four-player games", () => {
+    let longBoards = 0;
+    let sawEveryArmBend = false;
+    for (const mode of ["draw_one", "draw_until"] as const) {
+      for (let seed = 0; seed < 12; seed += 1) {
+        for (const board of playHand(4, mode, seed + 40)) {
+          const lengths = ARM_IDS.map((arm) => board.arms[arm].length);
+          if (lengths.some((length) => length < 3)) continue;
+          longBoards += 1;
+          assertLaidOut(board, `clearance ${mode} ${seed}`, false);
+          const layout = layoutBoard(board);
+          const bent = ARM_IDS.filter((arm) => {
+            const dirs = new Set(
+              board.arms[arm].map((tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction),
+            );
+            return dirs.size > 1;
+          });
+          if (bent.length === 4) sawEveryArmBend = true;
+        }
+      }
+    }
+    expect(longBoards).toBeGreaterThan(15);
+    expect(sawEveryArmBend).toBe(true);
   });
 
   it("reports a fit box with a margin around the tiles", () => {

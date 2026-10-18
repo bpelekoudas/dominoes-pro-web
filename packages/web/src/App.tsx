@@ -610,10 +610,11 @@ function SeatStrip({ view }: { view: PlayerView }) {
         >
           <div className="seat-top">
             <span className="seat-name">{player.isYou ? "You" : player.name}</span>
-            {player.bot ? <em className="bot-pill">BOT</em> : !player.connected ? <em className="away">away</em> : null}
+            {!player.connected && !player.bot ? <em className="away">away</em> : null}
             <strong>{player.score}</strong>
           </div>
-          <div className="seat-backs" aria-label={`${player.tileCount} tiles`}>
+          <div className="seat-backs" aria-label={`${player.bot ? "Computer, " : ""}${player.tileCount} tiles`}>
+            {player.bot ? <BotMark /> : null}
             {Array.from({ length: player.tileCount }, (_, index) => (
               <i key={index} className="tile-back" />
             ))}
