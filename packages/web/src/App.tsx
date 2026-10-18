@@ -374,35 +374,55 @@ function Game({
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
 
+  const playing = view.status !== "lobby";
   return (
     <main className={`felt-app${chatOpen ? " chat-open" : ""}`} data-skin="ivory">
       <div className="felt-column">
-      <header className="topbar">
-        <div>
-          <Logo compact />
-          <button type="button" className="code-chip" data-room-code={view.roomCode} onClick={() => copyText(link)}>
+      {playing ? (
+        <header className="playbar">
+          <PlayMark />
+          <button type="button" className="code-chip play-code" data-room-code={view.roomCode} onClick={() => copyText(link)}>
             {view.roomCode}
           </button>
-        </div>
-        <div className="series-note">
-          <span>
-            Best of {view.settings.seriesLength} · first to {view.winsNeeded}
-          </span>
-          <span>
-            {view.status === "lobby"
-              ? "Lobby"
-              : `Game ${view.gameNumber} · Hand ${view.handNumber} · to ${view.settings.targetScore}`}
-          </span>
-        </div>
-        <div className="top-actions">
-          <button type="button" className="text-button mobile-only" onClick={onToggleChat}>
-            {chatOpen ? "Close" : "Talk"}
+          <p className="series-line">
+            Bo{view.settings.seriesLength} · G{view.gameNumber} · H{view.handNumber} · to {view.settings.targetScore}
+          </p>
+          <button type="button" className="icon-button mobile-only" aria-label={chatOpen ? "Close chat" : "Talk"} onClick={onToggleChat}>
+            <TalkIcon />
           </button>
-          <button type="button" className="text-button" onClick={leaveArmed ? onLeave : onLeaveArm}>
-            {leaveArmed ? "Leave now" : "Leave"}
+          <button
+            type="button"
+            className={`icon-button${leaveArmed ? " armed" : ""}`}
+            aria-label={leaveArmed ? "Leave now" : "Leave"}
+            onClick={leaveArmed ? onLeave : onLeaveArm}
+          >
+            {leaveArmed ? "Leave" : <LeaveIcon />}
           </button>
-        </div>
-      </header>
+        </header>
+      ) : (
+        <header className="topbar">
+          <div>
+            <Logo compact />
+            <button type="button" className="code-chip" data-room-code={view.roomCode} onClick={() => copyText(link)}>
+              {view.roomCode}
+            </button>
+          </div>
+          <div className="series-note">
+            <span>
+              Best of {view.settings.seriesLength} · first to {view.winsNeeded}
+            </span>
+            <span>Lobby</span>
+          </div>
+          <div className="top-actions">
+            <button type="button" className="text-button mobile-only" onClick={onToggleChat}>
+              {chatOpen ? "Close" : "Talk"}
+            </button>
+            <button type="button" className="text-button" onClick={leaveArmed ? onLeave : onLeaveArm}>
+              {leaveArmed ? "Leave now" : "Leave"}
+            </button>
+          </div>
+        </header>
+      )}
 
       {status !== "live" ? <p className="banner">Reconnecting…</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
@@ -420,16 +440,8 @@ function Game({
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
-          <ScoreRow view={view} />
-          <p className="prompt" data-phase={view.phase}>
-            {view.prompt}
-          </p>
-          <Ends view={view} />
-          {view.board?.center?.isSpinner ? (
-            <p className="spinner-note">
-              {view.board.spinnerOpen ? "Spinner is open on four sides." : "Play both long sides before the cross opens."}
-            </p>
-          ) : null}
+          <SeatStrip view={view} />
+          <StatusLine view={view} />
           <Table
             view={view}
             selectedTile={selectedTile}
@@ -442,8 +454,6 @@ function Game({
             <p className="hint">Drop on a lit end.</p>
           ) : selectedTile ? (
             <p className="hint">Tap a lit end to play that tile.</p>
-          ) : view.turnPlayerId === view.yourId && view.legalPlays.length > 0 ? (
-            <p className="hint">Drag a tile onto the board, or tap it.</p>
           ) : null}
           <div className="actions">
             {view.canDraw ? (
@@ -589,61 +599,88 @@ function Lobby({
   );
 }
 
-function ScoreRow({ view }: { view: PlayerView }) {
+function SeatStrip({ view }: { view: PlayerView }) {
   return (
-    <div className="score-row">
+    <div className="seat-strip">
       {view.players.map((player) => (
         <article
           key={player.id}
-          className={`score-card${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+          className={`seat${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+          data-player-id={player.id}
         >
-          <header>
-            <span className="who">
-              {player.bot ? <BotMark /> : null}
-              <span>{player.isYou ? "You" : player.name}</span>
-            </span>
-            {player.bot ? <em className="bot-pill">BOT</em> : !player.connected ? <em>away</em> : null}
-          </header>
-          <strong>{player.score}</strong>
-          <footer>
-            <span>{player.tileCount} tiles</span>
-            <span>
-              {player.gamesWon} {player.gamesWon === 1 ? "game" : "games"}
-            </span>
-          </footer>
+          <div className="seat-top">
+            <span className="seat-name">{player.isYou ? "You" : player.name}</span>
+            {player.bot ? <em className="bot-pill">BOT</em> : !player.connected ? <em className="away">away</em> : null}
+            <strong>{player.score}</strong>
+          </div>
+          <div className="seat-backs" aria-label={`${player.tileCount} tiles`}>
+            {Array.from({ length: player.tileCount }, (_, index) => (
+              <i key={index} className="tile-back" />
+            ))}
+            <span className="seat-count">{player.tileCount}</span>
+          </div>
         </article>
       ))}
-      <article className="score-card bone">
-        <header>
-          <span>Boneyard</span>
-        </header>
+      <article className="seat bone" aria-label={`${view.boneyardCount} in the boneyard`}>
+        <span className="seat-name">Bone</span>
         <strong>{view.boneyardCount}</strong>
-        <footer>
-          <span>{view.settings.boneyardMode === "draw_one" ? "Draw one" : "Draw until"}</span>
-        </footer>
       </article>
     </div>
   );
 }
 
-function Ends({ view }: { view: PlayerView }) {
-  const showMath = scoreMathOn() && Boolean(view.openEquation);
-  if (!showMath && !view.lastPlay) return null;
-  const scored = view.lastPlay && view.lastPlay.awarded > 0;
+function StatusLine({ view }: { view: PlayerView }) {
+  const busy = view.phase === "draw" || view.phase === "knock" || view.phase === "over";
+  if (busy) {
+    return (
+      <p className="status-line" data-phase={view.phase}>
+        {view.prompt}
+      </p>
+    );
+  }
+  const math = scoreMathOn() && view.openEquation ? view.openEquation.replaceAll(" ", "") : null;
+  const spinner = view.board?.center?.isSpinner ? (view.board.spinnerOpen ? "Spinner open" : "Long sides first") : null;
+  const awarded = view.lastPlay?.awarded ?? null;
   return (
-    <div className={`ends${scored ? " scored" : ""}`}>
-      {showMath ? (
-        <>
-          <span>Open ends</span>
-          <strong>{view.openEquation}</strong>
-        </>
+    <p className="status-line" data-phase={view.phase}>
+      <span>{view.prompt}</span>
+      {math ? <span className="status-math">{math}</span> : null}
+      {awarded !== null ? (
+        <span className={awarded > 0 ? "status-scored" : undefined} data-awarded={awarded}>
+          {awarded > 0 ? `Scored ${awarded}` : "No score"}
+        </span>
       ) : null}
-      {view.lastPlay ? (
-        <em className="score-flag" data-awarded={view.lastPlay.awarded}>
-          {view.lastPlay.awarded > 0 ? `Scored ${view.lastPlay.awarded}` : "No score"}
-        </em>
-      ) : null}
-    </div>
+      {spinner ? <span>{spinner}</span> : null}
+    </p>
+  );
+}
+
+function PlayMark() {
+  return (
+    <svg className="play-mark" viewBox="0 0 16 24" aria-hidden="true">
+      <rect x="0.75" y="0.75" width="14.5" height="22.5" rx="2" />
+      <line x1="1" y1="12" x2="15" y2="12" />
+      <circle cx="8" cy="6.2" r="1.5" />
+      <circle cx="5.2" cy="17.6" r="1.3" />
+      <circle cx="10.8" cy="17.6" r="1.3" />
+    </svg>
+  );
+}
+
+function TalkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 6.5h14v9H8.5L5 18.5z" />
+    </svg>
+  );
+}
+
+function LeaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10 6H6.5v12H10" />
+      <path d="M10 12h8M15 8.5 18.5 12 15 15.5" />
+    </svg>
   );
 }
 

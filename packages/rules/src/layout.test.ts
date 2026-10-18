@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { openEnds, placeTile, type BoardState } from "./board.js";
+import { ARM_IDS, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
 import {
   applyIntent,
   beginHand,
@@ -9,8 +9,13 @@ import {
   type MatchState,
 } from "./engine.js";
 import {
+  ARM_GAP,
+  boxGap,
   boxesOverlap,
   FIT_MARGIN,
+  HARD_HEIGHT,
+  HARD_WIDTH,
+  insideHard,
   insidePhone,
   layoutBoard,
   PHONE_HEIGHT,
@@ -18,7 +23,9 @@ import {
   TILE_GAP,
   TILE_LONG,
   TILE_SHORT,
+  type BoardLayout,
   type LayoutBox,
+  type PlacedTile,
 } from "./layout.js";
 import { shuffleWithSeed } from "./rng.js";
 import { allTiles, tileById, type Tile } from "./tiles.js";
@@ -84,14 +91,108 @@ function assertLaidOut(board: BoardState, label: string, phone: boolean): void {
   const boxes = [...layout.tiles, ...layout.ends];
   for (const box of boxes) {
     expect(contains(layout.fit, box), `${label} outside fit`).toBe(true);
+    expect(insideHard(box), `${label} outside the table`).toBe(true);
     if (phone) expect(insidePhone(box), `${label} outside phone felt`).toBe(true);
   }
   for (const end of layout.ends) {
     const host = layout.tiles.some((tile) => contains(tile, end));
     expect(host, `${label} end ${end.id} is not on a tile`).toBe(true);
   }
-  expect(layout.fit.w).toBeLessThanOrEqual(PHONE_WIDTH + FIT_MARGIN * 2 + 4);
-  expect(layout.fit.h).toBeLessThanOrEqual(PHONE_HEIGHT + FIT_MARGIN * 2 + 4);
+  const limitW = phone ? PHONE_WIDTH : HARD_WIDTH;
+  const limitH = phone ? PHONE_HEIGHT : HARD_HEIGHT;
+  expect(layout.fit.w).toBeLessThanOrEqual(limitW + FIT_MARGIN * 2 + 4);
+  expect(layout.fit.h).toBeLessThanOrEqual(limitH + FIT_MARGIN * 2 + 4);
+  assertArmsSeparated(board, layout, label);
+  assertDoublesCentered(board, layout, label);
+}
+
+/** First tiles of each arm meet beside the spinner, so the gap rule starts after them. */
+function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: string): void {
+  const stems = new Set<string>();
+  for (const arm of ARM_IDS) {
+    const first = board.arms[arm][0];
+    if (first) stems.add(first.tileId);
+  }
+  const center = layout.tiles.find((tile) => tile.arm === null);
+  if (center) {
+    const pad = TILE_SHORT;
+    const region = { x: center.x - pad, y: center.y - pad, w: center.w + pad * 2, h: center.h + pad * 2 };
+    for (const tile of layout.tiles) {
+      if (tile.arm === null || stems.has(tile.tileId)) continue;
+      expect(boxesOverlap(tile, region), `${label} ${tile.tileId} re-enters the centre`).toBe(false);
+    }
+  }
+  for (let i = 0; i < layout.tiles.length; i += 1) {
+    for (let j = i + 1; j < layout.tiles.length; j += 1) {
+      const a = layout.tiles[i]!;
+      const b = layout.tiles[j]!;
+      if (!a.arm || !b.arm || a.arm === b.arm) continue;
+      if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
+      expect(boxGap(a, b), `${label} ${a.tileId} near ${b.tileId}`).toBeGreaterThanOrEqual(ARM_GAP);
+    }
+  }
+}
+
+/**
+ * A double sits crosswise. The next tile meets it with a short end, centred,
+ * and the chain does not turn on that join.
+ */
+function assertDoublesCentered(board: BoardState, layout: BoardLayout, label: string): void {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  if (board.center && board.center.low === board.center.high) {
+    const spinner = byId.get(board.center.tileId);
+    expect(spinner?.orientation, label).toBe("vertical");
+    for (const arm of ["east", "west"] as const) {
+      const first = board.arms[arm][0];
+      if (!first || !spinner) continue;
+      expectJoinedToDouble(spinner, byId.get(first.tileId)!, arm, `${label} spinner ${arm}`);
+    }
+  }
+  for (const arm of ARM_IDS) {
+    const chain = board.arms[arm];
+    for (let i = 0; i < chain.length; i += 1) {
+      const placed = byId.get(chain[i]!.tileId);
+      expect(placed, `${label} missing ${chain[i]!.tileId}`).toBeTruthy();
+      if (!placed) continue;
+      const isDouble = chain[i]!.low === chain[i]!.high;
+      if (isDouble) {
+        const crosswise = placed.direction === "east" || placed.direction === "west" ? placed.h > placed.w : placed.w > placed.h;
+        expect(crosswise, `${label} ${placed.tileId} not crosswise`).toBe(true);
+      }
+      if (i === 0) continue;
+      const prev = chain[i - 1]!;
+      const prevPlaced = byId.get(prev.tileId)!;
+      const prevDouble = prev.low === prev.high;
+      if (prevDouble) expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`);
+      if (placed.direction !== prevPlaced.direction) {
+        expect(isDouble, `${label} bent on double ${placed.tileId}`).toBe(false);
+        expect(prevDouble, `${label} bent off double ${prev.tileId}`).toBe(false);
+      }
+    }
+  }
+}
+
+function expectJoinedToDouble(double: PlacedTile, next: PlacedTile, dir: ArmId, label: string): void {
+  expect(next.direction, label).toBe(dir);
+  const along = dir === "east"
+    ? next.x - (double.x + double.w)
+    : dir === "west"
+      ? double.x - (next.x + next.w)
+      : dir === "south"
+        ? next.y - (double.y + double.h)
+        : double.y - (next.y + next.h);
+  expect(along, label).toBe(TILE_GAP);
+  if (dir === "east" || dir === "west") {
+    expect(next.y + next.h / 2, label).toBeCloseTo(double.y + double.h / 2, 5);
+    expect(double.h, label).toBe(TILE_LONG);
+    expect(next.h, label).toBeLessThanOrEqual(double.h);
+    expect(next.h, label).toBe(TILE_SHORT);
+  } else {
+    expect(next.x + next.w / 2, label).toBeCloseTo(double.x + double.w / 2, 5);
+    expect(double.w, label).toBe(TILE_LONG);
+    expect(next.w, label).toBeLessThanOrEqual(double.w);
+    expect(next.w, label).toBe(TILE_SHORT);
+  }
 }
 
 function contains(outer: LayoutBox, inner: LayoutBox): boolean {
@@ -153,6 +254,45 @@ describe("board layout", () => {
     expect(follower?.orientation).toBe("horizontal");
     expect(follower?.h).toBe(TILE_SHORT);
     expect(follower?.w).toBe(TILE_LONG);
+    assertDoublesCentered(board, layout, "straight double");
+  });
+
+  it("centres the next tile on a double, in a straight run and at a bend", () => {
+    let straight = placeTile(
+      { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
+      "lead",
+      tileById("6-6"),
+    );
+    for (const [end, id] of [["east", "3-6"], ["east", "3-3"], ["east", "2-3"]] as const) {
+      straight = placeTile(straight, end, tileById(id));
+    }
+    const straightLayout = layoutBoard(straight);
+    const double = straightLayout.tiles.find((tile) => tile.tileId === "3-3")!;
+    const after = straightLayout.tiles.find((tile) => tile.tileId === "2-3")!;
+    expect(double.direction).toBe("east");
+    expect(double.orientation).toBe("vertical");
+    expectJoinedToDouble(double, after, "east", "mid-chain 3-3");
+    assertLaidOut(straight, "mid-chain double", true);
+
+    // The double would fall past the right edge, so the chain turns on the
+    // normal tile before it and the follower stays centred on the new line.
+    let bent = placeTile(
+      { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
+      "lead",
+      tileById("6-6"),
+    );
+    for (const id of ["5-6", "4-5", "3-4", "2-3", "2-2", "1-2"]) {
+      bent = placeTile(bent, "east", tileById(id));
+    }
+    const bentLayout = layoutBoard(bent);
+    const corner = bentLayout.tiles.find((tile) => tile.tileId === "3-4")!;
+    const bentDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-2")!;
+    const follower = bentLayout.tiles.find((tile) => tile.tileId === "1-2")!;
+    expect(corner.direction).not.toBe("east");
+    expect(bentDouble.direction).toBe(corner.direction);
+    expect(bentDouble.direction).toBe(follower.direction);
+    expectJoinedToDouble(bentDouble, follower, bentDouble.direction, "double at a bend");
+    assertLaidOut(bent, "double at a bend", true);
   });
 
   it("bends a long arm and keeps every tile inside the phone felt", () => {
@@ -205,7 +345,7 @@ describe("board layout", () => {
       for (const board of played) {
         boards += 1;
         if (board.spinnerOpen) sawSpinner = true;
-        assertLaidOut(board, `${players} ${mode} seed ${seed}`, true);
+        assertLaidOut(board, `${players} ${mode} seed ${seed}`, false);
       }
     }
     // A later deal can open on a non-double. The first deal of a series cannot:

@@ -84,7 +84,7 @@ export function Table({
       const width = viewport.clientWidth;
       const height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
-      const next = Math.min(width / layout.fit.w, height / layout.fit.h, width >= 800 ? 2 : 1.65);
+      const next = Math.min(width / layout.fit.w, height / layout.fit.h, width >= 800 ? 2.4 : 2.2);
       setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
     };
     measure();
