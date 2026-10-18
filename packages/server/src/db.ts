@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { Intent } from "@uhoh/rules";
+import type { LoggedAction } from "@uhoh/rules";
 
 export interface RoomRow {
   id: string;
@@ -11,6 +11,8 @@ export interface RoomRow {
   series_length: number;
   status: string;
   created_at: string;
+  /** Null on tables saved before this column existed. */
+  rules_version: number | null;
 }
 
 export interface PlayerRow {
@@ -71,7 +73,8 @@ export class Store {
         boneyard_mode TEXT NOT NULL,
         series_length INTEGER NOT NULL,
         status TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        rules_version INTEGER
       );
       CREATE TABLE IF NOT EXISTS players (
         id TEXT PRIMARY KEY,
@@ -126,14 +129,19 @@ export class Store {
     if (!names.has("difficulty")) {
       this.db.exec(`ALTER TABLE players ADD COLUMN difficulty TEXT`);
     }
+    const roomColumns = this.db.prepare(`PRAGMA table_info(rooms)`).all() as Array<{ name: string }>;
+    const roomNames = new Set(roomColumns.map((column) => column.name));
+    if (!roomNames.has("rules_version")) {
+      this.db.exec(`ALTER TABLE rooms ADD COLUMN rules_version INTEGER`);
+    }
   }
 
   insertRoom(room: RoomRow): void {
     this.db
       .prepare(
         `INSERT INTO rooms (
-          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         room.id,
@@ -145,15 +153,26 @@ export class Store {
         room.series_length,
         room.status,
         room.created_at,
+        room.rules_version,
       );
   }
 
-  updateRoom(id: string, patch: { host_id?: string; series_id?: string; status?: string }): void {
+  updateRoom(
+    id: string,
+    patch: { host_id?: string; series_id?: string; status?: string; rules_version?: number | null },
+  ): void {
     const current = this.room(id);
     if (!current) throw new Error("Room disappeared.");
+    const version = patch.rules_version === undefined ? current.rules_version : patch.rules_version;
     this.db
-      .prepare(`UPDATE rooms SET host_id = ?, series_id = ?, status = ? WHERE id = ?`)
-      .run(patch.host_id ?? current.host_id, patch.series_id ?? current.series_id, patch.status ?? current.status, id);
+      .prepare(`UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ? WHERE id = ?`)
+      .run(
+        patch.host_id ?? current.host_id,
+        patch.series_id ?? current.series_id,
+        patch.status ?? current.status,
+        version,
+        id,
+      );
   }
 
   deleteRoom(id: string): void {
@@ -245,13 +264,13 @@ export class Store {
       .run(action.hand_id, action.seq, action.player_id, action.payload_json, action.created_at);
   }
 
-  actions(handId: string): Array<{ playerId: string; intent: Intent }> {
+  actions(handId: string): LoggedAction[] {
     const rows = this.db
       .prepare(`SELECT player_id, payload_json FROM actions WHERE hand_id = ? ORDER BY seq`)
       .all(handId) as unknown as Array<{ player_id: string; payload_json: string }>;
     return rows.map((row) => ({
       playerId: row.player_id,
-      intent: JSON.parse(row.payload_json) as Intent,
+      intent: JSON.parse(row.payload_json) as LoggedAction["intent"],
     }));
   }
 

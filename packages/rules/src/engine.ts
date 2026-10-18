@@ -126,6 +126,12 @@ export interface LoggedHand {
 
 const SERIES_LENGTHS = new Set<SeriesLength>([3, 5, 7]);
 
+/**
+ * Saved tables replay only when this matches the copy stored with the room.
+ * Bump it when an older action log would no longer replay.
+ */
+export const RULES_VERSION = 2;
+
 export function createMatch(players: MatchPlayer[], config: MatchConfig): MatchState {
   if (players.length < 2 || players.length > 4) {
     throw new Error("Uh Oh is played by 2 to 4 people.");

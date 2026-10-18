@@ -1,6 +1,7 @@
+import { copyFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
-import type { PlayerView } from "@uhoh/rules";
+import { describe, expect, it, vi } from "vitest";
+import { RULES_VERSION, shuffleWithSeed, type PlayerView } from "@uhoh/rules";
 import { Store } from "./db.js";
 import { BOT_TURN_MS, Hub, type ServerMessage } from "./hub.js";
 
@@ -434,6 +435,273 @@ describe("rooms", () => {
     expect((next?.gameNumber ?? 0) > gameBefore || (next?.handNumber ?? 0) > handBefore).toBe(true);
     expect(next?.you.hand).toHaveLength(7);
     expect(store.roomByCode(code)?.status).toBe("playing");
+  });
+
+  it("starts when a saved game cannot be replayed", () => {
+    const file = `/tmp/uhoh-bad-room-${Date.now()}.sqlite`;
+    const deck = shuffleWithSeed(Buffer.alloc(32, 7));
+    const seed = Buffer.alloc(32, 7).toString("hex");
+    const raw = new DatabaseSync(file);
+    raw.exec(`
+      CREATE TABLE rooms (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        host_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        player_count INTEGER NOT NULL,
+        boneyard_mode TEXT NOT NULL,
+        series_length INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE players (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        seat INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        bot INTEGER NOT NULL DEFAULT 0,
+        difficulty TEXT
+      );
+      CREATE TABLE hands (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        hand_number INTEGER NOT NULL,
+        seed TEXT NOT NULL,
+        deck_json TEXT NOT NULL,
+        result_json TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE actions (
+        hand_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        player_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (hand_id, seq)
+      );
+    `);
+    const stamp = "2020-01-01T00:00:00.000Z";
+    raw.prepare(
+      `INSERT INTO rooms (
+        id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("r_old", "OLDROOM", "p_old", "s_old", 2, "draw_one", 3, "playing", stamp);
+    raw.prepare(
+      `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("p_old", "r_old", "Pat", "o".repeat(32), 0, stamp, 0, null);
+    raw.prepare(
+      `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("p_old2", "r_old", "Jo", "q".repeat(32), 1, stamp, 0, null);
+    raw.prepare(
+      `INSERT INTO hands (
+        id, room_id, series_id, game_number, hand_number, seed, deck_json, result_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("h_old", "r_old", "s_old", 1, 1, seed, JSON.stringify(deck), null, stamp);
+    raw.prepare(
+      `INSERT INTO actions (hand_id, seq, player_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run("h_old", 1, "not-seated", JSON.stringify({ type: "play", tileId: deck[0], endId: "lead" }), stamp);
+    raw.close();
+
+    const store = new Store(file);
+    expect(store.room("r_old")?.rules_version).toBeNull();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hub = new Hub(store, 30, () => 0, 60_000);
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).toMatch(/Room r_old could not be restored/);
+      expect(store.room("r_old")?.status).toBe("abandoned");
+      expect(store.room("r_old")?.rules_version).toBeNull();
+
+      const messages: ServerMessage[] = [];
+      const alex = hub.connect(
+        { type: "create", name: "Alex", playerCount: 2, boneyardMode: "draw_one", seriesLength: 3 },
+        (message) => messages.push(message),
+        () => undefined,
+      );
+      if (!alex.ok) throw new Error(alex.error);
+      const code = latestView(messages)?.roomCode ?? "";
+      const sam = hub.connect(
+        { type: "join", code, name: "Sam" },
+        () => undefined,
+        () => undefined,
+      );
+      if (!sam.ok) throw new Error(sam.error);
+      hub.command(alex.session.playerId, { type: "start" });
+      const before = latestView(messages);
+      expect(before?.status).toBe("playing");
+      const good = store.roomByCode(code);
+      expect(good?.rules_version).toBe(RULES_VERSION);
+      const token = messages.find((message) => message.type === "welcome");
+      const welcome = token?.type === "welcome" ? token.token : "";
+
+      const now = new Date().toISOString();
+      store.insertRoom({
+        id: "r_bad",
+        code: "BADROOM",
+        host_id: "p_bad",
+        series_id: "s_bad",
+        player_count: 2,
+        boneyard_mode: "draw_one",
+        series_length: 3,
+        status: "playing",
+        created_at: now,
+        rules_version: RULES_VERSION,
+      });
+      store.insertPlayer({
+        id: "p_bad",
+        room_id: "r_bad",
+        name: "Pat",
+        token: "b".repeat(32),
+        seat: 0,
+        created_at: now,
+        bot: 0,
+        difficulty: null,
+      });
+      store.insertPlayer({
+        id: "p_bad2",
+        room_id: "r_bad",
+        name: "Jo",
+        token: "d".repeat(32),
+        seat: 1,
+        created_at: now,
+        bot: 0,
+        difficulty: null,
+      });
+      store.insertHand({
+        id: "h_bad",
+        room_id: "r_bad",
+        series_id: "s_bad",
+        game_number: 1,
+        hand_number: 1,
+        seed,
+        deck_json: JSON.stringify(deck),
+        result_json: null,
+        created_at: now,
+      });
+      store.insertAction({
+        hand_id: "h_bad",
+        seq: 1,
+        player_id: "not-seated",
+        payload_json: JSON.stringify({ type: "play", tileId: deck[0], endId: "lead" }),
+        created_at: now,
+      });
+      store.insertRoom({
+        id: "r_settled",
+        code: "SETTLED",
+        host_id: "p_settled",
+        series_id: "s_settled",
+        player_count: 2,
+        boneyard_mode: "draw_one",
+        series_length: 3,
+        status: "abandoned",
+        created_at: now,
+        rules_version: null,
+      });
+
+      warn.mockClear();
+      const restored = new Hub(store, 30, () => 0, 60_000);
+      const warnings = warn.mock.calls.map((call) => String(call[0]));
+      expect(warnings.some((line) => line.includes("r_bad") && line.includes("It's not your turn."))).toBe(true);
+      expect(warnings.some((line) => line.includes("r_old") || line.includes("r_settled"))).toBe(false);
+      expect(store.room("r_bad")?.status).toBe("abandoned");
+      expect(store.room("r_bad")?.rules_version).toBeNull();
+      expect(store.room(good?.id ?? "")?.status).toBe("playing");
+
+      const again: ServerMessage[] = [];
+      const back = restored.connect(
+        { type: "reconnect", token: welcome },
+        (message) => again.push(message),
+        () => undefined,
+      );
+      expect(back.ok).toBe(true);
+      expect(latestView(again)?.status).toBe("playing");
+      expect(latestView(again)?.you.hand).toEqual(before?.you.hand);
+      expect(latestView(again)?.players.map((player) => player.score)).toEqual(
+        before?.players.map((player) => player.score),
+      );
+      const refused = restored.connect(
+        { type: "reconnect", token: "b".repeat(32) },
+        () => undefined,
+        () => undefined,
+      );
+      expect(refused.ok).toBe(false);
+    } finally {
+      warn.mockRestore();
+      store.db.close();
+    }
+  });
+
+  it("restores a skipped turn after the server starts again", async () => {
+    const file = `/tmp/uhoh-timeout-restart-${Date.now()}.sqlite`;
+    const store = new Store(file);
+    const hub = new Hub(store, 30, () => 0, 300, 60_000);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "solo", name: "Alex", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3, difficulty: "easy" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const playerId = alex.session.playerId;
+    let humanMoves = 0;
+    const ready = await waitFor(() => {
+      const view = latestView(messages);
+      const room = store.roomByCode(view?.roomCode ?? "");
+      const actions = room ? store.handsForSeries(room.id, room.series_id).flatMap((hand) => store.actions(hand.id)) : [];
+      const hasTimeout = actions.some((action) => action.intent.type === "timeout");
+      if (
+        view &&
+        view.status === "playing" &&
+        view.betweenHands !== true &&
+        view.turnPlayerId === playerId &&
+        humanMoves < 2 &&
+        !hasTimeout
+      ) {
+        const play = view.legalPlays[0];
+        if (play) hub.command(playerId, { type: "intent", intent: { type: "play", ...play } });
+        else if (view.canDraw) hub.command(playerId, { type: "intent", intent: { type: "draw" } });
+        else if (view.canKnock) hub.command(playerId, { type: "intent", intent: { type: "knock" } });
+        humanMoves += 1;
+      }
+      return (
+        humanMoves >= 1 &&
+        hasTimeout &&
+        view?.status === "playing" &&
+        view.betweenHands !== true &&
+        view.turnPlayerId === playerId
+      );
+    }, 5_000);
+    expect(ready).toBe(true);
+    const before = latestView(messages);
+    const welcome = messages.find((message) => message.type === "welcome");
+    const token = welcome?.type === "welcome" ? welcome.token : "";
+    store.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const copy = `${file}.copy`;
+    copyFileSync(file, copy);
+
+    const restoredStore = new Store(copy);
+    const restored = new Hub(restoredStore, 30, () => 0, 60_000, 60_000);
+    const room = restoredStore.roomByCode(before?.roomCode ?? "");
+    const actions = restoredStore.handsForSeries(room!.id, room!.series_id).flatMap((hand) => restoredStore.actions(hand.id));
+    expect(actions.some((action) => action.intent.type === "timeout")).toBe(true);
+    expect(actions.some((action) => action.intent.type !== "timeout")).toBe(true);
+    expect(room?.rules_version).toBe(RULES_VERSION);
+    const again: ServerMessage[] = [];
+    const back = restored.connect(
+      { type: "reconnect", token },
+      (message) => again.push(message),
+      () => undefined,
+    );
+    expect(back.ok).toBe(true);
+    const after = latestView(again);
+    expect(after?.status).toBe("playing");
+    expect(after?.you.hand).toEqual(before?.you.hand);
+    expect(after?.players.map((player) => player.score)).toEqual(before?.players.map((player) => player.score));
+    expect(after?.openEquation).toBe(before?.openEquation);
+    restoredStore.db.close();
   });
 });
 

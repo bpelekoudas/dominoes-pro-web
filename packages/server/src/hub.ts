@@ -13,6 +13,7 @@ import {
   shuffleWithSeed,
   tauntsForPlayer,
   randomSeed,
+  RULES_VERSION,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
   type BotDifficulty,
@@ -22,7 +23,7 @@ import {
   type SeriesLength,
   type TableMeta,
 } from "@uhoh/rules";
-import { Store, type ChatRow } from "./db.js";
+import { Store, type ChatRow, type RoomRow } from "./db.js";
 
 export interface ChatLine {
   id: number;
@@ -264,6 +265,7 @@ export class Hub {
       series_length: room.settings.seriesLength,
       status: room.status,
       created_at: created,
+      rules_version: RULES_VERSION,
     });
     this.store.insertPlayer({
       id: seat.id,
@@ -730,66 +732,87 @@ export class Hub {
 
   private restore(): void {
     for (const row of this.store.listRooms()) {
-      const players = this.store.players(row.id);
-      const room: LiveRoom = {
-        id: row.id,
-        code: row.code,
-        hostId: row.host_id,
-        seriesId: row.series_id,
-        settings: {
-          playerCount: row.player_count as 2 | 3 | 4,
-          boneyardMode: row.boneyard_mode as BoneyardMode,
-          seriesLength: row.series_length as SeriesLength,
-        },
-        status: row.status as LiveRoom["status"],
-        seats: players.map((player) =>
-          this.makeSeat(
-            player.id,
-            player.name,
-            player.token,
-            player.bot === 1,
-            player.bot === 1,
-            asDifficulty(player.difficulty),
-          ),
-        ),
-        match: null,
-        handId: null,
-        actionSeq: 0,
-        betweenHands: false,
-        turnDeadline: null,
-        continueDeadline: null,
-        ended: null,
-      };
-      if (row.status !== "lobby") {
-        const logged = this.store.handsForSeries(row.id, row.series_id).map((hand) => ({
-          deck: JSON.parse(hand.deck_json) as string[],
-          actions: this.store.actions(hand.id),
-          id: hand.id,
-        }));
-        if (logged.length === 0) {
-          room.status = "lobby";
-          this.store.updateRoom(room.id, { status: "lobby" });
-        } else {
-          let match = replayMatch(
-            room.seats.map((seat) => ({ id: seat.id, name: seat.name })),
-            { ...room.settings, targetScore: 150 },
-            logged,
-          );
-          const last = logged[logged.length - 1]!;
-          room.handId = last.id;
-          room.actionSeq = last.actions.length;
-          if (match.hand?.phase === "complete" && match.phase !== "series_over") {
-            room.betweenHands = true;
-            room.continueDeadline = Date.now() + this.continueMs;
-          }
-          room.match = match;
-          if (match.phase === "series_over") room.status = "complete";
+      try {
+        this.restoreRoom(row);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "The saved game could not be replayed.";
+        console.warn(`Room ${row.id} could not be restored (${detail}). Closing it.`);
+        try {
+          this.store.updateRoom(row.id, { status: "abandoned", rules_version: null });
+        } catch (closeError) {
+          const closeDetail = closeError instanceof Error ? closeError.message : "The room could not be closed.";
+          console.warn(`Room ${row.id} stayed on disk (${closeDetail}).`);
         }
       }
-      this.remember(room);
-      if (room.betweenHands) this.armContinue(room);
-      if (room.status === "playing") this.scheduleBot(room);
     }
+  }
+
+  private restoreRoom(row: RoomRow): void {
+    if (row.rules_version !== RULES_VERSION) {
+      // Already closed on an earlier boot. Leave it on disk and do not load it again.
+      if (row.status === "abandoned") return;
+      const saved = row.rules_version == null ? "an older version" : `version ${row.rules_version}`;
+      throw new Error(`it was saved under ${saved} of the rules`);
+    }
+    const players = this.store.players(row.id);
+    const room: LiveRoom = {
+      id: row.id,
+      code: row.code,
+      hostId: row.host_id,
+      seriesId: row.series_id,
+      settings: {
+        playerCount: row.player_count as 2 | 3 | 4,
+        boneyardMode: row.boneyard_mode as BoneyardMode,
+        seriesLength: row.series_length as SeriesLength,
+      },
+      status: row.status as LiveRoom["status"],
+      seats: players.map((player) =>
+        this.makeSeat(
+          player.id,
+          player.name,
+          player.token,
+          player.bot === 1,
+          player.bot === 1,
+          asDifficulty(player.difficulty),
+        ),
+      ),
+      match: null,
+      handId: null,
+      actionSeq: 0,
+      betweenHands: false,
+      turnDeadline: null,
+      continueDeadline: null,
+      ended: null,
+    };
+    if (row.status !== "lobby") {
+      const logged = this.store.handsForSeries(row.id, row.series_id).map((hand) => ({
+        deck: JSON.parse(hand.deck_json) as string[],
+        actions: this.store.actions(hand.id),
+        id: hand.id,
+      }));
+      if (logged.length === 0) {
+        room.status = "lobby";
+        this.store.updateRoom(room.id, { status: "lobby" });
+      } else {
+        const match = replayMatch(
+          room.seats.map((seat) => ({ id: seat.id, name: seat.name })),
+          { ...room.settings, targetScore: 150 },
+          logged,
+        );
+        const last = logged[logged.length - 1]!;
+        room.handId = last.id;
+        room.actionSeq = last.actions.length;
+        if (match.hand?.phase === "complete" && match.phase !== "series_over") {
+          room.betweenHands = true;
+          room.continueDeadline = Date.now() + this.continueMs;
+        }
+        room.match = match;
+        if (match.phase === "series_over") room.status = "complete";
+      }
+    }
+    this.remember(room);
+    if (room.betweenHands) this.armContinue(room);
+    if (room.status === "playing") this.scheduleBot(room);
   }
 
   private remember(room: LiveRoom): void {
