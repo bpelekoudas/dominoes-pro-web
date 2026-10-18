@@ -133,10 +133,7 @@ export function Table({
                   data-hot={hot ? "true" : "false"}
                   onClick={() => chooseEnd(end.id)}
                   aria-label={`Open ${end.id} end, match ${end.match}, counts ${end.scorePips}`}
-                >
-                  <strong className={`pip-badge badge-${end.id}`}>{end.match}</strong>
-                  {end.scorePips !== end.match ? <small>×2</small> : null}
-                </button>
+                />
               );
             })}
           </div>

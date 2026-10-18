@@ -351,25 +351,7 @@ input {
   position: absolute;
   inset: -4px;
 }
-.end-cap .pip-badge {
-  position: absolute;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(10, 10, 10, 0.82);
-  color: var(--paper);
-  font-family: "Bebas Neue", "Arial Narrow", sans-serif;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-.badge-east { right: 1px; top: 50%; transform: translateY(-50%); }
-.badge-west { left: 1px; top: 50%; transform: translateY(-50%); }
-.badge-south { bottom: 1px; left: 50%; transform: translateX(-50%); }
-.badge-north { top: 1px; left: 50%; transform: translateX(-50%); }
 .end-cap.hot { box-shadow: inset 0 0 0 3px var(--gold); }
-.end-cap.hot .pip-badge { background: var(--gold); color: var(--ink); }
 .end-cap.aim { box-shadow: inset 0 0 0 4px var(--gold), 0 0 0 6px rgba(213, 163, 54, 0.55); }
 .table-scroll.drop-ready { box-shadow: inset 0 0 0 3px var(--gold); }
 .actions { display: grid; gap: 8px; }
