@@ -67,6 +67,8 @@ npm start
 
 That serves the site and the socket on port 8787. The database file is `data/uhoh.sqlite`. Override the location with `DATA_DIR` or `DB_FILE`, and the port with `PORT`.
 
+While a hand is going, the table can show the addition across the open ends, such as `2 + 2 + 6 + 5 = 15`. That line is on by default so a test table can be checked by eye. The result next to it (`Scored 15` or `No score`) stays either way. To hide the addition, set `SHOW_SCORE_MATH` to `0` (`false`, `off`, and `no` also hide it) and restart the server. Unset, empty, or `1` leaves it on. The page reads the flag from `/config.js` when it loads, so changing it does not need a rebuild.
+
 ## Deploy
 
 Any host that runs Node 22 can take this. Give it a persistent disk for the SQLite file, or the hands disappear when the machine restarts. The server listens on the `PORT` it is given (8787 when that variable is unset) and on every network interface, which is what a host's proxy expects.

@@ -28,6 +28,16 @@ await app.register(websocket);
 
 app.get("/health", async () => ({ ok: true }));
 
+// The open-end addition ("2 + 2 + 6 = 10") stays on until this is turned off.
+// Unset or empty means on. 0, false, off, and no mean off. Read at each request
+// so a restart is enough — the page does not need a rebuild.
+app.get("/config.js", async (_request, reply) => {
+  const raw = (process.env.SHOW_SCORE_MATH ?? "").trim().toLowerCase();
+  const showScoreMath = raw !== "0" && raw !== "false" && raw !== "off" && raw !== "no";
+  reply.type("application/javascript; charset=utf-8").header("cache-control", "no-store");
+  return `window.__UHOH__=${JSON.stringify({ showScoreMath })};\n`;
+});
+
 app.get("/ws", { websocket: true }, (socket) => {
   let session: { playerId: string; generation: number } | null = null;
   // A quiet table still has to send traffic, or the proxy treats the socket as idle and drops it.

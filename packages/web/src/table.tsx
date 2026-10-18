@@ -1,4 +1,6 @@
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PlayerView } from "@uhoh/rules";
+import { layoutBoard, type LayoutBox } from "../../rules/src/layout.js";
 
 const PIPS: Record<number, number[]> = {
   0: [],
@@ -9,10 +11,6 @@ const PIPS: Record<number, number[]> = {
   5: [1, 3, 5, 7, 9],
   6: [1, 3, 4, 6, 7, 9],
 };
-
-type Board = NonNullable<PlayerView["board"]>;
-type Oriented = Board["arms"]["west"][number];
-type Direction = "west" | "east" | "north" | "south";
 
 export function Domino({
   a,
@@ -62,29 +60,64 @@ export function Table({
   onSelect: (tileId: string | null) => void;
 }) {
   const board = view.board;
-  const ends = new Map(view.openEnds.map((end) => [end.id, end]));
+  const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !layout) return;
+    const measure = () => {
+      const width = viewport.clientWidth;
+      const height = viewport.clientHeight;
+      if (width < 8 || height < 8) return;
+      const next = Math.min(width / layout.fit.w, height / layout.fit.h, width >= 800 ? 2 : 1.65);
+      setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [layout]);
+
   const hotEnds = new Set(
     selectedTile ? view.legalPlays.filter((play) => play.tileId === selectedTile).map((play) => play.endId) : [],
   );
 
   return (
-    <div className="table-scroll" data-open-total={view.openTotal}>
-      {!board?.center ? (
+    <div className="table-scroll" ref={viewportRef} data-open-total={view.openTotal} data-board-scale={scale.toFixed(2)}>
+      {!layout ? (
         <p className="empty-felt">The felt is clear. Whoever leads, play a tile.</p>
       ) : (
-        <div className="cross">
-          <Arm direction="north" tiles={board.arms.north} end={ends.get("north")} hot={hotEnds.has("north")} onEnd={() => chooseEnd("north")} />
-          <Arm direction="west" tiles={board.arms.west} end={ends.get("west")} hot={hotEnds.has("west")} onEnd={() => chooseEnd("west")} />
-          <div className="center-slot">
-            <Domino
-              a={board.center.westValue}
-              b={board.center.eastValue}
-              orientation={board.center.low === board.center.high ? "vertical" : "horizontal"}
-              spinner={board.center.isSpinner}
-            />
+        <div className="board-scaler" style={{ width: layout.fit.w * scale, height: layout.fit.h * scale }}>
+          <div
+            className="board-stage"
+            style={{ width: layout.fit.w, height: layout.fit.h, transform: `scale(${scale})` }}
+          >
+            {layout.tiles.map((tile) => (
+              <div key={tile.tileId} className="board-tile" style={place(tile, layout.fit)}>
+                <Domino a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
+              </div>
+            ))}
+            {layout.ends.map((end) => {
+              const hot = hotEnds.has(end.id);
+              return (
+                <button
+                  key={end.id}
+                  type="button"
+                  className={`end-cap${hot ? " hot" : ""}`}
+                  style={place(end, layout.fit)}
+                  data-end-id={end.id}
+                  data-hot={hot ? "true" : "false"}
+                  onClick={() => chooseEnd(end.id)}
+                  aria-label={`Open ${end.id} end, match ${end.match}, counts ${end.scorePips}`}
+                >
+                  <strong className={`pip-badge badge-${end.id}`}>{end.match}</strong>
+                  {end.scorePips !== end.match ? <small>×2</small> : null}
+                </button>
+              );
+            })}
           </div>
-          <Arm direction="east" tiles={board.arms.east} end={ends.get("east")} hot={hotEnds.has("east")} onEnd={() => chooseEnd("east")} />
-          <Arm direction="south" tiles={board.arms.south} end={ends.get("south")} hot={hotEnds.has("south")} onEnd={() => chooseEnd("south")} />
         </div>
       )}
     </div>
@@ -97,55 +130,13 @@ export function Table({
   }
 }
 
-function Arm({
-  direction,
-  tiles,
-  end,
-  hot,
-  onEnd,
-}: {
-  direction: Direction;
-  tiles: Oriented[];
-  end: PlayerView["openEnds"][number] | undefined;
-  hot: boolean;
-  onEnd: () => void;
-}) {
-  if (!end && tiles.length === 0) return <div className={`arm arm-${direction}`} />;
-  return (
-    <div className={`arm arm-${direction}`}>
-      {tiles.map((tile) => {
-        const faces = facing(direction, tile);
-        const isDouble = tile.low === tile.high;
-        const along = direction === "west" || direction === "east" ? "horizontal" : "vertical";
-        return (
-          <Domino
-            key={tile.tileId}
-            a={faces.a}
-            b={faces.b}
-            orientation={isDouble ? (along === "horizontal" ? "vertical" : "horizontal") : along}
-          />
-        );
-      })}
-      {end ? (
-        <button
-          type="button"
-          className={`end-cap${hot ? " hot" : ""}`}
-          data-end-id={end.id}
-          data-hot={hot ? "true" : "false"}
-          onClick={onEnd}
-          aria-label={`Open ${end.id} end, match ${end.match}, counts ${end.scorePips}`}
-        >
-          <strong>{end.match}</strong>
-          {end.scorePips !== end.match ? <small>×2</small> : null}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function facing(direction: Direction, tile: Oriented): { a: number; b: number } {
-  if (direction === "west" || direction === "north") return { a: tile.outward, b: tile.inward };
-  return { a: tile.inward, b: tile.outward };
+function place(box: LayoutBox, fit: LayoutBox): { left: number; top: number; width: number; height: number } {
+  return {
+    left: box.x - fit.x,
+    top: box.y - fit.y,
+    width: box.w,
+    height: box.h,
+  };
 }
 
 export function Hand({

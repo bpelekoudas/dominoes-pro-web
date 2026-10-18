@@ -24,6 +24,8 @@ services:
       # The disk is mounted here. Render sets PORT itself; the server listens on that port.
       - key: DATA_DIR
         value: /var/data
+      - key: SHOW_SCORE_MATH
+        value: "1"
     disk:
       name: uhoh-sqlite
       mountPath: /var/data

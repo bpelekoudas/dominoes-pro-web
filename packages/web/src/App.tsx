@@ -361,6 +361,7 @@ function Game({
 
   return (
     <main className={`felt-app${chatOpen ? " chat-open" : ""}`}>
+      <div className="felt-column">
       <header className="topbar">
         <div>
           <p className="brand-lockup">Uh Oh</p>
@@ -444,6 +445,7 @@ function Game({
           <Hand view={view} selectedTile={selectedTile} onSelect={onSelect} onPlay={play} />
         </>
       )}
+      </div>
 
       <ChatPanel
         open={chatOpen}
@@ -529,12 +531,17 @@ function ScoreRow({ view }: { view: PlayerView }) {
 }
 
 function Ends({ view }: { view: PlayerView }) {
-  if (!view.openEquation) return null;
+  const showMath = scoreMathOn() && Boolean(view.openEquation);
+  if (!showMath && !view.lastPlay) return null;
   const scored = view.lastPlay && view.lastPlay.awarded > 0;
   return (
     <div className={`ends${scored ? " scored" : ""}`}>
-      <span>Open ends</span>
-      <strong>{view.openEquation}</strong>
+      {showMath ? (
+        <>
+          <span>Open ends</span>
+          <strong>{view.openEquation}</strong>
+        </>
+      ) : null}
       {view.lastPlay ? (
         <em className="score-flag" data-awarded={view.lastPlay.awarded}>
           {view.lastPlay.awarded > 0 ? `Scored ${view.lastPlay.awarded}` : "No score"}
@@ -542,6 +549,10 @@ function Ends({ view }: { view: PlayerView }) {
       ) : null}
     </div>
   );
+}
+
+function scoreMathOn(): boolean {
+  return window.__UHOH__?.showScoreMath !== false;
 }
 
 function ChatPanel({
