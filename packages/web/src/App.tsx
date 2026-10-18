@@ -462,24 +462,32 @@ function Game({
             </div>
           ) : null}
           <div className="hand-tray">
-            <div className="you-float">
-              {you ? <SeatChip player={you.player} /> : null}
-              {you && bubbleText(bubble, you.player.id) ? <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p> : null}
+            <div className="tray-notices">
+              <div className="you-float">
+                {you ? <SeatChip player={you.player} /> : null}
+                {you && bubbleText(bubble, you.player.id) ? (
+                  <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p>
+                ) : null}
+              </div>
+              <div className="tray-copy">
+                {yourTurn ? <p className="your-turn">Your turn</p> : null}
+                <StatusLine view={view} />
+              </div>
             </div>
-            {yourTurn ? <p className="your-turn">Your turn</p> : null}
-            <StatusLine view={view} />
-            <Hand
-              view={view}
-              selectedTile={selectedTile}
-              onSelect={onSelect}
-              onPlay={play}
-              onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
-            />
-            <YardPile
-              view={view}
-              onDraw={() => onSend({ type: "intent", intent: { type: "draw" } })}
-              onKnock={() => onSend({ type: "intent", intent: { type: "knock" } })}
-            />
+            <div className="tray-row">
+              <Hand
+                view={view}
+                selectedTile={selectedTile}
+                onSelect={onSelect}
+                onPlay={play}
+                onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
+              />
+              <YardPile
+                view={view}
+                onDraw={() => onSend({ type: "intent", intent: { type: "draw" } })}
+                onKnock={() => onSend({ type: "intent", intent: { type: "knock" } })}
+              />
+            </div>
           </div>
         </>
       )}

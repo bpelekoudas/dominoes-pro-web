@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { boardAward } from "./score.js";
 import { tileById } from "./tiles.js";
-import { emptyBoard, openEnds, openTotal, placeTile, tilesOnBoard } from "./board.js";
+import { emptyBoard, openEnds, openEquation, openScore, openTotal, placeTile, tilesOnBoard } from "./board.js";
 
 function play(ids: Array<[string, string]>): ReturnType<typeof emptyBoard> {
   let board = emptyBoard();
@@ -108,15 +108,16 @@ describe("spinner", () => {
       ["west", "4-5"],
     ]);
     expect(board.spinnerOpen).toBe(true);
-    // West tip 4, terminal 3–3 counts 6, and the two fresh spinner sides count 5 each.
-    expect(openTotal(board)).toBe(20);
-    expect(awarded(board)).toBe(20);
+    // West tip 4 and terminal 3–3 counts 6. The two unplayed short sides add nothing.
+    expect(openTotal(board)).toBe(10);
+    expect(awarded(board)).toBe(10);
     expect(openEnds(board).map((end) => [end.id, end.scorePips])).toEqual([
       ["west", 4],
       ["east", 6],
-      ["north", 5],
-      ["south", 5],
+      ["north", 0],
+      ["south", 0],
     ]);
+    expect(openEquation(board)).toBe("4 + 6 = 10");
   });
 
   it("lets a later double be the spinner when the lead was not a double", () => {
@@ -144,11 +145,12 @@ describe("spinner", () => {
     expect(tilesOnBoard(board)).toEqual(["6-6", "4-6", "5-6", "5-5"]);
     const eastTip = board.arms.east[board.arms.east.length - 1]!;
     expect(eastTip.tileId).toBe("5-5");
-    // West 4, east double-five counts 10, north 6, south 6.
-    expect(openTotal(board)).toBe(26);
+    // West 4 and the east double-five counts 10. The unplayed short sides add nothing.
+    expect(openTotal(board)).toBe(14);
+    expect(openEquation(board)).toBe("4 + 10 = 14");
   });
 
-  it("scores an empty cross side once, not as another full double", () => {
+  it("leaves an unplayed short side out even after the other short side is played", () => {
     const board = play([
       ["lead", "5-5"],
       ["east", "1-5"],
@@ -159,9 +161,100 @@ describe("spinner", () => {
       ["west", 2, 2],
       ["east", 1, 1],
       ["north", 3, 3],
-      ["south", 5, 5],
+      ["south", 5, 0],
     ]);
-    expect(openTotal(board)).toBe(11);
+    expect(openTotal(board)).toBe(6);
+    expect(openEquation(board)).toBe("2 + 1 + 3 = 6");
     expect(awarded(board)).toBe(0);
+  });
+
+  it("counts only the outer ends once both long sides of the spinner are filled", () => {
+    // 5:0 - 0:4 - [4:4] - 4:6 - 6:2
+    const bothArms = play([
+      ["lead", "4-4"],
+      ["west", "0-4"],
+      ["west", "0-5"],
+      ["east", "4-6"],
+      ["east", "2-6"],
+    ]);
+    expect(bothArms.spinnerOpen).toBe(true);
+    expect(openTotal(bothArms)).toBe(7);
+    expect(openEquation(bothArms)).toBe("5 + 2 = 7");
+    expect(awarded(bothArms)).toBe(0);
+
+    // 0:4 - [4:4] - 4:6 - 6:2
+    const oneArmBlank = play([
+      ["lead", "4-4"],
+      ["west", "0-4"],
+      ["east", "4-6"],
+      ["east", "2-6"],
+    ]);
+    expect(openTotal(oneArmBlank)).toBe(2);
+    expect(openEquation(oneArmBlank)).toBe("0 + 2 = 2");
+
+    // Left outer 5, right outer 3, down arm 4:3 outer 3, up side empty.
+    const downOnly = play([
+      ["lead", "4-4"],
+      ["west", "4-5"],
+      ["east", "4-6"],
+      ["east", "3-6"],
+      ["south", "3-4"],
+    ]);
+    expect(downOnly.spinnerOpen).toBe(true);
+    expect(downOnly.arms.north).toHaveLength(0);
+    expect(openEnds(downOnly).map((end) => [end.id, end.scorePips])).toEqual([
+      ["west", 5],
+      ["east", 3],
+      ["north", 0],
+      ["south", 3],
+    ]);
+    expect(openTotal(downOnly)).toBe(11);
+    expect(openEquation(downOnly)).toBe("5 + 3 + 3 = 11");
+    expect(awarded(downOnly)).toBe(0);
+  });
+
+  it("scores 5–5 with a down arm and an empty up side as 10, and awards 10", () => {
+    // Left outer 3, right outer 5, down 5:2 outer 2, up side of the 5–5 unplayed.
+    // The live bug showed 3+5+5+2=15 and credited 5. Both came from splitting
+    // the sum and the award. This board is 3+5+2=10, which scores 10.
+    const board = play([
+      ["lead", "5-5"],
+      ["west", "3-5"],
+      ["east", "5-6"],
+      ["east", "4-6"],
+      ["east", "4-5"],
+      ["south", "2-5"],
+    ]);
+    expect(board.center?.tileId).toBe("5-5");
+    expect(board.spinnerOpen).toBe(true);
+    expect(board.arms.north).toHaveLength(0);
+    expect(board.arms.south.map((tile) => tile.tileId)).toEqual(["2-5"]);
+    expect(openEnds(board).find((end) => end.id === "north")?.scorePips).toBe(0);
+
+    const scored = openScore(board);
+    expect(scored.parts).toEqual([3, 5, 2]);
+    expect(scored.total).toBe(10);
+    expect(scored.equation).toBe("3 + 5 + 2 = 10");
+    expect(scored.awarded).toBe(10);
+    expect(openTotal(board)).toBe(scored.total);
+    expect(openEquation(board)).toBe(scored.equation);
+    expect(awarded(board)).toBe(scored.awarded);
+    expect(scored.awarded).not.toBe(5);
+    expect(boardAward(5)).toBe(0);
+    expect(boardAward(15)).toBe(15);
+  });
+
+  it("still counts a spinner with only one long side as a double", () => {
+    const board = play([
+      ["lead", "4-4"],
+      ["east", "4-6"],
+    ]);
+    expect(board.spinnerOpen).toBe(false);
+    expect(openEnds(board).map((end) => [end.id, end.scorePips])).toEqual([
+      ["west", 8],
+      ["east", 6],
+    ]);
+    expect(openTotal(board)).toBe(14);
+    expect(openEquation(board)).toBe("8 + 6 = 14");
   });
 });

@@ -1,4 +1,4 @@
-import { openEnds, openEquation, openTotal, type BoardState } from "./board.js";
+import { openEnds, openScore, type BoardState } from "./board.js";
 import { winsNeeded } from "./score.js";
 import { tauntsForPlayer, type AvailableTaunt } from "./taunts.js";
 import { tileById } from "./tiles.js";
@@ -117,6 +117,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
 
   const board = match?.hand ? structuredClone(match.hand.board) : null;
   const ends = board?.center ? openEnds(board) : [];
+  const scored = board?.center ? openScore(board) : null;
   const status = match?.phase === "series_over" ? "complete" : meta.status;
   const phase = viewPhase(match, meta, turnPlayerId);
   const lastDraw = privateDraw(match?.lastDraw ?? EMPTY_DRAW, meta.youId);
@@ -148,8 +149,8 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
     you: { hand: youHand },
     board,
     openEnds: ends.map((end) => ({ id: end.id, match: end.match, scorePips: end.scorePips })),
-    openTotal: board?.center ? openTotal(board) : 0,
-    openEquation: board?.center ? openEquation(board) : null,
+    openTotal: scored?.total ?? 0,
+    openEquation: scored?.equation ?? null,
     boneyardCount: match?.hand?.boneyard.length ?? 0,
     turnPlayerId,
     phase,

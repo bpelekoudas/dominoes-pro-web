@@ -1,3 +1,4 @@
+import { boardAward } from "./score.js";
 import { isDouble, tileById, type Tile } from "./tiles.js";
 
 export const ARM_IDS = ["west", "east", "north", "south"] as const;
@@ -59,8 +60,10 @@ function cloneBoard(board: BoardState): BoardState {
  * A bare double scores both halves once (6–6 is 12, 5–5 is 10).
  * A double sitting at the outer end of an arm scores both halves.
  * A spinner that still has one long side empty is that kind of terminal
- * double, so the empty side scores twice the face.
- * Once the cross is open, each empty spinner side scores its face once.
+ * double, so the empty long side scores twice the face.
+ * Once both long sides have a tile, only the outer ends of arms that
+ * have been played count. An unplayed side of the spinner, including a
+ * short side nobody has played on, adds nothing.
  */
 export function openEnds(board: BoardState): OpenEnd[] {
   if (!board.center) return [{ id: "lead", match: -1, scorePips: 0 }];
@@ -78,11 +81,21 @@ function faceValue(board: BoardState, direction: ArmId): number {
 function emptySidePips(board: BoardState, direction: ArmId): number {
   const value = faceValue(board, direction);
   const center = board.center!;
-  if (!center.isSpinner || board.spinnerOpen) return value;
+  // Both long sides are filled. The spinner itself is no longer an end.
+  if (center.isSpinner && board.spinnerOpen) return 0;
+  if (!center.isSpinner) return value;
   const westEmpty = board.arms.west.length === 0;
   const eastEmpty = board.arms.east.length === 0;
+  // Bare double: each face once. One long side still open: that side counts both halves.
   if (westEmpty && eastEmpty) return value;
   return value * 2;
+}
+
+/** Blank outer ends stay in the sum. Unplayed spinner sides, after the cross opens, do not. */
+function countsTowardTotal(board: BoardState, end: OpenEnd): boolean {
+  if (!board.center?.isSpinner || !board.spinnerOpen) return true;
+  const arm = board.arms[end.id as ArmId];
+  return !arm || arm.length > 0;
 }
 
 function endFor(board: BoardState, direction: ArmId): OpenEnd {
@@ -103,17 +116,38 @@ function endFor(board: BoardState, direction: ArmId): OpenEnd {
   };
 }
 
+/**
+ * The only scoring result for a board. The math line, the running total,
+ * and the points a play awards all come from this object, so they cannot
+ * disagree. A total of 5 awards nothing. Only a multiple of 5 that is
+ * at least 10 awards, and it awards the whole total.
+ */
+export interface OpenScore {
+  /** Counting ends, west to east to north to south. Unplayed spinner sides are left out. */
+  parts: number[];
+  total: number;
+  awarded: number;
+  equation: string | null;
+}
+
+export function openScore(board: BoardState): OpenScore {
+  if (!board.center) return { parts: [], total: 0, awarded: 0, equation: null };
+  const parts = openEnds(board)
+    .filter((end) => countsTowardTotal(board, end))
+    .map((end) => end.scorePips);
+  const total = parts.reduce((sum, part) => sum + part, 0);
+  const awarded = boardAward(total);
+  const equation =
+    parts.length === 0 ? "0" : parts.length === 1 ? String(total) : `${parts.join(" + ")} = ${total}`;
+  return { parts, total, awarded, equation };
+}
+
 export function openTotal(board: BoardState): number {
-  if (!board.center) return 0;
-  return openEnds(board).reduce((sum, end) => sum + end.scorePips, 0);
+  return openScore(board).total;
 }
 
 export function openEquation(board: BoardState): string | null {
-  if (!board.center) return null;
-  const parts = openEnds(board).map((end) => String(end.scorePips));
-  const total = parts.reduce((sum, part) => sum + Number(part), 0);
-  if (parts.length === 1) return String(total);
-  return `${parts.join(" + ")} = ${total}`;
+  return openScore(board).equation;
 }
 
 export function tilesOnBoard(board: BoardState): string[] {

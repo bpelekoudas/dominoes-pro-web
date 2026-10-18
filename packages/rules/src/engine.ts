@@ -1,11 +1,5 @@
-import { openEnds, openTotal, placeTile, tileFits, emptyBoard, type BoardState } from "./board.js";
-import {
-  boardAward,
-  gameWinnerId,
-  scoreDomino,
-  scoreLocked,
-  winsNeeded,
-} from "./score.js";
+import { openEnds, openScore, placeTile, tileFits, emptyBoard, type BoardState } from "./board.js";
+import { gameWinnerId, scoreDomino, scoreLocked, winsNeeded } from "./score.js";
 import { allTileIds, handPips, tileById, tileLabel } from "./tiles.js";
 
 export type BoneyardMode = "draw_one" | "draw_until";
@@ -374,8 +368,9 @@ function applyPlay(match: MatchState, playerId: string, tileId: string, endId: s
   if (!allowed) return fail(match, "That tile does not fit there.");
 
   const board = placeTile(hand.board, endId, tileById(tileId));
-  const total = openTotal(board);
-  const awarded = boardAward(total);
+  const scored = openScore(board);
+  const total = scored.total;
+  const awarded = scored.awarded;
   const remaining = owned.slice(0, index).concat(owned.slice(index + 1));
   const hands = { ...hand.hands, [playerId]: remaining };
   const scores = { ...match.scores, [playerId]: (match.scores[playerId] ?? 0) + awarded };

@@ -12,6 +12,7 @@ import {
   type Intent,
   type MatchState,
 } from "./engine.js";
+import { openScore } from "./board.js";
 import { deckMatchesSeed, shuffleWithSeed } from "./rng.js";
 import { roundDownToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
 import { allTileIds, handPips, lowestEndKey } from "./tiles.js";
@@ -111,6 +112,35 @@ describe("opening lead", () => {
     const led = play(match, "b", "4-6", "lead");
     expect(led.lastPlay?.total).toBe(10);
     expect(led.scores.b).toBe(10);
+  });
+});
+
+describe("spinner score is what the table shows and what the player is paid", () => {
+  it("pays 10, not 5 and not 15, for a 5–5 with an empty up side", () => {
+    const hands = {
+      a: ["5-5", "5-6", "4-5", "0-1", "0-2", "0-3", "1-2"],
+      b: ["3-5", "4-6", "2-5", "0-4", "1-3", "1-4", "2-3"],
+    };
+    let match = start([A, B], deckFor(["a", "b"], hands));
+    match = play(match, "a", "5-5", "lead");
+    match = play(match, "b", "3-5", "west");
+    match = play(match, "a", "5-6", "east");
+    match = play(match, "b", "4-6", "east");
+    match = play(match, "a", "4-5", "east");
+    const before = match.scores.b ?? 0;
+    match = play(match, "b", "2-5", "south");
+
+    const board = match.hand!.board;
+    const scored = openScore(board);
+    expect(scored).toMatchObject({ parts: [3, 5, 2], total: 10, awarded: 10, equation: "3 + 5 + 2 = 10" });
+    expect(match.lastPlay).toMatchObject({ total: scored.total, awarded: scored.awarded });
+    expect(match.scores.b).toBe(before + scored.awarded);
+    expect(match.scores.b).toBe(before + 10);
+
+    const shown = project(match, metaOf(match, "a"));
+    expect(shown.openEquation).toBe(scored.equation);
+    expect(shown.openTotal).toBe(scored.total);
+    expect(shown.lastPlay?.awarded).toBe(scored.awarded);
   });
 });
 

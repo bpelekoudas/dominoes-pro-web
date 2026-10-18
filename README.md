@@ -23,7 +23,7 @@ Talk is a row of preset lines, plus a short note of your own (80 characters). Pr
 ## Rules worth knowing
 
 - A board that adds up to 5 scores nothing. 10, 15, 20, and so on score the whole amount.
-- The first double is the spinner. The cross opens only after both long sides have a tile.
+- The first double is the spinner. The cross opens only after both long sides have a tile. Once both long sides are filled, an unplayed side of the spinner does not count in the open-end total.
 - Going out pays the other players' pips, rounded down to a multiple of 5. A leftover of 5 still counts.
 - A locked tie splits what's left, and each share is rounded down. The player with the lowest tile-end leads next.
 - The winner of a hand leads the next hand, including the first hand of the next game. Only the first hand of a whole series starts from the double-six.
