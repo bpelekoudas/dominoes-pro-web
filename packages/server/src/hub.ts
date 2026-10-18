@@ -2,15 +2,19 @@ import { randomBytes } from "node:crypto";
 import {
   applyIntent,
   beginHand,
+  chooseBotIntent,
   createMatch,
+  currentPlayerId,
   deckMatchesSeed,
   project,
   replayMatch,
   resolveTaunt,
   shuffleWithSeed,
+  tauntsForPlayer,
   randomSeed,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
+  type BotDifficulty,
   type Intent,
   type MatchState,
   type PlayerView,
@@ -50,13 +54,24 @@ export type ClientMessage =
   | { type: "intent"; intent: Intent }
   | { type: "chat"; kind: "preset"; packId: string; tauntId: string }
   | { type: "chat"; kind: "text"; text: string }
-  | { type: "rematch" };
+  | { type: "rematch" }
+  | {
+      type: "solo";
+      name: string;
+      boneyardMode?: string;
+      seriesLength?: number;
+      difficulty?: string;
+    }
+  | { type: "add-bot"; difficulty?: string }
+  | { type: "remove-bot"; playerId: string };
 
 interface LiveSeat {
   id: string;
   name: string;
   token: string;
   connected: boolean;
+  bot: boolean;
+  difficulty: BotDifficulty | null;
   generation: number;
   send: ((message: ServerMessage) => void) | null;
   close: (() => void) | null;
@@ -87,6 +102,15 @@ export interface BoundSession {
 }
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
+
+function defaultBotPace(): number {
+  return 800 + Math.floor(Math.random() * 701);
+}
+
+function asDifficulty(value: unknown): BotDifficulty {
+  return value === "easy" ? "easy" : "normal";
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -126,10 +150,12 @@ export class Hub {
   private readonly rooms = new Map<string, LiveRoom>();
   private readonly byPlayer = new Map<string, string>();
   private readonly byCode = new Map<string, string>();
+  private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly store: Store,
     private readonly lobbyGraceMs = 20_000,
+    private readonly botPace: () => number = defaultBotPace,
   ) {
     this.restore();
   }
@@ -140,6 +166,7 @@ export class Hub {
     if (message.type === "create") return this.create(message, send, close);
     if (message.type === "join") return this.join(message, send, close);
     if (message.type === "reconnect") return this.reconnect(message.token, send, close);
+    if (message.type === "solo") return this.solo(message, send, close);
     return { ok: false, error: "Join a table first." };
   }
 
@@ -151,6 +178,8 @@ export class Hub {
     else if (message.type === "intent") this.intent(room, seat, message.intent);
     else if (message.type === "chat") this.chat(room, seat, message);
     else if (message.type === "rematch") this.rematch(room, seat);
+    else if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
+    else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
   }
 
@@ -221,6 +250,8 @@ export class Hub {
       token: seat.token,
       seat: 0,
       created_at: created,
+      bot: 0,
+      difficulty: null,
     });
     this.remember(room);
     const generation = this.bind(seat, send, close);
@@ -250,6 +281,8 @@ export class Hub {
       token: seat.token,
       seat: room.seats.length - 1,
       created_at: nowIso(),
+      bot: 0,
+      difficulty: null,
     });
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
@@ -266,7 +299,7 @@ export class Hub {
       return { ok: false, error: "This device isn't at a table. Join with a code." };
     }
     const row = this.store.playerByToken(token);
-    if (!row) return { ok: false, error: "This device isn't at a table. Join with a code." };
+    if (!row || row.bot) return { ok: false, error: "This device isn't at a table. Join with a code." };
     const room = this.rooms.get(row.room_id);
     const seat = room?.seats.find((candidate) => candidate.id === row.id);
     if (!room || !seat) return { ok: false, error: "This device isn't at a table. Join with a code." };
@@ -425,6 +458,142 @@ export class Hub {
     room.actionSeq = 0;
   }
 
+  private solo(
+    message: Extract<ClientMessage, { type: "solo" }>,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+  ): { ok: true; session: BoundSession } | { ok: false; error: string } {
+    const boneyardMode = message.boneyardMode ?? "draw_until";
+    const seriesLength = message.seriesLength ?? 3;
+    const opened = this.create(
+      {
+        type: "create",
+        name: message.name,
+        playerCount: 4,
+        boneyardMode,
+        seriesLength,
+      },
+      send,
+      close,
+    );
+    if (!opened.ok) return opened;
+    const room = this.roomFor(opened.session.playerId);
+    const seat = room?.seats.find((candidate) => candidate.id === opened.session.playerId);
+    if (!room || !seat) return { ok: false, error: "The table didn't open." };
+    const difficulty = asDifficulty(message.difficulty);
+    for (let count = 0; count < 3; count += 1) this.addBot(room, seat, difficulty);
+    this.start(room, seat);
+    return opened;
+  }
+
+  private addBot(room: LiveRoom, host: LiveSeat, difficulty: BotDifficulty): void {
+    if (host.id !== room.hostId) {
+      this.tell(host, { type: "error", message: "Only the host can add a computer." });
+      return;
+    }
+    if (room.status !== "lobby") {
+      this.tell(host, { type: "error", message: "Computers can only sit down before the deal." });
+      return;
+    }
+    if (room.seats.length >= room.settings.playerCount) {
+      this.tell(host, { type: "error", message: "That table is full." });
+      return;
+    }
+    if (room.seats.filter((seat) => seat.bot).length >= 3) {
+      this.tell(host, { type: "error", message: "Three computers is the table limit." });
+      return;
+    }
+    const name = this.nextBotName(room);
+    const seat = this.makeSeat(makeId("p"), name, randomBytes(32).toString("hex"), true, true, difficulty);
+    room.seats.push(seat);
+    this.byPlayer.set(seat.id, room.id);
+    this.store.insertPlayer({
+      id: seat.id,
+      room_id: room.id,
+      name: seat.name,
+      token: seat.token,
+      seat: room.seats.length - 1,
+      created_at: nowIso(),
+      bot: 1,
+      difficulty,
+    });
+    this.broadcast(room);
+  }
+
+  private removeBot(room: LiveRoom, host: LiveSeat, playerId: string): void {
+    if (host.id !== room.hostId) {
+      this.tell(host, { type: "error", message: "Only the host can remove a computer." });
+      return;
+    }
+    if (room.status !== "lobby") {
+      this.tell(host, { type: "error", message: "Computers can only leave before the deal." });
+      return;
+    }
+    const target = room.seats.find((candidate) => candidate.id === playerId);
+    if (!target?.bot) {
+      this.tell(host, { type: "error", message: "Only a computer can be removed from here." });
+      return;
+    }
+    room.seats = room.seats.filter((candidate) => candidate.id !== target.id);
+    this.byPlayer.delete(target.id);
+    this.store.deletePlayer(target.id);
+    this.broadcast(room);
+  }
+
+  private nextBotName(room: LiveRoom): string {
+    const used = new Set(room.seats.map((seat) => seat.name));
+    for (const name of BOT_NAMES) {
+      if (!used.has(name)) return name;
+    }
+    return `Bones ${room.seats.length}`;
+  }
+
+  private scheduleBot(room: LiveRoom): void {
+    if (this.botTimers.has(room.id)) return;
+    if (!room.match || room.status !== "playing") return;
+    const turnId = currentPlayerId(room.match);
+    if (!turnId) return;
+    const seat = room.seats.find((candidate) => candidate.id === turnId);
+    if (!seat?.bot) return;
+    const wait = Math.max(0, this.botPace());
+    const timer = setTimeout(() => {
+      this.botTimers.delete(room.id);
+      this.playBot(room.id, seat.id);
+    }, wait);
+    timer.unref?.();
+    this.botTimers.set(room.id, timer);
+  }
+
+  private playBot(roomId: string, playerId: string): void {
+    const room = this.rooms.get(roomId);
+    const seat = room?.seats.find((candidate) => candidate.id === playerId);
+    if (!room || !seat?.bot || !room.match) return;
+    if (currentPlayerId(room.match) !== playerId) return;
+    const intent = chooseBotIntent(room.match, playerId, seat.difficulty ?? "normal", Math.random);
+    if (!intent) return;
+    const before = room.match.playSeq;
+    this.intent(room, seat, intent);
+    if (room.match && room.match.playSeq > before && Math.random() < 0.12) this.botTaunt(room, seat);
+  }
+
+  private botTaunt(room: LiveRoom, seat: LiveSeat): void {
+    const lines = tauntsForPlayer();
+    if (lines.length === 0) return;
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    if (!line) return;
+    this.chat(room, seat, { type: "chat", kind: "preset", packId: line.packId, tauntId: line.id });
+  }
+
+  private dropRoom(room: LiveRoom): void {
+    const timer = this.botTimers.get(room.id);
+    if (timer) clearTimeout(timer);
+    this.botTimers.delete(room.id);
+    for (const seat of room.seats) this.byPlayer.delete(seat.id);
+    this.rooms.delete(room.id);
+    this.byCode.delete(room.code);
+    this.store.deleteRoom(room.id);
+  }
+
   private removeLobbySeat(roomId: string, playerId: string): void {
     const room = this.rooms.get(roomId);
     const seat = room?.seats.find((candidate) => candidate.id === playerId);
@@ -439,7 +608,12 @@ export class Hub {
       return;
     }
     if (room.hostId === playerId) {
-      room.hostId = room.seats[0]!.id;
+      const human = room.seats.find((candidate) => !candidate.bot);
+      if (!human) {
+        this.dropRoom(room);
+        return;
+      }
+      room.hostId = human.id;
       this.store.updateRoom(room.id, { host_id: room.hostId });
     }
     this.broadcast(room);
@@ -459,7 +633,16 @@ export class Hub {
           seriesLength: row.series_length as SeriesLength,
         },
         status: row.status as LiveRoom["status"],
-        seats: players.map((player) => this.makeSeat(player.id, player.name, player.token, false)),
+        seats: players.map((player) =>
+          this.makeSeat(
+            player.id,
+            player.name,
+            player.token,
+            player.bot === 1,
+            player.bot === 1,
+            player.difficulty === "easy" || player.difficulty === "normal" ? player.difficulty : null,
+          ),
+        ),
         match: null,
         handId: null,
         actionSeq: 0,
@@ -491,6 +674,7 @@ export class Hub {
         }
       }
       this.remember(room);
+      if (room.status === "playing") this.scheduleBot(room);
     }
   }
 
@@ -500,12 +684,21 @@ export class Hub {
     for (const seat of room.seats) this.byPlayer.set(seat.id, room.id);
   }
 
-  private makeSeat(id: string, name: string, token = randomBytes(32).toString("hex"), connected = false): LiveSeat {
+  private makeSeat(
+    id: string,
+    name: string,
+    token = randomBytes(32).toString("hex"),
+    connected = false,
+    bot = false,
+    difficulty: BotDifficulty | null = null,
+  ): LiveSeat {
     return {
       id,
       name,
       token,
       connected,
+      bot,
+      difficulty: bot ? (difficulty ?? "normal") : null,
       generation: 0,
       send: null,
       close: null,
@@ -541,6 +734,7 @@ export class Hub {
       if (!seat.send) continue;
       seat.send({ type: "state", view: this.view(room, seat.id) });
     }
+    this.scheduleBot(room);
   }
 
   private view(room: LiveRoom, playerId: string): PlayerView {
@@ -556,6 +750,8 @@ export class Hub {
         id: seat.id,
         name: seat.name,
         connected: seat.connected,
+        bot: seat.bot,
+        difficulty: seat.difficulty,
       })),
       settings: room.settings,
       youId,

@@ -15,7 +15,7 @@ The old single-player page is still here, untouched, so the current site can kee
 1. Someone creates a room and picks 2–4 players, a boneyard rule, and a best-of-3, 5, or 7 series.
 2. They share a short code or a link (`/r/CODE`).
 3. Everyone else joins with a display name. There are no accounts yet.
-4. The host deals when the table is full.
+4. The host deals when the table is full. Empty seats can be filled with computers (Easy or Normal) and removed again before the deal. Play vs computer on the home screen starts a four-seat table — you and three computers — and deals immediately. Computers play on the server, about a second after the tile is theirs, so you can watch.
 5. Play goes to 150, then on through the series. Refreshing the phone puts you back in your seat.
 
 Talk is a row of preset lines, plus a short note of your own (80 characters). Preset packs are set up so a character can bring their own lines later. That pack stays hidden until the player owns the character.

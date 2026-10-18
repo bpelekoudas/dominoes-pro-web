@@ -2,6 +2,7 @@ import { openEnds, openEquation, openTotal, type BoardState } from "./board.js";
 import { winsNeeded } from "./score.js";
 import { tauntsForPlayer, type AvailableTaunt } from "./taunts.js";
 import { tileById } from "./tiles.js";
+import type { BotDifficulty } from "./bot.js";
 import {
   currentPlayerId,
   legalIntents,
@@ -46,6 +47,8 @@ export interface PlayerView {
     tileCount: number;
     isYou: boolean;
     isTurn: boolean;
+    bot: boolean;
+    difficulty: BotDifficulty | null;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -79,6 +82,8 @@ export interface TableSeat {
   id: string;
   name: string;
   connected: boolean;
+  bot: boolean;
+  difficulty: BotDifficulty | null;
 }
 
 export interface TableMeta {
@@ -137,6 +142,8 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       tileCount: match?.hand?.hands[seat.id]?.length ?? 0,
       isYou: seat.id === meta.youId,
       isTurn: seat.id === turnPlayerId,
+      bot: seat.bot,
+      difficulty: seat.difficulty,
     })),
     you: { hand: youHand },
     board,
@@ -230,6 +237,7 @@ function promptFor(
     }
     return "Your turn.";
   }
-  const name = meta.seats.find((seat) => seat.id === turnPlayerId)?.name ?? "Someone";
+  const seat = meta.seats.find((candidate) => candidate.id === turnPlayerId);
+  const name = seat?.bot ? `${seat.name} (computer)` : (seat?.name ?? "Someone");
   return `${name}'s turn.`;
 }

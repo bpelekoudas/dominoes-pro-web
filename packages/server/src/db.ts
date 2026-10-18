@@ -20,6 +20,9 @@ export interface PlayerRow {
   token: string;
   seat: number;
   created_at: string;
+  /** 1 when the seat is a computer. Older databases gain this column on open. */
+  bot: number;
+  difficulty: string | null;
 }
 
 export interface HandRow {
@@ -76,7 +79,9 @@ export class Store {
         name TEXT NOT NULL,
         token TEXT NOT NULL UNIQUE,
         seat INTEGER NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        bot INTEGER NOT NULL DEFAULT 0,
+        difficulty TEXT
       );
       CREATE TABLE IF NOT EXISTS hands (
         id TEXT PRIMARY KEY,
@@ -108,6 +113,19 @@ export class Store {
         created_at TEXT NOT NULL
       );
     `);
+    this.migrate();
+  }
+
+  /** Rooms created before computers existed are missing the seat columns. */
+  private migrate(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(players)`).all() as Array<{ name: string }>;
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("bot")) {
+      this.db.exec(`ALTER TABLE players ADD COLUMN bot INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!names.has("difficulty")) {
+      this.db.exec(`ALTER TABLE players ADD COLUMN difficulty TEXT`);
+    }
   }
 
   insertRoom(room: RoomRow): void {
@@ -159,9 +177,18 @@ export class Store {
   insertPlayer(player: PlayerRow): void {
     this.db
       .prepare(
-        `INSERT INTO players (id, room_id, name, token, seat, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(player.id, player.room_id, player.name, player.token, player.seat, player.created_at);
+      .run(
+        player.id,
+        player.room_id,
+        player.name,
+        player.token,
+        player.seat,
+        player.created_at,
+        player.bot,
+        player.difficulty,
+      );
   }
 
   deletePlayer(id: string): void {

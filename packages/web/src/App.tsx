@@ -140,6 +140,9 @@ export function App() {
         onCreate={(name, playerCount, boneyardMode, seriesLength) =>
           openSocket({ type: "create", name, playerCount, boneyardMode, seriesLength })
         }
+        onSolo={(name, boneyardMode, seriesLength) =>
+          openSocket({ type: "solo", name, boneyardMode, seriesLength })
+        }
         onJoin={(name, code) => openSocket({ type: "join", name, code })}
       />
     );
@@ -196,12 +199,14 @@ function Home({
   error,
   connecting,
   onCreate,
+  onSolo,
   onJoin,
 }: {
   presetCode: string;
   error: string | null;
   connecting: boolean;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
+  onSolo: (name: string, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
   onJoin: (name: string, code: string) => void;
 }) {
   const [name, setName] = useState("");
@@ -248,8 +253,8 @@ function Home({
           <Choice
             value={boneyardMode}
             options={[
-              { value: "draw_until", label: "Draw until you can play" },
-              { value: "draw_one", label: "Draw one, then pass" },
+              { value: "draw_until", label: "Draw until" },
+              { value: "draw_one", label: "Draw one" },
             ]}
             onChange={setBoneyardMode}
           />
@@ -269,6 +274,15 @@ function Home({
         <button className="primary" type="submit" disabled={connecting || !name.trim()}>
           Create room
         </button>
+        <button
+          className="primary computer"
+          type="button"
+          disabled={connecting || !name.trim()}
+          onClick={() => onSolo(name, boneyardMode, seriesLength)}
+        >
+          Play vs computer
+        </button>
+        <p className="solo-note">You and three computers. The hand starts right away, using the boneyard and series above.</p>
       </form>
       <form
         className="card join-card"
@@ -403,7 +417,7 @@ function Game({
       ) : null}
 
       {view.status === "lobby" ? (
-        <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} />
+        <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
           <ScoreRow view={view} />
@@ -480,7 +494,20 @@ function Game({
   );
 }
 
-function Lobby({ view, link, onStart }: { view: PlayerView; link: string; onStart: () => void }) {
+function Lobby({
+  view,
+  link,
+  onStart,
+  onSend,
+}: {
+  view: PlayerView;
+  link: string;
+  onStart: () => void;
+  onSend: (message: object) => void;
+}) {
+  const [difficulty, setDifficulty] = useState<"easy" | "normal">("normal");
+  const host = view.yourId === view.hostId;
+  const openSeats = view.settings.playerCount - view.players.length;
   const mode = view.settings.boneyardMode === "draw_one" ? "Draw one, then pass if it doesn't fit." : "Draw until you can play.";
   return (
     <section className="lobby">
@@ -497,17 +524,59 @@ function Lobby({ view, link, onStart }: { view: PlayerView; link: string; onStar
       </button>
       <ul className="seat-list">
         {view.players.map((player) => (
-          <li key={player.id}>
-            <span>{player.isYou ? `${player.name} (you)` : player.name}</span>
-            <span>{player.connected ? "here" : "away"}</span>
+          <li key={player.id} className={player.bot ? "bot-seat" : ""}>
+            <span className="who">
+              {player.bot ? <BotMark /> : null}
+              <span>
+                {player.isYou ? `${player.name} (you)` : player.name}
+                {player.bot ? (
+                  <small className="bot-label">Computer · {player.difficulty === "easy" ? "Easy" : "Normal"}</small>
+                ) : null}
+              </span>
+            </span>
+            {player.bot && host ? (
+              <button
+                type="button"
+                className="text-button"
+                data-action="remove-bot"
+                onClick={() => onSend({ type: "remove-bot", playerId: player.id })}
+              >
+                Remove
+              </button>
+            ) : (
+              <span>{player.connected ? "here" : "away"}</span>
+            )}
           </li>
         ))}
-        {Array.from({ length: view.settings.playerCount - view.players.length }, (_, index) => (
+        {Array.from({ length: openSeats }, (_, index) => (
           <li key={`empty-${index}`} className="empty-seat">
             Waiting for a player
           </li>
         ))}
       </ul>
+      {host && openSeats > 0 ? (
+        <div className="bot-add">
+          <fieldset>
+            <legend>Computer</legend>
+            <Choice
+              value={difficulty}
+              options={[
+                { value: "easy", label: "Easy" },
+                { value: "normal", label: "Normal" },
+              ]}
+              onChange={setDifficulty}
+            />
+          </fieldset>
+          <button
+            type="button"
+            className="primary"
+            data-action="add-bot"
+            onClick={() => onSend({ type: "add-bot", difficulty })}
+          >
+            Add a computer
+          </button>
+        </div>
+      ) : null}
       <p className="rules-note">
         {mode} First to {view.settings.targetScore}. {view.prompt}
       </p>
@@ -524,10 +593,16 @@ function ScoreRow({ view }: { view: PlayerView }) {
   return (
     <div className="score-row">
       {view.players.map((player) => (
-        <article key={player.id} className={`score-card${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}`}>
+        <article
+          key={player.id}
+          className={`score-card${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+        >
           <header>
-            <span>{player.isYou ? "You" : player.name}</span>
-            {!player.connected ? <em>away</em> : null}
+            <span className="who">
+              {player.bot ? <BotMark /> : null}
+              <span>{player.isYou ? "You" : player.name}</span>
+            </span>
+            {player.bot ? <em className="bot-pill">BOT</em> : !player.connected ? <em>away</em> : null}
           </header>
           <strong>{player.score}</strong>
           <footer>
@@ -569,6 +644,18 @@ function Ends({ view }: { view: PlayerView }) {
         </em>
       ) : null}
     </div>
+  );
+}
+
+function BotMark() {
+  return (
+    <svg className="bot-mark" viewBox="0 0 24 36" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="21" height="33" rx="3" />
+      <line x1="2" y1="18" x2="22" y2="18" />
+      <circle cx="12" cy="9" r="2.2" />
+      <circle cx="8.2" cy="27" r="2" />
+      <circle cx="15.8" cy="27" r="2" />
+    </svg>
   );
 }
 

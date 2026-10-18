@@ -5,4 +5,5 @@ export * from "./board.js";
 export * from "./layout.js";
 export * from "./taunts.js";
 export * from "./engine.js";
+export * from "./bot.js";
 export * from "./view.js";

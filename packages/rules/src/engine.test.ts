@@ -450,7 +450,13 @@ function metaOf(match: MatchState, youId: string): TableMeta {
     roomCode: "TEST",
     hostId: match.players[0]!.id,
     status: "playing",
-    seats: match.players.map((player) => ({ id: player.id, name: player.name, connected: true })),
+    seats: match.players.map((player) => ({
+      id: player.id,
+      name: player.name,
+      connected: true,
+      bot: false,
+      difficulty: null,
+    })),
     settings: {
       playerCount: match.players.length as 2 | 3 | 4,
       boneyardMode: match.config.boneyardMode,

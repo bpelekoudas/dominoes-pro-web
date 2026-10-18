@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { PlayerView } from "@uhoh/rules";
 import { Store } from "./db.js";
@@ -150,7 +151,156 @@ describe("rooms", () => {
     );
     expect(missing.ok).toBe(false);
   });
+
+  it("lets the host add and remove computers, and logs a computer move", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "create", name: "Alex", playerCount: 4, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const code = latestView(messages)?.roomCode ?? "";
+    const samMessages: ServerMessage[] = [];
+    const sam = hub.connect(
+      { type: "join", code, name: "Sam" },
+      (message) => samMessages.push(message),
+      () => undefined,
+    );
+    if (!sam.ok) throw new Error(sam.error);
+
+    hub.command(sam.session.playerId, { type: "add-bot", difficulty: "easy" });
+    expect(samMessages.at(-1)?.type).toBe("error");
+
+    hub.command(alex.session.playerId, { type: "add-bot", difficulty: "easy" });
+    hub.command(alex.session.playerId, { type: "add-bot" });
+    let view = latestView(messages);
+    expect(view?.players.filter((player) => player.bot).map((player) => player.name)).toEqual(["Bones", "Pips"]);
+    expect(view?.players.find((player) => player.name === "Bones")?.difficulty).toBe("easy");
+    expect(view?.players.find((player) => player.name === "Pips")?.difficulty).toBe("normal");
+    expect(view?.canStart).toBe(true);
+
+    const bones = view?.players.find((player) => player.name === "Bones");
+    hub.command(alex.session.playerId, { type: "remove-bot", playerId: alex.session.playerId });
+    expect(messages.at(-1)?.type).toBe("error");
+    hub.command(alex.session.playerId, { type: "remove-bot", playerId: bones?.id ?? "" });
+    view = latestView(messages);
+    expect(view?.players.some((player) => player.bot)).toBe(true);
+    expect(view?.players.some((player) => player.name === "Bones")).toBe(false);
+    expect(view?.canStart).toBe(false);
+
+    hub.command(alex.session.playerId, { type: "add-bot", difficulty: "normal" });
+    hub.command(alex.session.playerId, { type: "start" });
+    const playing = latestView(messages);
+    expect(playing?.status).toBe("playing");
+    expect(playing?.players.filter((player) => player.bot)).toHaveLength(2);
+
+    const actions = await untilBotActs(hub, store, code, [
+      { playerId: alex.session.playerId, messages },
+      { playerId: sam.session.playerId, messages: samMessages },
+    ]);
+    const botIds = new Set(store.players(store.roomByCode(code)!.id).filter((player) => player.bot).map((player) => player.id));
+    expect(actions.some((action) => botIds.has(action.playerId))).toBe(true);
+
+    const during = latestView(messages);
+    if (during?.status === "playing") {
+      hub.command(alex.session.playerId, { type: "add-bot" });
+      expect(messages.at(-1)?.type).toBe("error");
+    }
+  });
+
+  it("starts a four-seat table against three computers", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "solo", name: "Alex", boneyardMode: "draw_one", seriesLength: 5 },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const alexId = alex.session.playerId;
+    const view = latestView(messages);
+    expect(view?.status).toBe("playing");
+    expect(view?.settings.playerCount).toBe(4);
+    expect(view?.settings.seriesLength).toBe(5);
+    expect(view?.settings.boneyardMode).toBe("draw_one");
+    expect(view?.players.filter((player) => player.bot)).toHaveLength(3);
+    expect(view?.players.filter((player) => player.bot).every((player) => player.connected)).toBe(true);
+
+    const room = store.roomByCode(view?.roomCode ?? "");
+    const bot = store.players(room?.id ?? "").find((player) => player.bot);
+    const refused = hub.connect(
+      { type: "reconnect", token: bot?.token ?? "" },
+      () => undefined,
+      () => undefined,
+    );
+    expect(refused.ok).toBe(false);
+
+    const actions = await untilBotActs(hub, store, view?.roomCode ?? "", [
+      { playerId: alexId, messages },
+    ]);
+    expect(actions.some((action) => action.playerId === bot?.id || store.players(room?.id ?? "").some((player) => player.bot && player.id === action.playerId))).toBe(true);
+  });
+
+  it("adds the computer columns when an older database is opened", () => {
+    const file = `/tmp/uhoh-bot-migrate-${Date.now()}.sqlite`;
+    const raw = new DatabaseSync(file);
+    raw.exec(`
+      CREATE TABLE players (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        seat INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `);
+    raw.close();
+    const store = new Store(file);
+    store.insertPlayer({
+      id: "p1",
+      room_id: "r1",
+      name: "Bones",
+      token: "t".repeat(32),
+      seat: 1,
+      created_at: new Date().toISOString(),
+      bot: 1,
+      difficulty: "easy",
+    });
+    const row = store.playerByToken("t".repeat(32));
+    expect(row?.bot).toBe(1);
+    expect(row?.difficulty).toBe("easy");
+    store.db.close();
+  });
 });
+
+async function untilBotActs(
+  hub: Hub,
+  store: Store,
+  code: string,
+  humans: Array<{ playerId: string; messages: ServerMessage[] }>,
+) {
+  for (let step = 0; step < 80; step += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const room = store.roomByCode(code);
+    if (!room) throw new Error("The room disappeared.");
+    const botIds = new Set(store.players(room.id).filter((player) => player.bot).map((player) => player.id));
+    const actions = store.handsForSeries(room.id, room.series_id).flatMap((hand) => store.actions(hand.id));
+    if (actions.some((action) => botIds.has(action.playerId))) return actions;
+    for (const human of humans) {
+      const view = latestView(human.messages);
+      if (!view || view.turnPlayerId !== human.playerId) continue;
+      const play = view.legalPlays[0];
+      if (play) hub.command(human.playerId, { type: "intent", intent: { type: "play", ...play } });
+      else if (view.canDraw) hub.command(human.playerId, { type: "intent", intent: { type: "draw" } });
+      else if (view.canKnock) hub.command(human.playerId, { type: "intent", intent: { type: "knock" } });
+    }
+  }
+  throw new Error("A computer never moved.");
+}
 
 function boardIds(view: PlayerView | null): string[] {
   if (!view?.board) return [];
