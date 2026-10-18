@@ -44,8 +44,15 @@ The older single-player page in the repo root is not this game, and it still sco
 
 ## Winning
 
-- First player to reach 150 points wins the game.
+- The moment a player reaches 150, the game ends. That includes a score played in the middle of a hand. The hand stops, and the table goes to the game summary. If the series is still going, the next game starts after that. Leftovers at the end of a hand can also cross 150, and that ends the game too.
 - A series is best of 3, best of 5, or best of 7.
+- Every hand records finishing order. First is the player who went out, the lightest hand in a lock, or the player who reached 150 on a score. Everyone else is ordered by remaining pips, lowest first. A tie shares that place and the next place number is skipped. The order is stored with the hand. It does not award points.
+
+## At the table
+
+- Each person has 30 seconds on their turn. The server skips the turn when the clock runs out. It does not play a tile and it does not draw. If that same person misses again the next time the turn returns, the game ends for the table. The screen reads `Game ended - <name> left`, with the scores at that moment. Rejoining before that next turn expires keeps them in. Computers are not on the clock.
+- Computers can be Easy, Medium, Hard, or Expert. Each one waits two seconds before it plays. They only use what a person at the table could see.
+- Talk is preset lines and a few reactions. There is no free typing. About one line every two seconds.
 
 ## Decisions made while building
 
@@ -54,7 +61,7 @@ These are the spots the written rules did not spell out. The two owner questions
 1. **Who leads.** Confirmed: the winner of a hand leads the next hand, inside a game and into the next game of the series. Only the very first hand of a series uses the 6–6 rule.
 2. **Tied lock money.** Confirmed: split the other players' pips evenly, then round each person's share down to a multiple of 5. Two players splitting 19 get 5 each. A share of 5 is kept. A share under 5 becomes 0.
 3. **No double was dealt on the opening hand.** The player with the heaviest tile leads and must play that tile. Heaviest means the higher pip total, then the higher single pip. This is rare: every double would have to be sitting in the boneyard.
-4. **150 is checked when the hand ends.** A hand is always finished, so there is always a next leader. Board points scored in the middle of the hand count, but they do not stop the hand.
+4. **150 ends the game immediately.** Confirmed by the owner after a 2-player game reached 155 on a board score of 10 and the hand kept going. A board score that takes someone to 150 or more stops the hand on that play. The hand-end count can do it too. The winner of that game leads the next game, unless the series is over. If two players are tied at the top and both are at 150 or more, the game continues until one is strictly ahead.
 5. **Two players reach 150 together.** The higher score wins the game. If they are tied at the top, and that score is at least 150, the game continues until one player is strictly ahead.
 6. **Spinner scoring.** West and east are the long sides. North and south open only after both long sides have a tile. A bare double scores both halves once (5–5 is 10, 6–6 is 12 and does not score). A spinner with only one long side played still counts as a double on that open end (4–4 with one side open counts 8). Once both long sides have a tile, the spinner itself drops out of the total. Only the outer ends of arms that have actually been played count. An unplayed short side adds nothing, even when the other short side has a tile. A double at the outer end of an arm still counts both halves. Examples: 5–0, 0–4, spinner 4–4, 4–6, 6–2 totals 5 + 2 = 7. 0–4, spinner 4–4, 4–6, 6–2 totals 0 + 2 = 2. Spinner 4–4 with outer ends 5, 3, and a down arm of 3, and the up side empty, totals 5 + 3 + 3 = 11. Spinner 5–5 with outer ends 3 and 5, a down arm of 2, and the up side empty, totals 3 + 5 + 2 = 10 and scores 10. The math line and the points awarded are the same total. A board total of 5 scores nothing.
 7. **An opening tile that is not a double** is set with the lower pip to the west. Both ends are open, so this has no effect on play.

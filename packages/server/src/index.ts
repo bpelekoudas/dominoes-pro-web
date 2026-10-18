@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
-import { Hub, type ClientMessage, type ServerMessage } from "./hub.js";
+import { BOT_TURN_MS, Hub, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Store } from "./db.js";
 import { publicBase } from "./public-url.js";
 
@@ -18,7 +18,21 @@ if (!process.env.DB_FILE && !existsSync(dataDir)) {
 }
 
 const store = new Store(dbFile);
-const hub = new Hub(store);
+
+function envMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+const hub = new Hub(
+  store,
+  20_000,
+  () => envMs("BOT_PACE_MS", BOT_TURN_MS),
+  envMs("TURN_LIMIT_MS", 30_000),
+  envMs("CONTINUE_MS", 9_000),
+);
 const app = Fastify({
   logger: true,
   // Render terminates HTTPS and forwards the original host and protocol.

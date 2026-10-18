@@ -89,6 +89,47 @@ export function scoreLocked(hands: Record<string, readonly string[]>): LockScore
   return { winnerIds, nextLeaderId, pipCounts, awards };
 }
 
+export interface Placement {
+  playerId: string;
+  place: number;
+  pips: number;
+  tied: boolean;
+}
+
+/**
+ * 1st is the hand winner (went out, lightest hand, or the player who
+ * reached the target). Everyone else is ordered by remaining pips,
+ * lowest first. Equal pips share a place. The next place skips ahead.
+ * No placement points are awarded.
+ */
+export function finishingOrder(
+  pipCounts: Record<string, number>,
+  firstIds: readonly string[],
+): Placement[] {
+  const first = new Set(firstIds);
+  const leaders = Object.keys(pipCounts).filter((id) => first.has(id));
+  const rest = Object.keys(pipCounts).filter((id) => !first.has(id));
+  rest.sort((a, b) => pipCounts[a]! - pipCounts[b]! || (a < b ? -1 : a > b ? 1 : 0));
+  const placements: Placement[] = [];
+  const leaderTied = leaders.length > 1;
+  for (const playerId of leaders) {
+    placements.push({ playerId, place: 1, pips: pipCounts[playerId] ?? 0, tied: leaderTied });
+  }
+  let index = 0;
+  while (index < rest.length) {
+    let end = index + 1;
+    while (end < rest.length && pipCounts[rest[end]!] === pipCounts[rest[index]!]) end += 1;
+    const tied = end - index > 1;
+    const place = leaders.length + index + 1;
+    for (let cursor = index; cursor < end; cursor += 1) {
+      const playerId = rest[cursor]!;
+      placements.push({ playerId, place, pips: pipCounts[playerId] ?? 0, tied });
+    }
+    index = end;
+  }
+  return placements;
+}
+
 /** First to `needed` game-wins takes a best-of series. */
 export function winsNeeded(seriesLength: number): number {
   return Math.floor(seriesLength / 2) + 1;

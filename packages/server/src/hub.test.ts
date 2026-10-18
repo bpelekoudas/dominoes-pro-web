@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { PlayerView } from "@uhoh/rules";
 import { Store } from "./db.js";
-import { Hub, type ServerMessage } from "./hub.js";
+import { BOT_TURN_MS, Hub, type ServerMessage } from "./hub.js";
 
 function latestView(messages: ServerMessage[]): PlayerView | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -179,7 +179,7 @@ describe("rooms", () => {
     let view = latestView(messages);
     expect(view?.players.filter((player) => player.bot).map((player) => player.name)).toEqual(["Bones", "Pips"]);
     expect(view?.players.find((player) => player.name === "Bones")?.difficulty).toBe("easy");
-    expect(view?.players.find((player) => player.name === "Pips")?.difficulty).toBe("normal");
+    expect(view?.players.find((player) => player.name === "Pips")?.difficulty).toBe("medium");
     expect(view?.canStart).toBe(true);
 
     const bones = view?.players.find((player) => player.name === "Bones");
@@ -302,7 +302,149 @@ describe("rooms", () => {
     expect(row?.difficulty).toBe("easy");
     store.db.close();
   });
+
+  it("waits two seconds before a computer plays", () => {
+    expect(BOT_TURN_MS).toBe(2_000);
+  });
+
+  it("only accepts a preset line, and only one every two seconds", () => {
+    const { hub, connect } = setup();
+    const alex = connect({
+      type: "create",
+      name: "Alex",
+      playerCount: 2,
+      boneyardMode: "draw_one",
+      seriesLength: 3,
+    });
+    hub.command(alex.playerId, { type: "chat", kind: "text", text: "nice tile" });
+    expect(alex.messages.at(-1)).toMatchObject({ type: "error", message: "Pick a line from the list." });
+    hub.command(alex.playerId, { type: "chat", kind: "preset", packId: "table", tauntId: "nope" });
+    expect(alex.messages.at(-1)).toMatchObject({ type: "error", message: "That line isn't in the pack." });
+    hub.command(alex.playerId, { type: "chat", kind: "preset", packId: "table", tauntId: "gg" });
+    expect(alex.messages.filter((message) => message.type === "chat")).toHaveLength(1);
+    hub.command(alex.playerId, { type: "chat", kind: "preset", packId: "table", tauntId: "lucky" });
+    expect(alex.messages.at(-1)).toMatchObject({ type: "error", message: "Easy. Give the table a second." });
+  });
+
+  it("skips a turn when the clock runs out, and ends the game on the next miss", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0, 40, 60_000);
+    const alexMessages: ServerMessage[] = [];
+    const samMessages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "create", name: "Alex", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => alexMessages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const code = latestView(alexMessages)?.roomCode ?? "";
+    const sam = hub.connect(
+      { type: "join", code, name: "Sam" },
+      (message) => samMessages.push(message),
+      () => undefined,
+    );
+    if (!sam.ok) throw new Error(sam.error);
+    hub.command(alex.session.playerId, { type: "start" });
+
+    const abandoned = await waitFor(() => latestView(alexMessages)?.status === "abandoned");
+    expect(abandoned).toBe(true);
+    const view = latestView(alexMessages);
+    expect(view?.prompt).toMatch(/^Game ended - (Alex|Sam) left$/);
+    expect(view?.ended?.reason).toBe("player_left");
+    expect(view?.board?.center ?? null).toBeNull();
+
+    const room = store.roomByCode(code);
+    const actions = store.handsForSeries(room!.id, room!.series_id).flatMap((hand) => store.actions(hand.id));
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.every((action) => action.intent.type === "timeout")).toBe(true);
+  });
+
+  it("clears a missed turn when that player reconnects before the turn comes back", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0, 200, 60_000);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "create", name: "Alex", playerCount: 2, boneyardMode: "draw_one", seriesLength: 3 },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const code = latestView(messages)?.roomCode ?? "";
+    const sam = hub.connect(
+      { type: "join", code, name: "Sam" },
+      () => undefined,
+      () => undefined,
+    );
+    if (!sam.ok) throw new Error(sam.error);
+    hub.command(alex.session.playerId, { type: "start" });
+    const roomId = () => store.roomByCode(code)!;
+    const timeoutCount = () =>
+      store.handsForSeries(roomId().id, roomId().series_id).flatMap((hand) => store.actions(hand.id)).length;
+
+    const firstMiss = await waitFor(() => timeoutCount() >= 1, 1_500);
+    expect(firstMiss).toBe(true);
+    const first = store.handsForSeries(roomId().id, roomId().series_id).flatMap((hand) => store.actions(hand.id))[0];
+    const token = store.players(roomId().id).find((player) => player.id === first?.playerId)?.token ?? "";
+    const back = hub.connect(
+      { type: "reconnect", token },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    expect(back.ok).toBe(true);
+
+    const ended = await waitFor(() => latestView(messages)?.status === "abandoned", 4_000);
+    expect(ended).toBe(true);
+    const actions = store.handsForSeries(roomId().id, roomId().series_id).flatMap((hand) => store.actions(hand.id));
+    expect(actions.length).toBeGreaterThanOrEqual(3);
+    expect(latestView(messages)?.prompt.startsWith("Game ended - ")).toBe(true);
+  });
+
+  it("holds the summary, then deals the next hand when someone continues", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0, 30_000, 60_000);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "solo", name: "Alex", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3, difficulty: "easy" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const code = latestView(messages)?.roomCode ?? "";
+    for (let step = 0; step < 600 && latestView(messages)?.betweenHands !== true; step += 1) {
+      const view = latestView(messages);
+      if (view?.turnPlayerId === alex.session.playerId) {
+        const play = view.legalPlays[0];
+        if (play) hub.command(alex.session.playerId, { type: "intent", intent: { type: "play", ...play } });
+        else if (view.canDraw) hub.command(alex.session.playerId, { type: "intent", intent: { type: "draw" } });
+        else if (view.canKnock) hub.command(alex.session.playerId, { type: "intent", intent: { type: "knock" } });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const summary = latestView(messages);
+    expect(summary?.betweenHands).toBe(true);
+    expect(summary?.phase).toBe("between");
+    expect(summary?.lastHand?.placements.length).toBe(2);
+    expect(summary?.turnDeadline).toBeNull();
+    const handBefore = summary?.handNumber ?? 0;
+    const gameBefore = summary?.gameNumber ?? 0;
+    hub.command(alex.session.playerId, { type: "continue" });
+    const next = latestView(messages);
+    expect(next?.betweenHands).toBe(false);
+    expect(next?.status).toBe("playing");
+    expect((next?.gameNumber ?? 0) > gameBefore || (next?.handNumber ?? 0) > handBefore).toBe(true);
+    expect(next?.you.hand).toHaveLength(7);
+    expect(store.roomByCode(code)?.status).toBe("playing");
+  });
 });
+
+async function waitFor(ready: () => boolean, limitMs = 2_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < limitMs) {
+    if (ready()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+  return ready();
+}
 
 async function untilBotActs(
   hub: Hub,

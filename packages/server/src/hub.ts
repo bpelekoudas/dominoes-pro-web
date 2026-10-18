@@ -3,6 +3,7 @@ import {
   applyIntent,
   beginHand,
   chooseBotIntent,
+  skipTurn,
   createMatch,
   currentPlayerId,
   deckMatchesSeed,
@@ -54,6 +55,7 @@ export type ClientMessage =
   | { type: "intent"; intent: Intent }
   | { type: "chat"; kind: "preset"; packId: string; tauntId: string }
   | { type: "chat"; kind: "text"; text: string }
+  | { type: "continue" }
   | { type: "rematch" }
   | {
       type: "solo";
@@ -78,6 +80,7 @@ interface LiveSeat {
   close: (() => void) | null;
   leaveTimer: ReturnType<typeof setTimeout> | null;
   chatTimes: number[];
+  missedTurn: boolean;
 }
 
 interface LiveRoom {
@@ -90,11 +93,15 @@ interface LiveRoom {
     boneyardMode: BoneyardMode;
     seriesLength: SeriesLength;
   };
-  status: "lobby" | "playing" | "complete";
+  status: "lobby" | "playing" | "complete" | "abandoned";
   seats: LiveSeat[];
   match: MatchState | null;
   handId: string | null;
   actionSeq: number;
+  betweenHands: boolean;
+  turnDeadline: number | null;
+  continueDeadline: number | null;
+  ended: { reason: "player_left"; playerId: string; name: string } | null;
 }
 
 export interface BoundSession {
@@ -105,12 +112,17 @@ export interface BoundSession {
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
 
+/** Computers wait this long before they play, so a person can watch the tile. */
+export const BOT_TURN_MS = 2_000;
+
 function defaultBotPace(): number {
-  return 800 + Math.floor(Math.random() * 701);
+  return BOT_TURN_MS;
 }
 
 function asDifficulty(value: unknown): BotDifficulty {
-  return value === "easy" ? "easy" : "normal";
+  if (value === "easy" || value === "medium" || value === "hard" || value === "expert") return value;
+  if (value === "normal") return "medium";
+  return "medium";
 }
 
 function nowIso(): string {
@@ -152,11 +164,15 @@ export class Hub {
   private readonly byPlayer = new Map<string, string>();
   private readonly byCode = new Map<string, string>();
   private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly continueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly store: Store,
     private readonly lobbyGraceMs = 20_000,
     private readonly botPace: () => number = defaultBotPace,
+    private readonly turnLimitMs = 30_000,
+    private readonly continueMs = 9_000,
   ) {
     this.restore();
   }
@@ -178,6 +194,7 @@ export class Hub {
     if (message.type === "start") this.start(room, seat);
     else if (message.type === "intent") this.intent(room, seat, message.intent);
     else if (message.type === "chat") this.chat(room, seat, message);
+    else if (message.type === "continue") this.continueHand(room, seat);
     else if (message.type === "rematch") this.rematch(room, seat);
     else if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
     else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
@@ -230,6 +247,10 @@ export class Hub {
       match: null,
       handId: null,
       actionSeq: 0,
+      betweenHands: false,
+      turnDeadline: null,
+      continueDeadline: null,
+      ended: null,
     };
     const seat = this.makeSeat(room.hostId, name);
     room.seats.push(seat);
@@ -305,6 +326,7 @@ export class Hub {
     const seat = room?.seats.find((candidate) => candidate.id === row.id);
     if (!room || !seat) return { ok: false, error: "This device isn't at a table. Join with a code." };
     const generation = this.bind(seat, send, close);
+    seat.missedTurn = false;
     this.welcome(room, seat);
     // Everyone else still had this seat marked away. Tell them the player is back.
     this.broadcast(room);
@@ -372,6 +394,7 @@ export class Hub {
       this.tell(seat, { type: "error", message: result.error ?? "That move doesn't work." });
       return;
     }
+    seat.missedTurn = false;
     room.actionSeq += 1;
     this.store.insertAction({
       hand_id: room.handId,
@@ -385,44 +408,120 @@ export class Hub {
       this.store.setHandResult(room.handId, JSON.stringify(room.match.lastHand));
       if (room.match.phase === "series_over") {
         room.status = "complete";
+        room.betweenHands = false;
+        room.continueDeadline = null;
         this.store.updateRoom(room.id, { status: "complete" });
       } else {
-        this.openHand(room, room.match);
+        this.holdForSummary(room);
       }
+    }
+    this.broadcast(room);
+  }
+
+  private continueHand(room: LiveRoom, seat: LiveSeat): void {
+    if (!room.betweenHands || !room.match) {
+      this.tell(seat, { type: "error", message: "The next hand isn't waiting." });
+      return;
+    }
+    this.openHeldHand(room);
+    this.broadcast(room);
+  }
+
+  private holdForSummary(room: LiveRoom): void {
+    room.betweenHands = true;
+    room.turnDeadline = null;
+    room.continueDeadline = Date.now() + this.continueMs;
+    this.clearTimer(this.turnTimers, room.id);
+    this.armContinue(room);
+  }
+
+  private armContinue(room: LiveRoom): void {
+    this.clearTimer(this.continueTimers, room.id);
+    const wait = Math.max(0, (room.continueDeadline ?? Date.now()) - Date.now());
+    const timer = setTimeout(() => this.openHeldHand(room, true), wait);
+    timer.unref?.();
+    this.continueTimers.set(room.id, timer);
+  }
+
+  private openHeldHand(room: LiveRoom, fromTimer = false): void {
+    if (!room.betweenHands || !room.match) return;
+    this.clearTimer(this.continueTimers, room.id);
+    room.betweenHands = false;
+    room.continueDeadline = null;
+    this.openHand(room, room.match);
+    if (fromTimer) this.broadcast(room);
+  }
+
+  private onTurnTimeout(roomId: string, playerId: string): void {
+    const room = this.rooms.get(roomId);
+    const seat = room?.seats.find((candidate) => candidate.id === playerId);
+    if (!room?.match || !seat || seat.bot || room.ended) return;
+    if (currentPlayerId(room.match) !== playerId) return;
+    if (seat.missedTurn) {
+      this.abandon(room, seat);
+      return;
+    }
+    seat.missedTurn = true;
+    const result = skipTurn(room.match, playerId);
+    if (!result.ok || !room.handId) return;
+    room.actionSeq += 1;
+    this.store.insertAction({
+      hand_id: room.handId,
+      seq: room.actionSeq,
+      player_id: seat.id,
+      payload_json: JSON.stringify({ type: "timeout" }),
+      created_at: nowIso(),
+    });
+    const nextMatch = result.match;
+    room.match = nextMatch;
+    if (nextMatch.hand?.phase === "complete" && nextMatch.lastHand) {
+      this.store.setHandResult(room.handId, JSON.stringify(nextMatch.lastHand));
+      if (nextMatch.phase === "series_over") {
+        room.status = "complete";
+        this.store.updateRoom(room.id, { status: "complete" });
+      } else {
+        this.holdForSummary(room);
+      }
+    }
+    this.broadcast(room);
+  }
+
+  private abandon(room: LiveRoom, seat: LiveSeat): void {
+    room.ended = { reason: "player_left", playerId: seat.id, name: seat.name };
+    room.status = "abandoned";
+    room.betweenHands = false;
+    room.turnDeadline = null;
+    room.continueDeadline = null;
+    this.clearTimer(this.botTimers, room.id);
+    this.clearTimer(this.turnTimers, room.id);
+    this.clearTimer(this.continueTimers, room.id);
+    this.store.updateRoom(room.id, { status: "abandoned" });
+    if (room.handId && room.match?.lastHand) {
+      this.store.setHandResult(room.handId, JSON.stringify({ ...room.match.lastHand, abandoned: room.ended }));
     }
     this.broadcast(room);
   }
 
   private chat(room: LiveRoom, seat: LiveSeat, message: Extract<ClientMessage, { type: "chat" }>): void {
     const now = Date.now();
-    seat.chatTimes = seat.chatTimes.filter((stamp) => now - stamp < 10_000);
-    if (seat.chatTimes.length >= 5) {
+    seat.chatTimes = seat.chatTimes.filter((stamp) => now - stamp < 2_000);
+    if (seat.chatTimes.length >= 1) {
       this.tell(seat, { type: "error", message: "Easy. Give the table a second." });
       return;
     }
-    let text: string | null = null;
-    let packId: string | null = null;
-    let tauntId: string | null = null;
-    let kind: "preset" | "text" = "text";
-    if (message.kind === "preset") {
-      const taunt = resolveTaunt(message.packId, message.tauntId);
-      if (!taunt) {
-        this.tell(seat, { type: "error", message: "That line isn't in the pack." });
-        return;
-      }
-      text = taunt.text;
-      packId = taunt.packId;
-      tauntId = taunt.id;
-      kind = "preset";
-    } else if (message.kind === "text") {
-      text = cleanChatText(message.text);
-      if (!text) {
-        this.tell(seat, { type: "error", message: `Keep it to ${CHAT_TEXT_LIMIT} characters.` });
-        return;
-      }
-    } else {
+    if (message.kind !== "preset") {
+      this.tell(seat, { type: "error", message: "Pick a line from the list." });
       return;
     }
+    const taunt = resolveTaunt(message.packId, message.tauntId);
+    if (!taunt) {
+      this.tell(seat, { type: "error", message: "That line isn't in the pack." });
+      return;
+    }
+    const text = taunt.text;
+    const packId = taunt.packId;
+    const tauntId = taunt.id;
+    const kind = "preset" as const;
     seat.chatTimes.push(now);
     const row = this.store.insertChat({
       room_id: room.id,
@@ -554,7 +653,7 @@ export class Hub {
 
   private scheduleBot(room: LiveRoom): void {
     if (this.botTimers.has(room.id)) return;
-    if (!room.match || room.status !== "playing") return;
+    if (!room.match || room.status !== "playing" || room.betweenHands || room.ended) return;
     const turnId = currentPlayerId(room.match);
     if (!turnId) return;
     const seat = room.seats.find((candidate) => candidate.id === turnId);
@@ -573,7 +672,7 @@ export class Hub {
     const seat = room?.seats.find((candidate) => candidate.id === playerId);
     if (!room || !seat?.bot || !room.match) return;
     if (currentPlayerId(room.match) !== playerId) return;
-    const intent = chooseBotIntent(room.match, playerId, seat.difficulty ?? "normal", Math.random);
+    const intent = chooseBotIntent(room.match, playerId, seat.difficulty ?? "medium", Math.random);
     if (!intent) return;
     const before = room.match.playSeq;
     this.intent(room, seat, intent);
@@ -588,10 +687,16 @@ export class Hub {
     this.chat(room, seat, { type: "chat", kind: "preset", packId: line.packId, tauntId: line.id });
   }
 
-  private dropRoom(room: LiveRoom): void {
-    const timer = this.botTimers.get(room.id);
+  private clearTimer(timers: Map<string, ReturnType<typeof setTimeout>>, roomId: string): void {
+    const timer = timers.get(roomId);
     if (timer) clearTimeout(timer);
-    this.botTimers.delete(room.id);
+    timers.delete(roomId);
+  }
+
+  private dropRoom(room: LiveRoom): void {
+    this.clearTimer(this.botTimers, room.id);
+    this.clearTimer(this.turnTimers, room.id);
+    this.clearTimer(this.continueTimers, room.id);
     for (const seat of room.seats) this.byPlayer.delete(seat.id);
     this.rooms.delete(room.id);
     this.byCode.delete(room.code);
@@ -644,12 +749,16 @@ export class Hub {
             player.token,
             player.bot === 1,
             player.bot === 1,
-            player.difficulty === "easy" || player.difficulty === "normal" ? player.difficulty : null,
+            asDifficulty(player.difficulty),
           ),
         ),
         match: null,
         handId: null,
         actionSeq: 0,
+        betweenHands: false,
+        turnDeadline: null,
+        continueDeadline: null,
+        ended: null,
       };
       if (row.status !== "lobby") {
         const logged = this.store.handsForSeries(row.id, row.series_id).map((hand) => ({
@@ -670,14 +779,15 @@ export class Hub {
           room.handId = last.id;
           room.actionSeq = last.actions.length;
           if (match.hand?.phase === "complete" && match.phase !== "series_over") {
-            this.openHand(room, match);
-            match = room.match!;
+            room.betweenHands = true;
+            room.continueDeadline = Date.now() + this.continueMs;
           }
           room.match = match;
           if (match.phase === "series_over") room.status = "complete";
         }
       }
       this.remember(room);
+      if (room.betweenHands) this.armContinue(room);
       if (room.status === "playing") this.scheduleBot(room);
     }
   }
@@ -702,7 +812,8 @@ export class Hub {
       token,
       connected,
       bot,
-      difficulty: bot ? (difficulty ?? "normal") : null,
+      difficulty: bot ? (difficulty ?? "medium") : null,
+      missedTurn: false,
       generation: 0,
       send: null,
       close: null,
@@ -734,11 +845,25 @@ export class Hub {
   }
 
   private broadcast(room: LiveRoom): void {
+    this.armTurn(room);
     for (const seat of room.seats) {
       if (!seat.send) continue;
       seat.send({ type: "state", view: this.view(room, seat.id) });
     }
     this.scheduleBot(room);
+  }
+
+  private armTurn(room: LiveRoom): void {
+    this.clearTimer(this.turnTimers, room.id);
+    room.turnDeadline = null;
+    if (room.ended || room.betweenHands || room.status !== "playing" || !room.match) return;
+    const turnId = currentPlayerId(room.match);
+    const seat = room.seats.find((candidate) => candidate.id === turnId);
+    if (!seat || seat.bot) return;
+    room.turnDeadline = Date.now() + this.turnLimitMs;
+    const timer = setTimeout(() => this.onTurnTimeout(room.id, seat.id), this.turnLimitMs);
+    timer.unref?.();
+    this.turnTimers.set(room.id, timer);
   }
 
   private view(room: LiveRoom, playerId: string): PlayerView {
@@ -759,6 +884,12 @@ export class Hub {
       })),
       settings: room.settings,
       youId,
+      turnDeadline: room.turnDeadline,
+      turnBudgetMs: this.turnLimitMs,
+      serverNow: Date.now(),
+      betweenHands: room.betweenHands,
+      continueDeadline: room.continueDeadline,
+      ended: room.ended,
     };
   }
 

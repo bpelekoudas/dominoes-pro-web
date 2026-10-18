@@ -28,7 +28,7 @@ export interface OpenEndView {
 
 export interface PlayerView {
   roomCode: string;
-  status: "lobby" | "playing" | "complete";
+  status: "lobby" | "playing" | "complete" | "abandoned";
   yourId: string;
   hostId: string;
   settings: {
@@ -57,7 +57,13 @@ export interface PlayerView {
   openEquation: string | null;
   boneyardCount: number;
   turnPlayerId: string | null;
-  phase: "lobby" | "play" | "draw" | "knock" | "over";
+  phase: "lobby" | "play" | "draw" | "knock" | "between" | "over";
+  turnDeadline: number | null;
+  turnBudgetMs: number;
+  serverNow: number;
+  betweenHands: boolean;
+  continueDeadline: number | null;
+  ended: { reason: "player_left"; playerId: string; name: string } | null;
   prompt: string;
   legalPlays: Array<{ tileId: string; endId: string }>;
   canDraw: boolean;
@@ -69,10 +75,21 @@ export interface PlayerView {
   handNumber: number;
   winsNeeded: number;
   seriesWinnerId: string | null;
-  lastHand: Pick<
-    HandResult,
-    "summary" | "reason" | "gameWinnerId" | "scoresAfter" | "gameNumber" | "handNumber"
-  > | null;
+  lastHand: {
+    summary: string;
+    reason: HandResult["reason"];
+    gameWinnerId: string | null;
+    seriesWinnerId: string | null;
+    winnerIds: string[];
+    nextLeaderId: string;
+    pipCounts: Record<string, number>;
+    leftoverAwards: Record<string, number>;
+    placements: HandResult["placements"];
+    remaining: Array<{ playerId: string; pips: number; tiles: TileFace[] }>;
+    scoresAfter: Record<string, number>;
+    gameNumber: number;
+    handNumber: number;
+  } | null;
   lastPlay: LastPlay | null;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
@@ -89,7 +106,7 @@ export interface TableSeat {
 export interface TableMeta {
   roomCode: string;
   hostId: string;
-  status: "lobby" | "playing" | "complete";
+  status: "lobby" | "playing" | "complete" | "abandoned";
   seats: TableSeat[];
   settings: {
     playerCount: 2 | 3 | 4;
@@ -97,6 +114,12 @@ export interface TableMeta {
     seriesLength: SeriesLength;
   };
   youId: string;
+  turnDeadline?: number | null;
+  turnBudgetMs?: number;
+  serverNow?: number;
+  betweenHands?: boolean;
+  continueDeadline?: number | null;
+  ended?: { reason: "player_left"; playerId: string; name: string } | null;
 }
 
 const EMPTY_DRAW: LastDraw | null = null;
@@ -162,18 +185,38 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       meta.status === "lobby" &&
       meta.youId === meta.hostId &&
       meta.seats.length === meta.settings.playerCount,
-    canRematch: status === "complete" && meta.youId === meta.hostId,
+    canRematch: status === "complete" && meta.youId === meta.hostId && !meta.ended,
     openingTileId:
       match?.hand?.leaderId === meta.youId ? (match.hand.openingTileId ?? null) : null,
     gameNumber: match?.gameNumber ?? 0,
     handNumber: match?.handNumber ?? 0,
     winsNeeded: winsNeeded(meta.settings.seriesLength),
     seriesWinnerId: match?.seriesWinnerId ?? null,
+    turnDeadline: meta.turnDeadline ?? null,
+    turnBudgetMs: meta.turnBudgetMs ?? 30_000,
+    serverNow: meta.serverNow ?? Date.now(),
+    betweenHands: meta.betweenHands ?? false,
+    continueDeadline: meta.continueDeadline ?? null,
+    ended: meta.ended ?? null,
     lastHand: match?.lastHand
       ? {
           summary: match.lastHand.summary,
           reason: match.lastHand.reason,
           gameWinnerId: match.lastHand.gameWinnerId,
+          seriesWinnerId: match.lastHand.seriesWinnerId,
+          winnerIds: match.lastHand.winnerIds,
+          nextLeaderId: match.lastHand.nextLeaderId,
+          pipCounts: match.lastHand.pipCounts,
+          leftoverAwards: match.lastHand.leftoverAwards,
+          placements: match.lastHand.placements,
+          remaining: match.lastHand.remaining.map((hand) => ({
+            playerId: hand.playerId,
+            pips: hand.pips,
+            tiles: hand.tiles.map((id) => {
+              const tile = tileById(id);
+              return { id: tile.id, low: tile.low, high: tile.high };
+            }),
+          })),
           scoresAfter: match.lastHand.scoresAfter,
           gameNumber: match.lastHand.gameNumber,
           handNumber: match.lastHand.handNumber,
@@ -199,9 +242,11 @@ function viewPhase(
   meta: TableMeta,
   turnPlayerId: string | null,
 ): PlayerView["phase"] {
+  if (meta.ended) return "over";
   if (!match || meta.status === "lobby") return "lobby";
   if (match.phase === "series_over") return "over";
-  if (!match.hand || match.hand.phase === "complete") return "over";
+  if (meta.betweenHands) return "between";
+  if (!match.hand || match.hand.phase === "complete") return "between";
   if (turnPlayerId !== meta.youId) return "play";
   if (match.hand.phase === "await_draw") return "draw";
   if (match.hand.phase === "await_knock") return "knock";
@@ -222,7 +267,9 @@ function promptFor(
     if (meta.youId === meta.hostId) return "Everyone's here. Start when you're ready.";
     return "Waiting for the host to start.";
   }
+  if (meta.ended) return `Game ended - ${meta.ended.name} left`;
   if (match.phase === "series_over") return match.lastHand?.summary ?? "The series is over.";
+  if (phase === "between") return "Hand over.";
   if (phase === "draw") {
     return match.config.boneyardMode === "draw_one"
       ? "Nothing fits. Draw one tile."

@@ -144,6 +144,189 @@ describe("spinner score is what the table shows and what the player is paid", ()
   });
 });
 
+describe("owner checklist", () => {
+  const series = { boneyardMode: "draw_one" as const, seriesLength: 5 as const, targetScore: 150 };
+
+  it("splits a tied lock and the player with the lowest end leads the next hand", () => {
+    const hands = {
+      a: ["6-6", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["1-1", "1-3", "1-4", "1-5", "2-2", "2-3", "2-4"],
+      c: ["2-5", "3-3", "3-4", "3-5", "4-4", "4-5", "5-5"],
+    };
+    let match = start([A, B, C], deckFor(["a", "b", "c"], hands), series);
+    match = play(match, "a", "6-6", "lead");
+    match = {
+      ...match,
+      hand: {
+        ...match.hand!,
+        hands: { a: ["2-2"], b: ["1-3"], c: ["5-5", "4-5"] },
+        boneyard: [],
+        phase: "await_knock",
+        turnIndex: 0,
+      },
+    };
+    const locked = applyIntent(match, "a", { type: "knock" });
+    expect(locked.ok, locked.error).toBe(true);
+    expect(locked.match.lastHand?.reason).toBe("locked");
+    expect(handPips(["5-5", "4-5"])).toBe(19);
+    expect(locked.match.lastHand?.leftoverAwards).toEqual({ a: 5, b: 5, c: 0 });
+    expect(locked.match.lastHand?.nextLeaderId).toBe("b");
+    const places = locked.match.lastHand?.placements ?? [];
+    expect(places.filter((row) => row.place === 1).map((row) => row.playerId).sort()).toEqual(["a", "b"]);
+    expect(places.find((row) => row.playerId === "a")?.tied).toBe(true);
+    expect(places.find((row) => row.playerId === "c")?.place).toBe(3);
+    const next = beginHand(locked.match, deckFor(["a", "b", "c"], hands));
+    expect(next.hand?.leaderId).toBe("b");
+    expect(next.hand?.openingTileId).toBeNull();
+    expect(next.config.boneyardMode).toBe("draw_one");
+  });
+
+  it("keeps the boneyard rule for the series, and an empty yard is a knock", () => {
+    const hands = {
+      a: ["6-6", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["1-1", "1-3", "1-4", "1-5", "2-2", "2-3", "2-4"],
+    };
+    let match = start([A, B], deckFor(["a", "b"], hands), {
+      boneyardMode: "draw_until",
+      seriesLength: 5,
+      targetScore: 150,
+    });
+    match = play(match, "a", "6-6", "lead");
+    match = {
+      ...match,
+      hand: { ...match.hand!, boneyard: [], phase: "await_knock", turnIndex: 1 },
+    };
+    expect(legalIntents(match, "b")).toEqual([{ type: "knock" }]);
+    expect(applyIntent(match, "b", { type: "draw" }).ok).toBe(false);
+    const knocked = applyIntent(match, "b", { type: "knock" });
+    expect(knocked.ok, knocked.error).toBe(true);
+    expect(knocked.match.config.boneyardMode).toBe("draw_until");
+    const next = beginHand(knocked.match, deckFor(["a", "b"], hands));
+    expect(next.config.boneyardMode).toBe("draw_until");
+  });
+
+  it.each([2, 3] as const)("a board score to 150 ends a %s-player hand immediately", (count) => {
+    const players = [A, B, C].slice(0, count);
+    const ids = players.map((player) => player.id);
+    const hands: Record<string, string[]> = {};
+    const pool = allTileIds().filter((id) => id !== "5-5" && id !== "6-6");
+    hands.a = ["5-5", ...pool.splice(0, 6)];
+    for (const id of ids.slice(1)) hands[id] = pool.splice(0, 7);
+    let match = start(players, deckFor(ids, hands, ["6-6"]), series);
+    expect(match.hand?.openingTileId).toBe("5-5");
+    match = { ...match, scores: { ...match.scores, a: 145 } };
+    const led = play(match, "a", "5-5", "lead");
+    expect(led.lastPlay?.awarded).toBe(10);
+    expect(led.scores.a).toBe(155);
+    expect(led.hand?.phase).toBe("complete");
+    expect(led.lastHand?.reason).toBe("score");
+    expect(led.lastHand?.gameWinnerId).toBe("a");
+    expect(led.phase).toBe("in_hand");
+    expect(led.gamesWon.a).toBe(1);
+    for (const player of players) expect(legalIntents(led, player.id)).toEqual([]);
+    const next = beginHand(led, deckFor(ids, hands, ["6-6"]));
+    expect(next.gameNumber).toBe(2);
+    expect(next.scores.a).toBe(0);
+    expect(next.hand?.leaderId).toBe("a");
+  });
+
+  it("a board score to 150 ends a 4-player hand immediately", () => {
+    const players = [A, B, C, { id: "d", name: "Dee" }];
+    const ids = players.map((player) => player.id);
+    const pool = allTileIds().filter((id) => id !== "6-6" && id !== "3-6");
+    const hands: Record<string, string[]> = {
+      a: ["6-6", ...pool.splice(0, 6)],
+      b: ["3-6", ...pool.splice(0, 6)],
+      c: pool.splice(0, 7),
+      d: pool.splice(0, 7),
+    };
+    let match = start(players, deckFor(ids, hands), series);
+    expect(match.hand?.openingTileId).toBe("6-6");
+    match = play(match, "a", "6-6", "lead");
+    expect(match.hand?.phase).toBe("await_play");
+    expect(match.lastPlay?.awarded).toBe(0);
+    match = { ...match, scores: { ...match.scores, b: 140 } };
+    const scored = play(match, "b", "3-6", "east");
+    expect(scored.lastPlay?.awarded).toBe(15);
+    expect(scored.scores.b).toBe(155);
+    expect(scored.hand?.phase).toBe("complete");
+    expect(scored.lastHand?.reason).toBe("score");
+    expect(scored.lastHand?.gameWinnerId).toBe("b");
+    expect(scored.gamesWon.b).toBe(1);
+    for (const player of players) expect(legalIntents(scored, player.id)).toEqual([]);
+  });
+
+  it.each([2, 3, 4] as const)("leftovers that reach 150 end a %s-player game", (count) => {
+    const players = [A, B, C, { id: "d", name: "Dee" }].slice(0, count);
+    const ids = players.map((player) => player.id);
+    const pool = allTileIds();
+    const hands: Record<string, string[]> = {};
+    for (const id of ids) hands[id] = pool.splice(0, 7);
+    const holder = ids.find((id) => hands[id]?.includes("6-6"));
+    if (holder && holder !== "a") {
+      const swap = hands.a?.[0];
+      if (swap) {
+        hands[holder] = (hands[holder] ?? []).map((id) => (id === "6-6" ? swap : id));
+        hands.a = ["6-6", ...(hands.a ?? []).slice(1)];
+      }
+    }
+    let match = start(players, deckFor(ids, hands), series);
+    const held: Record<string, string[]> = { a: ["6-6"] };
+    const heavy = ["5-5", "4-4", "3-3"];
+    ids.slice(1).forEach((id, index) => {
+      held[id] = [heavy[index] ?? "2-2"];
+    });
+    match = {
+      ...match,
+      scores: { ...match.scores, a: 140 },
+      hand: {
+        ...match.hand!,
+        hands: held,
+        boneyard: [],
+        phase: "await_play",
+        turnIndex: 0,
+        openingTileId: "6-6",
+      },
+    };
+    const out = play(match, "a", "6-6", "lead");
+    expect(out.lastPlay?.awarded).toBe(0);
+    expect(out.lastHand?.reason).toBe("domino");
+    expect(out.scores.a).toBeGreaterThanOrEqual(150);
+    expect(out.lastHand?.gameWinnerId).toBe("a");
+    expect(out.hand?.phase).toBe("complete");
+    for (const player of players) expect(legalIntents(out, player.id)).toEqual([]);
+  });
+
+  it("a score under 150 does not stop the hand", () => {
+    const hands = {
+      a: ["5-5", "0-1", "0-2", "0-3", "0-4", "1-2", "1-3"],
+      b: ["4-4", "1-4", "1-5", "2-3", "2-4", "2-5", "3-4"],
+    };
+    let match = start([A, B], deckFor(["a", "b"], hands, ["6-6"]), series);
+    match = { ...match, scores: { ...match.scores, a: 100 } };
+    const led = play(match, "a", "5-5", "lead");
+    expect(led.scores.a).toBe(110);
+    expect(led.hand?.phase).toBe("await_play");
+    expect(led.lastHand).toBeNull();
+    expect(led.gamesWon.a).toBe(0);
+  });
+
+  it("plays a best of 5 through to a series winner", () => {
+    const report = playSeeded(21, {
+      players: [A, B, C],
+      boneyardMode: "draw_until",
+      seriesLength: 5,
+      targetScore: 40,
+    });
+    expect(report.finished).toBe(true);
+    expect(report.final.config.boneyardMode).toBe("draw_until");
+    const winner = report.final.seriesWinnerId;
+    expect(winner).toBeTruthy();
+    expect(report.final.gamesWon[winner ?? ""]).toBeGreaterThanOrEqual(3);
+    for (const games of Object.values(report.final.gamesWon)) expect(games).toBeLessThanOrEqual(3);
+  });
+});
+
 describe("leftover rounding", () => {
   it("rounds down, and a leftover of 5 still counts", () => {
     expect(roundDownToFive(0)).toBe(0);
@@ -432,6 +615,8 @@ function playSeeded(
 
     if (match.hand?.phase === "complete" && match.lastHand) {
       const resultHand = match.lastHand;
+      expect(resultHand.placements).toHaveLength(match.players.length);
+      expect(resultHand.remaining).toHaveLength(match.players.length);
       if (resultHand.reason === "domino") {
         dominoes += 1;
         const award = scoreDomino(resultHand.pipCounts, resultHand.winnerIds[0]!)[
@@ -439,7 +624,7 @@ function playSeeded(
         ];
         expect(resultHand.leftoverAwards[resultHand.winnerIds[0]!]).toBe(award);
         expect(award % 5).toBe(0);
-      } else {
+      } else if (resultHand.reason === "locked") {
         locks += 1;
         for (const award of Object.values(resultHand.leftoverAwards)) expect(award % 5).toBe(0);
         if (resultHand.winnerIds.length > 1) {
@@ -448,6 +633,10 @@ function playSeeded(
           expect(resultHand.nextLeaderId).toBe(locked.nextLeaderId);
           expect(resultHand.leftoverAwards).toEqual(locked.awards);
         }
+      } else {
+        expect(resultHand.reason).toBe("score");
+        expect(resultHand.gameWinnerId).toBeTruthy();
+        for (const award of Object.values(resultHand.leftoverAwards)) expect(award).toBe(0);
       }
     }
   }

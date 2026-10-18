@@ -3,7 +3,8 @@ import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { Logo } from "./logo.js";
 import { seatAround, type SeatEdge } from "./seats.js";
-import { Hand, Table } from "./table";
+import { isMuted, playBuzz, playScore, playTile, setMuted, unlockSound } from "./sound";
+import { Domino, Hand, Table } from "./table";
 
 interface ChatLine {
   id: number;
@@ -143,8 +144,8 @@ export function App() {
         onCreate={(name, playerCount, boneyardMode, seriesLength) =>
           openSocket({ type: "create", name, playerCount, boneyardMode, seriesLength })
         }
-        onSolo={(name, playerCount, boneyardMode, seriesLength) =>
-          openSocket({ type: "solo", name, playerCount, boneyardMode, seriesLength })
+        onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) =>
+          openSocket({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
         }
         onJoin={(name, code) => openSocket({ type: "join", name, code })}
       />
@@ -209,13 +210,20 @@ function Home({
   error: string | null;
   connecting: boolean;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
-  onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
+  onSolo: (
+    name: string,
+    playerCount: number,
+    boneyardMode: BoneyardMode,
+    seriesLength: SeriesLength,
+    difficulty: "easy" | "medium" | "hard" | "expert",
+  ) => void;
   onJoin: (name: string, code: string) => void;
 }) {
   const [name, setName] = useState("");
   const [playerCount, setPlayerCount] = useState(2);
   const [boneyardMode, setBoneyardMode] = useState<BoneyardMode>("draw_until");
   const [seriesLength, setSeriesLength] = useState<SeriesLength>(3);
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
   const [code, setCode] = useState(presetCode);
 
   return (
@@ -277,17 +285,31 @@ function Home({
         <button className="primary" type="submit" disabled={connecting || !name.trim()}>
           Create room
         </button>
+        <fieldset>
+          <legend>Computer</legend>
+          <Choice
+            value={difficulty}
+            options={[
+              { value: "easy", label: "Easy" },
+              { value: "medium", label: "Medium" },
+              { value: "hard", label: "Hard" },
+              { value: "expert", label: "Expert" },
+            ]}
+            onChange={setDifficulty}
+          />
+        </fieldset>
         <button
           className="primary computer"
           type="button"
           disabled={connecting || !name.trim()}
-          onClick={() => onSolo(name, playerCount, boneyardMode, seriesLength)}
+          onClick={() => onSolo(name, playerCount, boneyardMode, seriesLength, difficulty)}
         >
           Play vs computer
         </button>
         <p className="solo-note">
-          You and {playerCount === 2 ? "one computer" : playerCount === 3 ? "two computers" : "three computers"}. The
-          hand starts right away, using the players, boneyard, and series above.
+          You and {playerCount === 2 ? "one computer" : playerCount === 3 ? "two computers" : "three computers"} on{" "}
+          {difficulty}. The hand starts right away, using the players, boneyard, and series above. Each computer waits
+          two seconds.
         </p>
       </form>
       <form
@@ -376,7 +398,7 @@ function Game({
   onSend: (message: object) => void;
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
-  const showResult = view.lastHand && dismissedHand !== handKey(view) && !view.lastPlay;
+  void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const bubble = useTalkBubble(chat);
   const unread = useUnread(chat, chatOpen);
@@ -386,7 +408,22 @@ function Game({
   const top = around.find((seat) => seat.edge === "top") ?? null;
   const right = around.find((seat) => seat.edge === "right") ?? null;
   const you = around.find((seat) => seat.edge === "bottom") ?? null;
-  const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby";
+  const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby" && view.phase !== "between";
+  const [muted, setMute] = useState(isMuted);
+  useEffect(() => {
+    const unlock = () => unlockSound();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, []);
+  useEffect(() => {
+    const play = view.lastPlay;
+    if (!play) return;
+    playTile();
+    if (play.awarded > 0) playScore();
+  }, [view.lastPlay?.seq]);
+  useEffect(() => {
+    if (yourTurn) playBuzz();
+  }, [yourTurn, view.turnPlayerId, view.handNumber]);
 
   const playing = view.status !== "lobby";
   return (
@@ -415,6 +452,20 @@ function Game({
         </button>
         <button
           type="button"
+          className="icon-button"
+          aria-label={muted ? "Unmute" : "Mute"}
+          aria-pressed={muted}
+          onClick={() => {
+            const next = !muted;
+            setMuted(next);
+            setMute(next);
+            unlockSound();
+          }}
+        >
+          <SpeakerIcon muted={muted} />
+        </button>
+        <button
+          type="button"
           className={`icon-button${leaveArmed ? " armed" : ""}`}
           aria-label={leaveArmed ? "Leave now" : "Leave"}
           onClick={leaveArmed ? onLeave : onLeaveArm}
@@ -425,14 +476,14 @@ function Game({
 
       {status !== "live" ? <p className="banner">Reconnecting…</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
-      {showResult && view.lastHand ? (
-        <div className="banner result">
-          <p className="result-kicker">Hand over</p>
-          <p>{view.lastHand.summary}</p>
-          <button type="button" className="text-button" onClick={onDismiss}>
-            Hide
-          </button>
-        </div>
+      {view.ended ? (
+        <section className="ended-screen" data-screen="player-left">
+          <p className="result-kicker">Game ended - {view.ended.name} left</p>
+          <ScoreList view={view} />
+        </section>
+      ) : null}
+      {view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended ? (
+        <HandSummary view={view} onContinue={() => onSend({ type: "continue" })} />
       ) : null}
 
       {view.status === "lobby" ? (
@@ -440,9 +491,13 @@ function Game({
       ) : (
         <>
           <div className="table-frame" data-opponents={around.length - 1}>
-            {top ? <SeatRail edge="top" player={top.player} bubble={bubbleText(bubble, top.player.id)} /> : null}
+            {top ? (
+              <SeatRail edge="top" player={top.player} bubble={bubbleText(bubble, top.player.id)} view={view} />
+            ) : null}
             <div className="table-middle">
-              {left ? <SeatRail edge="left" player={left.player} bubble={bubbleText(bubble, left.player.id)} /> : null}
+              {left ? (
+                <SeatRail edge="left" player={left.player} bubble={bubbleText(bubble, left.player.id)} view={view} />
+              ) : null}
               <Table
                 view={view}
                 selectedTile={selectedTile}
@@ -451,7 +506,9 @@ function Game({
                 onPlay={play}
                 onSelect={onSelect}
               />
-              {right ? <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} /> : null}
+              {right ? (
+                <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} view={view} />
+              ) : null}
             </div>
           </div>
           {view.canRematch ? (
@@ -464,13 +521,14 @@ function Game({
           <div className="hand-tray">
             <div className="tray-notices">
               <div className="you-float">
-                {you ? <SeatChip player={you.player} /> : null}
+                {you ? <SeatChip player={you.player} view={view} /> : null}
                 {you && bubbleText(bubble, you.player.id) ? (
                   <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p>
                 ) : null}
               </div>
               <div className="tray-copy">
                 {yourTurn ? <p className="your-turn">Your turn</p> : null}
+                {yourTurn ? <TurnBar view={view} /> : null}
                 <StatusLine view={view} />
               </div>
             </div>
@@ -499,7 +557,6 @@ function Game({
         chat={chat}
         onClose={onToggleChat}
         onPreset={(packId, tauntId) => onSend({ type: "chat", kind: "preset", packId, tauntId })}
-        onText={(text) => onSend({ type: "chat", kind: "text", text })}
       />
     </main>
   );
@@ -516,7 +573,7 @@ function Lobby({
   onStart: () => void;
   onSend: (message: object) => void;
 }) {
-  const [difficulty, setDifficulty] = useState<"easy" | "normal">("normal");
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
   const host = view.yourId === view.hostId;
   const openSeats = view.settings.playerCount - view.players.length;
   const mode = view.settings.boneyardMode === "draw_one" ? "Draw one, then pass if it doesn't fit." : "Draw until you can play.";
@@ -541,7 +598,7 @@ function Lobby({
               <span>
                 {player.isYou ? `${player.name} (you)` : player.name}
                 {player.bot ? (
-                  <small className="bot-label">Computer · {player.difficulty === "easy" ? "Easy" : "Normal"}</small>
+                  <small className="bot-label">Computer · {labelDifficulty(player.difficulty)}</small>
                 ) : null}
               </span>
             </span>
@@ -573,7 +630,9 @@ function Lobby({
               value={difficulty}
               options={[
                 { value: "easy", label: "Easy" },
-                { value: "normal", label: "Normal" },
+                { value: "medium", label: "Medium" },
+                { value: "hard", label: "Hard" },
+                { value: "expert", label: "Expert" },
               ]}
               onChange={setDifficulty}
             />
@@ -604,10 +663,12 @@ function SeatRail({
   edge,
   player,
   bubble,
+  view,
 }: {
   edge: Exclude<SeatEdge, "bottom">;
   player: PlayerView["players"][number];
   bubble: string | null;
+  view: PlayerView;
 }) {
   return (
     <div
@@ -621,21 +682,38 @@ function SeatRail({
           <i key={index} className="tile-back" />
         ))}
       </div>
-      <SeatChip player={player} />
+      <SeatChip player={player} view={view} />
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
     </div>
   );
 }
 
-function SeatChip({ player }: { player: PlayerView["players"][number] }) {
+function SeatChip({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
   const initial = player.name.trim().charAt(0).toUpperCase() || "?";
+  const clock = useServerNow(view.serverNow);
+  const left = player.isTurn && view.turnDeadline ? Math.max(0, view.turnDeadline - clock) : 0;
+  const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div
       className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
       data-player-id={player.id}
       data-turn={player.isTurn ? "true" : "false"}
+      data-turn-timer={player.isTurn && view.turnDeadline ? "true" : "false"}
     >
       <span className="avatar" aria-hidden="true">
+        {player.isTurn && view.turnDeadline ? (
+          <svg className="timer-ring" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="16" pathLength="100" />
+            <circle
+              cx="18"
+              cy="18"
+              r="16"
+              pathLength="100"
+              className="timer-arc"
+              style={{ strokeDashoffset: `${100 - ratio * 100}` }}
+            />
+          </svg>
+        ) : null}
         {player.bot ? <BotMark /> : initial}
       </span>
       <span className="chip-text">
@@ -725,6 +803,19 @@ function PlayMark() {
   );
 }
 
+function SpeakerIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 9h3l4-3v12l-4-3H4z" />
+      {muted ? (
+        <path d="M16 9.5 20.5 14.5M20.5 9.5 16 14.5" />
+      ) : (
+        <path d="M16 9.2a3.2 3.2 0 0 1 0 5.6M18.2 7a6 6 0 0 1 0 10" />
+      )}
+    </svg>
+  );
+}
+
 function TalkIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -758,40 +849,139 @@ function scoreMathOn(): boolean {
   return window.__UHOH__?.showScoreMath !== false;
 }
 
+function labelDifficulty(level: string | null): string {
+  if (level === "easy") return "Easy";
+  if (level === "hard") return "Hard";
+  if (level === "expert") return "Expert";
+  return "Medium";
+}
+
+function useServerNow(serverNow: number): number {
+  const offset = useRef(serverNow - Date.now());
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    offset.current = serverNow - Date.now();
+    const timer = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(timer);
+  }, [serverNow]);
+  return now + offset.current;
+}
+
+function TurnBar({ view }: { view: PlayerView }) {
+  const now = useServerNow(view.serverNow);
+  if (!view.turnDeadline) return null;
+  const left = Math.max(0, view.turnDeadline - now);
+  const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
+  return (
+    <div className="turn-bar" data-turn-timer="true" aria-label={`${Math.ceil(left / 1000)} seconds`}>
+      <span style={{ transform: `scaleX(${ratio})` }} />
+      <em>{Math.ceil(left / 1000)}</em>
+    </div>
+  );
+}
+
+function ScoreList({ view }: { view: PlayerView }) {
+  return (
+    <ul className="score-list">
+      {view.players.map((player) => (
+        <li key={player.id}>
+          <span>{player.isYou ? "You" : player.name}</span>
+          <strong>{player.score}</strong>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () => void }) {
+  const hand = view.lastHand;
+  const now = useServerNow(view.serverNow);
+  if (!hand) return null;
+  const names = new Map(view.players.map((player) => [player.id, player.isYou ? "You" : player.name]));
+  const winners = hand.winnerIds.map((id) => names.get(id) ?? "Someone");
+  const gameOver = Boolean(hand.gameWinnerId);
+  const seriesOver = Boolean(hand.seriesWinnerId);
+  const seconds = view.continueDeadline ? Math.max(0, Math.ceil((view.continueDeadline - now) / 1000)) : null;
+  const places = [...hand.placements].sort((a, b) => a.place - b.place || a.playerId.localeCompare(b.playerId));
+  return (
+    <section className="hand-summary" data-screen={seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand"}>
+      <p className="result-kicker">{seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
+      <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>
+      <p>{hand.summary}</p>
+      <p className="round-note">Leftovers round down to the nearest 5.</p>
+      <ol className="place-list">
+        {places.map((place) => (
+          <li key={place.playerId}>
+            {place.place}
+            {place.tied ? " (tie)" : ""} · {names.get(place.playerId) ?? "Someone"} · {place.pips} pips
+            {hand.leftoverAwards[place.playerId] ? ` · +${hand.leftoverAwards[place.playerId]}` : ""}
+          </li>
+        ))}
+      </ol>
+      <div className="reveal-row">
+        {hand.remaining
+          .filter((seat) => !hand.winnerIds.includes(seat.playerId) || hand.reason === "score")
+          .map((seat) => (
+            <div key={seat.playerId} className="reveal">
+              <p>{names.get(seat.playerId) ?? "Someone"} · {seat.pips}</p>
+              <div className="reveal-tiles">
+                {seat.tiles.map((tile) => (
+                  <Domino key={tile.id} a={tile.low} b={tile.high} orientation="vertical" />
+                ))}
+              </div>
+            </div>
+          ))}
+      </div>
+      <ScoreList view={view} />
+      {view.betweenHands ? (
+        <button type="button" className="primary" data-action="continue" onClick={onContinue}>
+          Continue{seconds !== null ? ` · ${seconds}` : ""}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 function ChatPanel({
   open,
   view,
   chat,
   onClose,
   onPreset,
-  onText,
 }: {
   open: boolean;
   view: PlayerView;
   chat: ChatLine[];
   onClose: () => void;
   onPreset: (packId: string, tauntId: string) => void;
-  onText: (text: string) => void;
 }) {
-  const [draft, setDraft] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const list = listRef.current;
     if (list) list.scrollTop = list.scrollHeight;
   }, [chat.length, open]);
+  const lines = view.taunts.filter((taunt) => !taunt.reaction);
+  const reactions = view.taunts.filter((taunt) => taunt.reaction);
 
   return (
     <>
     {open ? <button type="button" className="chat-scrim" aria-label="Close chat" onClick={onClose} /> : null}
-    <aside className={`chat-panel${open ? " open" : ""}`}>
+    <aside className={`chat-panel${open ? " open" : ""}`} data-screen="talk">
       <header>
         <h2>Table talk</h2>
         <button type="button" className="text-button mobile-only" onClick={onClose}>
           Close
         </button>
       </header>
-      <div className="taunts">
-        {view.taunts.map((taunt) => (
+      <div className="taunt-grid">
+        {lines.map((taunt) => (
+          <button type="button" key={`${taunt.packId}:${taunt.id}`} onClick={() => onPreset(taunt.packId, taunt.id)}>
+            {taunt.text}
+          </button>
+        ))}
+      </div>
+      <div className="reaction-row">
+        {reactions.map((taunt) => (
           <button type="button" key={`${taunt.packId}:${taunt.id}`} onClick={() => onPreset(taunt.packId, taunt.id)}>
             {taunt.text}
           </button>
@@ -806,26 +996,6 @@ function ChatPanel({
           </p>
         ))}
       </div>
-      <form
-        className="chat-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const text = draft.trim();
-          if (!text) return;
-          onText(text);
-          setDraft("");
-        }}
-      >
-        <input
-          value={draft}
-          maxLength={80}
-          placeholder="Say it in 80 characters"
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <button type="submit" className="primary">
-          Send
-        </button>
-      </form>
     </aside>
     </>
   );

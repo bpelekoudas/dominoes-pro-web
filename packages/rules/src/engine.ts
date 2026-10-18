@@ -1,5 +1,5 @@
 import { openEnds, openScore, placeTile, tileFits, emptyBoard, type BoardState } from "./board.js";
-import { gameWinnerId, scoreDomino, scoreLocked, winsNeeded } from "./score.js";
+import { finishingOrder, gameWinnerId, scoreDomino, scoreLocked, winsNeeded, type Placement } from "./score.js";
 import { allTileIds, handPips, tileById, tileLabel } from "./tiles.js";
 
 export type BoneyardMode = "draw_one" | "draw_until";
@@ -25,19 +25,37 @@ export type Intent =
   | { type: "draw" }
   | { type: "knock" };
 
+export interface HandRemainder {
+  playerId: string;
+  tiles: string[];
+  pips: number;
+}
+
 export interface HandResult {
-  reason: "domino" | "locked";
+  reason: "domino" | "locked" | "score";
   winnerIds: string[];
   nextLeaderId: string;
   pipCounts: Record<string, number>;
   leftoverAwards: Record<string, number>;
   boardPoints: Record<string, number>;
   scoresAfter: Record<string, number>;
+  placements: Placement[];
+  /** Tiles still held when the hand stopped. Faces are public only because the hand is over. */
+  remaining: HandRemainder[];
   gameWinnerId: string | null;
   seriesWinnerId: string | null;
   summary: string;
   gameNumber: number;
   handNumber: number;
+}
+
+/** What every player could have seen. Draws record a count, never the tile faces. */
+export interface PublicEvent {
+  playerId: string;
+  kind: "play" | "draw" | "knock" | "timeout";
+  tileId?: string;
+  endId?: string;
+  drawCount?: number;
 }
 
 export interface LastPlay {
@@ -84,6 +102,8 @@ export interface MatchState {
   playSeq: number;
   lastPlay: LastPlay | null;
   lastDraw: LastDraw | null;
+  /** Public play log for this hand. Computers may read it. It has no hidden faces. */
+  log: PublicEvent[];
 }
 
 export interface ApplyResult {
@@ -92,9 +112,11 @@ export interface ApplyResult {
   match: MatchState;
 }
 
+export type LoggedIntent = Intent | { type: "timeout" };
+
 export interface LoggedAction {
   playerId: string;
-  intent: Intent;
+  intent: LoggedIntent;
 }
 
 export interface LoggedHand {
@@ -137,6 +159,7 @@ export function createMatch(players: MatchPlayer[], config: MatchConfig): MatchS
     playSeq: 0,
     lastPlay: null,
     lastDraw: null,
+    log: [],
   };
 }
 
@@ -283,6 +306,7 @@ export function beginHand(match: MatchState, deck: string[]): MatchState {
     hand,
     lastPlay: null,
     lastDraw: null,
+    log: [],
   };
 }
 
@@ -344,7 +368,10 @@ export function replayMatch(
   for (const hand of hands) {
     match = beginHand(match, [...hand.deck]);
     for (const action of hand.actions) {
-      const result = applyIntent(match, action.playerId, action.intent);
+      const result =
+        action.intent.type === "timeout"
+          ? skipTurn(match, action.playerId)
+          : applyIntent(match, action.playerId, action.intent);
       if (!result.ok) throw new Error(result.error ?? "Replay failed.");
       match = result.match;
     }
@@ -393,8 +420,10 @@ function applyPlay(match: MatchState, playerId: string, tileId: string, endId: s
     },
   };
 
-  if (remaining.length === 0) return finishDomino(advanced, playerId);
-  return ok(passTurn(advanced));
+  const played = note(advanced, { playerId, kind: "play", tileId, endId });
+  if (remaining.length === 0) return finishDomino(played, playerId);
+  if (gameWinnerId(played.scores, played.config.targetScore)) return finishOnScore(played);
+  return ok(passTurn(played));
 }
 
 function applyDraw(match: MatchState, playerId: string): ApplyResult {
@@ -423,11 +452,14 @@ function applyDraw(match: MatchState, playerId: string): ApplyResult {
     }
   }
 
-  let next: MatchState = {
-    ...match,
-    lastDraw: { playerId, tileIds: drawn },
-    hand: { ...hand, hands, boneyard },
-  };
+  let next: MatchState = note(
+    {
+      ...match,
+      lastDraw: { playerId, tileIds: drawn },
+      hand: { ...hand, hands, boneyard },
+    },
+    { playerId, kind: "draw", drawCount: drawn.length },
+  );
 
   if (playerCanPlay(next.hand!.board, mine, next.hand!.openingTileId)) {
     next = { ...next, hand: { ...next.hand!, phase: "await_play" } };
@@ -445,8 +477,25 @@ function applyKnock(match: MatchState, playerId: string): ApplyResult {
   if (hand.phase !== "await_knock") {
     return fail(match, hand.boneyard.length > 0 ? "Draw from the boneyard." : "You have a tile that fits.");
   }
-  if (anybodyCanPlay(match)) return ok(passTurn(match));
-  return finishLock(match);
+  const noted = note(match, { playerId, kind: "knock" });
+  if (anybodyCanPlay(noted)) return ok(passTurn(noted));
+  return finishLock(noted);
+}
+
+/** A missed turn. Does not play or draw a tile. A knock is still a knock. */
+export function skipTurn(match: MatchState, playerId: string): ApplyResult {
+  if (!match.hand || match.phase !== "in_hand") return fail(match, "There is no hand in progress.");
+  if (currentPlayerId(match) !== playerId) return fail(match, "It's not your turn.");
+  if (match.hand.phase === "await_knock") return applyKnock(match, playerId);
+  return ok(passTurn(note(match, { playerId, kind: "timeout" })));
+}
+
+export function publicHandSize(match: MatchState, playerId: string): number {
+  return match.hand?.hands[playerId]?.length ?? 0;
+}
+
+export function publicBoneyardSize(match: MatchState): number {
+  return match.hand?.boneyard.length ?? 0;
 }
 
 function playerCanPlay(board: BoardState, tiles: readonly string[], openingTileId: string | null): boolean {
@@ -544,10 +593,31 @@ function finishLock(match: MatchState): ApplyResult {
   });
 }
 
+function finishOnScore(match: MatchState): ApplyResult {
+  const hand = match.hand!;
+  const winnerId = gameWinnerId(match.scores, match.config.targetScore);
+  if (!winnerId) return ok(match);
+  const pipCounts: Record<string, number> = {};
+  const leftoverAwards: Record<string, number> = {};
+  for (const player of match.players) {
+    pipCounts[player.id] = handPips(hand.hands[player.id] ?? []);
+    leftoverAwards[player.id] = 0;
+  }
+  return finish(match, {
+    reason: "score",
+    winnerIds: [winnerId],
+    nextLeaderId: winnerId,
+    pipCounts,
+    leftoverAwards,
+    scores: match.scores,
+    summary: "The hand stops on that score.",
+  });
+}
+
 function finish(
   match: MatchState,
   input: {
-    reason: "domino" | "locked";
+    reason: "domino" | "locked" | "score";
     winnerIds: string[];
     nextLeaderId: string;
     pipCounts: Record<string, number>;
@@ -579,6 +649,11 @@ function finish(
     }
   }
 
+  const remaining = match.players.map((player) => ({
+    playerId: player.id,
+    tiles: [...(hand.hands[player.id] ?? [])],
+    pips: input.pipCounts[player.id] ?? 0,
+  }));
   const result: HandResult = {
     reason: input.reason,
     winnerIds: input.winnerIds,
@@ -587,6 +662,8 @@ function finish(
     leftoverAwards: input.leftoverAwards,
     boardPoints: { ...hand.boardPoints },
     scoresAfter: input.scores,
+    placements: finishingOrder(input.pipCounts, input.winnerIds),
+    remaining,
     gameWinnerId: wonGame,
     seriesWinnerId,
     summary,
@@ -604,6 +681,10 @@ function finish(
     lastHand: result,
     hand: { ...hand, phase: "complete", result },
   });
+}
+
+function note(match: MatchState, event: PublicEvent): MatchState {
+  return { ...match, log: [...match.log, event] };
 }
 
 function copyHands(hands: Record<string, string[]>): Record<string, string[]> {

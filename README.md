@@ -15,10 +15,14 @@ The old single-player page is still here, untouched, so the current site can kee
 1. Someone creates a room and picks 2–4 players, a boneyard rule, and a best-of-3, 5, or 7 series.
 2. They share a short code or a link (`/r/CODE`).
 3. Everyone else joins with a display name. There are no accounts yet.
-4. The host deals when the table is full. Empty seats can be filled with computers (Easy or Normal) and removed again before the deal. Play vs computer on the home screen fills the player count you picked (one, two, or three computers) and deals immediately, using that boneyard and series. Computers play on the server, about a second after the tile is theirs, so you can watch.
-5. Play goes to 150, then on through the series. Refreshing the phone puts you back in your seat.
+4. The host deals when the table is full. Empty seats can be filled with computers (Easy, Medium, Hard, or Expert) and removed again before the deal. An older table that stored "Normal" is treated as Medium. Play vs computer on the home screen fills the player count you picked (one, two, or three computers) and deals immediately, using that boneyard and series. Each computer waits two seconds, then plays on the server, so you can watch.
+5. The first player to reach 150 wins the game, including a score played in the middle of a hand. The hand stops on that play and the table shows the game summary. If the series is still going, the next game starts from there. Refreshing the phone puts you back in your seat.
 
-Talk is a row of preset lines, plus a short note of your own (80 characters). Preset packs are set up so a character can bring their own lines later. That pack stays hidden until the player owns the character.
+Each person has 30 seconds when it is their turn. A ring on their seat and a bar over their hand count it down. If the clock runs out, the server skips the turn. It does not play a tile for them and it does not draw. If that same person misses the next time the turn comes back, the game ends for everyone. The screen says `Game ended - <name> left`, with the scores as they stood. Coming back before that next turn expires keeps them in. Computers are not on the clock.
+
+Talk is a grid of preset lines and a few emoji reactions, opened from the chat icon. There is no box to type in. The server only accepts a line from the list, and only about one every two seconds. Preset packs are set up so a character can bring their own lines later. That pack stays hidden until the player owns the character.
+
+Sound is a short click when a tile lands, a buzz when it becomes your turn, and a cha-ching when a play scores. Mute sits in the header and stays muted on that phone. The first tap unlocks sound, which is what iOS requires.
 
 ## Rules worth knowing
 
@@ -26,7 +30,8 @@ Talk is a row of preset lines, plus a short note of your own (80 characters). Pr
 - The first double is the spinner. The cross opens only after both long sides have a tile. Once both long sides are filled, an unplayed side of the spinner does not count in the open-end total.
 - Going out pays the other players' pips, rounded down to a multiple of 5. A leftover of 5 still counts.
 - A locked tie splits what's left, and each share is rounded down. The player with the lowest tile-end leads next.
-- The winner of a hand leads the next hand, including the first hand of the next game. Only the first hand of a whole series starts from the double-six.
+- The winner of a hand leads the next hand, including the first hand of the next game. Only the first hand of a whole series starts from the double-six. If 6–6 was not dealt, the highest double leads. If nobody holds a double, the heaviest tile leads: higher pip total, then the higher single pip.
+- Every hand records who finished 1st, 2nd, 3rd, and 4th. Ties share a place and the next place is skipped. Those places are shown. They do not award points yet.
 
 The two open questions in the original spec are settled. A few smaller gaps are written down in the house rules.
 

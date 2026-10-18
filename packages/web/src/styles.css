@@ -669,12 +669,16 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   border-radius: 18px 18px 0 0;
   padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
   box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
+  overflow: auto;
 }
 .chat-panel header { display: flex; justify-content: space-between; align-items: center; }
 .chat-panel header h2 { color: var(--paper); }
 .chat-log { overflow: auto; flex: 1; min-height: 0; display: grid; gap: 8px; align-content: start; }
 .chat-log p { margin: 0; }
 .chat-log span { display: block; font-size: 0.75rem; color: var(--gold); }
+.taunt-grid, .reaction-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0; }
+.taunt-grid button, .reaction-row button { min-height: 44px; color: var(--paper); border-color: rgba(213, 163, 54, 0.55); background: transparent; }
+.reaction-row button { min-width: 44px; font-size: 1.3rem; }
 .taunts { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0; }
 .taunts button {
   color: var(--paper);
@@ -736,6 +740,44 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .mobile-only { display: none; }
   .chat-log { max-height: none; flex: 1; }
 }
+
+.timer-ring { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); }
+.avatar { position: relative; }
+.timer-ring circle { fill: none; stroke: rgba(239, 239, 239, 0.25); stroke-width: 3; }
+.timer-arc { stroke: var(--gold) !important; stroke-dasharray: 100; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 18px 18px; }
+.turn-bar { position: relative; height: 28px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); overflow: hidden; }
+.turn-bar span { position: absolute; inset: 0; background: var(--gold); transform-origin: left center; }
+.turn-bar em { position: relative; z-index: 1; font-style: normal; font-weight: 700; }
+.hand-summary, .ended-screen {
+  position: fixed;
+  z-index: 40;
+  left: 12px;
+  right: 12px;
+  top: 64px;
+  max-height: calc(100dvh - 80px);
+  overflow: auto;
+  background: #1b1b1b;
+  color: var(--paper);
+  border: 1px solid rgba(213, 163, 54, 0.7);
+  border-radius: 16px;
+  padding: 16px;
+}
+.hand-summary h2, .ended-screen p { margin: 0 0 8px; }
+.ended-screen .result-kicker {
+  font-family: "Red Hat Text", sans-serif;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 1.45rem;
+  line-height: 1.25;
+}
+.place-list, .score-list { margin: 8px 0; padding-left: 18px; }
+.score-list { list-style: none; padding-left: 0; }
+.score-list li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.reveal-row { display: grid; gap: 10px; }
+.reveal-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.reveal-tiles .domino { width: 44px; height: 88px; }
+.round-note { color: var(--gold); }
 
 @media (prefers-reduced-motion: reduce) {
   .hand-tile, .hand-tile.playable, .hand-tile.selected { transform: none; }
