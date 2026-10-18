@@ -357,6 +357,7 @@ function Game({
 }) {
   const link = `${location.origin}/r/${view.roomCode}`;
   const showResult = view.lastHand && dismissedHand !== handKey(view) && !view.lastPlay;
+  const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
 
   return (
@@ -414,8 +415,21 @@ function Game({
               {view.board.spinnerOpen ? "Spinner is open on four sides." : "Play both long sides before the cross opens."}
             </p>
           ) : null}
-          <Table view={view} selectedTile={selectedTile} onPlay={play} onSelect={onSelect} />
-          {selectedTile ? <p className="hint">Tap a lit end to play that tile.</p> : null}
+          <Table
+            view={view}
+            selectedTile={selectedTile}
+            dragTileId={drag?.tileId ?? null}
+            aimEndId={drag?.aimEndId ?? null}
+            onPlay={play}
+            onSelect={onSelect}
+          />
+          {drag ? (
+            <p className="hint">Drop on a lit end.</p>
+          ) : selectedTile ? (
+            <p className="hint">Tap a lit end to play that tile.</p>
+          ) : view.turnPlayerId === view.yourId && view.legalPlays.length > 0 ? (
+            <p className="hint">Drag a tile onto the board, or tap it.</p>
+          ) : null}
           <div className="actions">
             {view.canDraw ? (
               <button type="button" className="primary" data-action="draw" onClick={() => onSend({ type: "intent", intent: { type: "draw" } })}>
@@ -442,7 +456,13 @@ function Game({
                 : `${nameOf(view, view.lastDraw.playerId)} drew ${view.lastDraw.count}.`}
             </p>
           ) : null}
-          <Hand view={view} selectedTile={selectedTile} onSelect={onSelect} onPlay={play} />
+          <Hand
+            view={view}
+            selectedTile={selectedTile}
+            onSelect={onSelect}
+            onPlay={play}
+            onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
+          />
         </>
       )}
       </div>
