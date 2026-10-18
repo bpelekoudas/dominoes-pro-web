@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
+import { Logo } from "./logo.js";
 import { Hand, Table } from "./table";
 
 interface ChatLine {
@@ -210,10 +211,9 @@ function Home({
   const [code, setCode] = useState(presetCode);
 
   return (
-    <main className="home">
+    <main className="home" data-skin="ivory">
       <header className="brand">
-        <p className="eyebrow">Straight dominoes</p>
-        <h1>Uh Oh</h1>
+        <Logo />
         <p className="lede">A private table for friends. The server deals, checks every tile, and keeps score.</p>
       </header>
       {error ? <p className="banner error">{error}</p> : null}
@@ -361,11 +361,11 @@ function Game({
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
 
   return (
-    <main className={`felt-app${chatOpen ? " chat-open" : ""}`}>
+    <main className={`felt-app${chatOpen ? " chat-open" : ""}`} data-skin="ivory">
       <div className="felt-column">
       <header className="topbar">
         <div>
-          <p className="brand-lockup">Uh Oh</p>
+          <Logo compact />
           <button type="button" className="code-chip" data-room-code={view.roomCode} onClick={() => copyText(link)}>
             {view.roomCode}
           </button>
@@ -394,8 +394,9 @@ function Game({
       {error ? <p className="banner error">{error}</p> : null}
       {showResult && view.lastHand ? (
         <div className="banner result">
+          <p className="result-kicker">Hand over</p>
           <p>{view.lastHand.summary}</p>
-          <button type="button" onClick={onDismiss}>
+          <button type="button" className="text-button" onClick={onDismiss}>
             Hide
           </button>
         </div>

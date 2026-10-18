@@ -1,20 +1,29 @@
+/*
+  Headers use Bebas Neue (SIL Open Font License), not Kenyan Coffee.
+  Typodermic's free Desktop EULA lets Kenyan Coffee appear in finished artwork,
+  but it does not allow the font inside a website, app, or game.
+  Bebas Neue is the closest free condensed all-caps face. Body is Red Hat Text.
+  Default tile skin is ivory: black pips stay readable on a phone, with a red
+  bar and a gold spinner ring. data-skin marks the hook for a later skin.
+*/
 :root {
   color-scheme: dark;
-  --wood: #2c1b12;
-  --wood-edge: #4a2e1d;
-  --felt: #1d5a3a;
-  --felt-deep: #143f29;
-  --ivory: #f6f0e4;
-  --ivory-dim: #e7dcc8;
-  --ink: #1b1712;
-  --cream: #f3eadb;
-  --gold: #e2b04a;
-  --gold-deep: #8a6420;
-  --muted: rgba(246, 240, 228, 0.72);
-  --line: rgba(246, 240, 228, 0.18);
-  font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
-  background: var(--wood);
-  color: var(--ivory);
+  --ink: #141414;
+  --charcoal: #1a1a1a;
+  --charcoal-deep: #101010;
+  --paper: #efefef;
+  --red: #e31e26;
+  --gold: #d5a336;
+  --ivory: var(--paper);
+  --muted: rgba(239, 239, 239, 0.72);
+  --line: rgba(239, 239, 239, 0.18);
+  --streaks:
+    repeating-linear-gradient(-32deg, rgba(255, 255, 255, 0) 0 16px, rgba(255, 255, 255, 0.045) 16px 17px),
+    radial-gradient(640px 280px at 100% -10%, rgba(227, 30, 38, 0.22), transparent 60%),
+    linear-gradient(180deg, #1c1c1c 0%, #101010 100%);
+  font-family: "Red Hat Text", "Segoe UI", sans-serif;
+  background: var(--charcoal-deep);
+  color: var(--paper);
 }
 
 * { box-sizing: border-box; }
@@ -27,17 +36,24 @@ body {
 }
 button, input { font: inherit; }
 button { cursor: pointer; }
-h1, h2, .brand-lockup, .big-code, .score-card strong, .ends strong {
-  font-family: "Fraunces", Georgia, serif;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+h1, h2, .big-code, .score-card strong, .ends strong, .result-kicker {
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
+.logo-mark, .logo-sub {
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+}
+.logo-mark { fill: var(--paper); }
+.logo-sub { fill: var(--red); }
+.logo { display: block; width: min(100%, 320px); height: auto; }
+.logo-compact { width: 156px; }
+.brand .logo { margin: 4px 0 14px; }
 
 .home, .felt-app {
   min-height: 100dvh;
-  background:
-    radial-gradient(1200px 500px at 50% -10%, rgba(255, 255, 255, 0.08), transparent 50%),
-    var(--felt);
+  background: var(--streaks);
 }
 
 .home {
@@ -56,7 +72,7 @@ h1, h2, .brand-lockup, .big-code, .score-card strong, .ends strong {
 .lede { font-size: 1.05rem; line-height: 1.45; }
 .name-field { margin-top: 18px; }
 .card, .lobby {
-  background: rgba(12, 32, 22, 0.35);
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 16px;
@@ -76,7 +92,7 @@ input {
   border: 0;
   border-radius: 12px;
   padding: 12px 14px;
-  background: var(--ivory);
+  background: var(--paper);
   color: var(--ink);
 }
 .code-input, .big-code { letter-spacing: 0.28em; text-transform: uppercase; }
@@ -85,7 +101,7 @@ input {
 .choices button, .taunts button, .text-button, .code-chip, .talk-toggle, .end-cap {
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--ivory);
+  color: var(--paper);
   border-radius: 999px;
   padding: 10px 14px;
 }
@@ -93,20 +109,20 @@ input {
   min-height: 44px;
 }
 .choices button[aria-pressed="true"] {
-  background: var(--ivory);
-  color: var(--ink);
-  border-color: var(--ivory);
+  background: var(--red);
+  color: white;
+  border-color: var(--red);
 }
 .primary {
   width: 100%;
   border: 0;
   border-radius: 14px;
   padding: 14px 16px;
-  background: var(--gold);
-  color: var(--ink);
+  background: var(--red);
+  color: white;
   font-weight: 600;
 }
-.primary.knock { background: var(--ivory); }
+.primary.knock { background: var(--gold); color: var(--ink); }
 .banner {
   display: flex;
   justify-content: space-between;
@@ -117,7 +133,17 @@ input {
   border-radius: 14px;
   background: rgba(0, 0, 0, 0.25);
 }
-.banner.error { background: #6e2c22; }
+.banner.error { background: var(--red); color: white; }
+.banner.result {
+  display: grid;
+  gap: 4px;
+  margin: 10px 14px 0;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--gold);
+}
+.result-kicker { margin: 0; font-size: 1.35rem; color: var(--red); line-height: 1; }
+.banner.result p { margin: 0; }
+.banner.result .text-button { justify-self: start; padding-left: 0; }
 .banner button, .link-row + .primary { margin-top: 8px; }
 
 .felt-app {
@@ -161,7 +187,7 @@ input {
 .score-card {
   min-width: 108px;
   flex: 1;
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.4);
   border-radius: 16px;
   padding: 8px 10px 10px;
   border: 1px solid transparent;
@@ -184,11 +210,11 @@ input {
   align-items: baseline;
   margin: 8px 14px 0;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.22);
+  background: rgba(0, 0, 0, 0.4);
   border-radius: 14px;
 }
 .ends strong { font-size: 1.35rem; }
-.ends.scored em { color: var(--gold); font-style: normal; font-weight: 600; }
+.ends.scored em { color: var(--gold); font-style: normal; font-weight: 600; font-family: "Red Hat Text", sans-serif; letter-spacing: 0; text-transform: none; }
 .spinner-note, .hint, .draw-note { margin: 4px 0; font-size: 0.9rem; }
 .table-scroll {
   flex: 1;
@@ -233,9 +259,9 @@ input {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(20, 63, 41, 0.78);
-  color: var(--ivory);
-  font-family: "Outfit", sans-serif;
+  background: rgba(10, 10, 10, 0.82);
+  color: var(--paper);
+  font-family: "Bebas Neue", "Arial Narrow", sans-serif;
   font-size: 0.8rem;
   font-weight: 700;
 }
@@ -245,7 +271,7 @@ input {
 .badge-north { top: 1px; left: 50%; transform: translateX(-50%); }
 .end-cap.hot { box-shadow: inset 0 0 0 3px var(--gold); }
 .end-cap.hot .pip-badge { background: var(--gold); color: var(--ink); }
-.end-cap.aim { box-shadow: inset 0 0 0 4px var(--gold), 0 0 0 6px rgba(226, 176, 74, 0.55); }
+.end-cap.aim { box-shadow: inset 0 0 0 4px var(--gold), 0 0 0 6px rgba(213, 163, 54, 0.55); }
 .table-scroll.drop-ready { box-shadow: inset 0 0 0 3px var(--gold); }
 .actions { display: grid; gap: 8px; }
 .hand {
@@ -285,21 +311,22 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .domino {
   width: 42px;
   height: 84px;
-  background: var(--ivory);
+  background: var(--paper);
   color: var(--ink);
   border-radius: 7px;
   display: flex;
   flex-direction: column;
   position: relative;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.55);
 }
 .domino.horizontal { width: 84px; height: 42px; flex-direction: row; }
 .hand-tile .domino { width: 48px; height: 96px; }
 .domino.face-down {
   background:
-    repeating-linear-gradient(45deg, #d9c7a4, #d9c7a4 4px, #c9b48d 4px, #c9b48d 8px);
+    repeating-linear-gradient(-32deg, #141414, #141414 5px, #2a1517 5px, #2a1517 6px);
+  box-shadow: inset 0 0 0 1px rgba(239, 239, 239, 0.28);
 }
-.domino.spinner { box-shadow: inset 0 0 0 2px var(--gold-deep); }
+.domino.spinner { box-shadow: inset 0 0 0 2px var(--gold), 0 1px 2px rgba(0, 0, 0, 0.55); }
 .half {
   flex: 1;
   display: grid;
@@ -321,13 +348,13 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .half i[data-pos="6"] { grid-area: 2 / 3; }
 .half i[data-pos="7"] { grid-area: 3 / 1; }
 .half i[data-pos="9"] { grid-area: 3 / 3; }
-.domino-split { background: var(--ink); }
+.domino-split { background: var(--red); }
 .domino.vertical .domino-split, .domino:not(.horizontal) .domino-split { height: 2px; }
 .domino.horizontal .domino-split { width: 2px; }
 .chat-panel {
   display: none;
-  background: var(--cream);
-  color: var(--ink);
+  background: var(--charcoal);
+  color: var(--paper);
 }
 .chat-panel.open {
   display: flex;
@@ -339,16 +366,16 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   padding: 12px 14px 14px;
 }
 .chat-panel header { display: flex; justify-content: space-between; align-items: center; }
-.chat-panel header h2 { color: var(--ink); }
+.chat-panel header h2 { color: var(--paper); }
 .chat-log { overflow: auto; max-height: 24dvh; display: grid; gap: 8px; }
 .chat-log p { margin: 0; }
-.chat-log span { display: block; font-size: 0.75rem; color: #6d6256; }
+.chat-log span { display: block; font-size: 0.75rem; color: var(--gold); }
 .taunts { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0; }
 .taunts button {
-  color: var(--ink);
-  border-color: rgba(27, 23, 18, 0.2);
+  color: var(--paper);
+  border-color: rgba(213, 163, 54, 0.55);
   white-space: nowrap;
-  background: white;
+  background: transparent;
 }
 .chat-form { display: flex; gap: 8px; }
 .chat-form .primary { width: auto; }
@@ -358,12 +385,12 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .mobile-only { display: inline; }
 
 @media (min-width: 960px) {
-  body { background: var(--wood); }
+  body { background: #0b0b0b; }
   .home, .felt-app {
     width: min(1120px, calc(100% - 32px));
     margin: 16px auto;
     border-radius: 28px;
-    border: 10px solid var(--wood-edge);
+    border: 1px solid rgba(213, 163, 54, 0.45);
   }
   .felt-app {
     display: grid;
@@ -383,7 +410,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
     height: 100%;
     min-height: 0;
     border-radius: 0 18px 18px 0;
-    border-left: 1px solid rgba(27, 23, 18, 0.12);
+    border-left: 1px solid rgba(239, 239, 239, 0.12);
   }
   .mobile-only { display: none; }
   .chat-log { max-height: none; flex: 1; }
