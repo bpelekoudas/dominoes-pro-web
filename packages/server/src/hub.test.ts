@@ -211,12 +211,39 @@ describe("rooms", () => {
     }
   });
 
+  it.each([
+    { playerCount: 2, bots: 1, boneyardMode: "draw_until", seriesLength: 3 },
+    { playerCount: 3, bots: 2, boneyardMode: "draw_one", seriesLength: 5 },
+    { playerCount: 4, bots: 3, boneyardMode: "draw_until", seriesLength: 7 },
+  ] as const)(
+    "Play vs computer uses $playerCount seats and the chosen boneyard and series",
+    ({ playerCount, bots, boneyardMode, seriesLength }) => {
+      const store = new Store(":memory:");
+      const hub = new Hub(store, 30, () => 0);
+      const messages: ServerMessage[] = [];
+      const alex = hub.connect(
+        { type: "solo", name: "Alex", playerCount, boneyardMode, seriesLength },
+        (message) => messages.push(message),
+        () => undefined,
+      );
+      if (!alex.ok) throw new Error(alex.error);
+      const view = latestView(messages);
+      expect(view?.status).toBe("playing");
+      expect(view?.settings.playerCount).toBe(playerCount);
+      expect(view?.settings.boneyardMode).toBe(boneyardMode);
+      expect(view?.settings.seriesLength).toBe(seriesLength);
+      expect(view?.players).toHaveLength(playerCount);
+      expect(view?.players.filter((player) => player.bot)).toHaveLength(bots);
+      expect(view?.players.filter((player) => !player.bot)).toHaveLength(1);
+    },
+  );
+
   it("starts a four-seat table against three computers", async () => {
     const store = new Store(":memory:");
     const hub = new Hub(store, 30, () => 0);
     const messages: ServerMessage[] = [];
     const alex = hub.connect(
-      { type: "solo", name: "Alex", boneyardMode: "draw_one", seriesLength: 5 },
+      { type: "solo", name: "Alex", playerCount: 4, boneyardMode: "draw_one", seriesLength: 5 },
       (message) => messages.push(message),
       () => undefined,
     );

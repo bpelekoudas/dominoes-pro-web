@@ -140,8 +140,8 @@ export function App() {
         onCreate={(name, playerCount, boneyardMode, seriesLength) =>
           openSocket({ type: "create", name, playerCount, boneyardMode, seriesLength })
         }
-        onSolo={(name, boneyardMode, seriesLength) =>
-          openSocket({ type: "solo", name, boneyardMode, seriesLength })
+        onSolo={(name, playerCount, boneyardMode, seriesLength) =>
+          openSocket({ type: "solo", name, playerCount, boneyardMode, seriesLength })
         }
         onJoin={(name, code) => openSocket({ type: "join", name, code })}
       />
@@ -206,7 +206,7 @@ function Home({
   error: string | null;
   connecting: boolean;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
-  onSolo: (name: string, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
+  onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
   onJoin: (name: string, code: string) => void;
 }) {
   const [name, setName] = useState("");
@@ -278,11 +278,14 @@ function Home({
           className="primary computer"
           type="button"
           disabled={connecting || !name.trim()}
-          onClick={() => onSolo(name, boneyardMode, seriesLength)}
+          onClick={() => onSolo(name, playerCount, boneyardMode, seriesLength)}
         >
           Play vs computer
         </button>
-        <p className="solo-note">You and three computers. The hand starts right away, using the boneyard and series above.</p>
+        <p className="solo-note">
+          You and {playerCount === 2 ? "one computer" : playerCount === 3 ? "two computers" : "three computers"}. The
+          hand starts right away, using the players, boneyard, and series above.
+        </p>
       </form>
       <form
         className="card join-card"

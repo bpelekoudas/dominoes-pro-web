@@ -58,6 +58,7 @@ export type ClientMessage =
   | {
       type: "solo";
       name: string;
+      playerCount?: number;
       boneyardMode?: string;
       seriesLength?: number;
       difficulty?: string;
@@ -465,11 +466,12 @@ export class Hub {
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const boneyardMode = message.boneyardMode ?? "draw_until";
     const seriesLength = message.seriesLength ?? 3;
+    const playerCount = message.playerCount ?? 4;
     const opened = this.create(
       {
         type: "create",
         name: message.name,
-        playerCount: 4,
+        playerCount,
         boneyardMode,
         seriesLength,
       },
@@ -481,7 +483,7 @@ export class Hub {
     const seat = room?.seats.find((candidate) => candidate.id === opened.session.playerId);
     if (!room || !seat) return { ok: false, error: "The table didn't open." };
     const difficulty = asDifficulty(message.difficulty);
-    for (let count = 0; count < 3; count += 1) this.addBot(room, seat, difficulty);
+    for (let count = 1; count < playerCount; count += 1) this.addBot(room, seat, difficulty);
     this.start(room, seat);
     return opened;
   }
