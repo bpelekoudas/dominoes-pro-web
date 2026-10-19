@@ -26,6 +26,62 @@ export interface OpenEndView {
   scorePips: number;
 }
 
+export type TierStep = "III" | "II" | "I";
+
+/** What the table shows beside a name. Computers have none. */
+export interface SeatRank {
+  rating: number;
+  provisional: boolean;
+  tierId: string;
+  tierName: string;
+  step: TierStep | null;
+}
+
+export interface PointBreakdown {
+  finish: number;
+  win: number;
+  second: number;
+  moments: number;
+  momentCount: number;
+  streak: number;
+  streakCount: number;
+  firstWin: number;
+  doubled: boolean;
+  total: number;
+}
+
+export interface RankedPlayerRecap {
+  playerId: string;
+  ranked: boolean;
+  ratingBefore: number | null;
+  ratingAfter: number | null;
+  delta: number | null;
+  provisional: boolean;
+  pointsEarned: number;
+  pointsBefore: number;
+  pointsAfter: number;
+  breakdown: PointBreakdown;
+  tierBeforeId: string;
+  tierBeforeName: string;
+  tierBeforeStep: TierStep | null;
+  tierAfterId: string;
+  tierAfterName: string;
+  tierAfterStep: TierStep | null;
+  steppedUp: boolean;
+  stepFloor: number;
+  nextAt: number | null;
+}
+
+/** Shown once, when a game to 150 ends or someone leaves for good. */
+export interface RankRecap {
+  gameNumber: number;
+  ranked: boolean;
+  casual: boolean;
+  vsComputer: boolean;
+  seasonEndsAt: string;
+  players: RankedPlayerRecap[];
+}
+
 export interface PlayerView {
   roomCode: string;
   status: "lobby" | "playing" | "complete" | "abandoned";
@@ -36,6 +92,7 @@ export interface PlayerView {
     boneyardMode: BoneyardMode;
     seriesLength: SeriesLength;
     targetScore: number;
+    casual: boolean;
   };
   players: Array<{
     id: string;
@@ -49,6 +106,7 @@ export interface PlayerView {
     isTurn: boolean;
     bot: boolean;
     difficulty: BotDifficulty | null;
+    rank: SeatRank | null;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -90,6 +148,7 @@ export interface PlayerView {
     gameNumber: number;
     handNumber: number;
   } | null;
+  recap: RankRecap | null;
   lastPlay: LastPlay | null;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
@@ -101,6 +160,7 @@ export interface TableSeat {
   connected: boolean;
   bot: boolean;
   difficulty: BotDifficulty | null;
+  rank?: SeatRank | null;
 }
 
 export interface TableMeta {
@@ -112,7 +172,9 @@ export interface TableMeta {
     playerCount: 2 | 3 | 4;
     boneyardMode: BoneyardMode;
     seriesLength: SeriesLength;
+    casual?: boolean;
   };
+  recap?: RankRecap | null;
   youId: string;
   turnDeadline?: number | null;
   turnBudgetMs?: number;
@@ -155,6 +217,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       boneyardMode: meta.settings.boneyardMode,
       seriesLength: meta.settings.seriesLength,
       targetScore,
+      casual: meta.settings.casual === true,
     },
     players: meta.seats.map((seat, seatIndex) => ({
       id: seat.id,
@@ -168,6 +231,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       isTurn: seat.id === turnPlayerId,
       bot: seat.bot,
       difficulty: seat.difficulty,
+      rank: seat.rank ?? null,
     })),
     you: { hand: youHand },
     board,
@@ -222,6 +286,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
           handNumber: match.lastHand.handNumber,
         }
       : null,
+    recap: meta.recap ?? null,
     lastPlay: match?.lastPlay ?? null,
     lastDraw,
     taunts: tauntsForPlayer(),

@@ -15,16 +15,19 @@ import {
   randomSeed,
   RULES_VERSION,
   turnHoldMs,
+  BIG_MOMENT_SCORE,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
   type BotDifficulty,
   type Intent,
   type MatchState,
   type PlayerView,
+  type RankRecap,
   type SeriesLength,
   type TableMeta,
 } from "@uhoh/rules";
 import { Store, type ChatRow, type RoomRow } from "./db.js";
+import { describePlayer, seatRankOf, settleGame } from "./ranking.js";
 
 export interface ChatLine {
   id: number;
@@ -50,7 +53,9 @@ export type ClientMessage =
       playerCount: number;
       boneyardMode: string;
       seriesLength: number;
+      casual?: boolean;
     }
+  | { type: "set-casual"; casual: boolean }
   | { type: "join"; code: string; name: string }
   | { type: "reconnect"; token: string }
   | { type: "start" }
@@ -97,6 +102,8 @@ interface LiveRoom {
     boneyardMode: BoneyardMode;
     seriesLength: SeriesLength;
   };
+  casual: boolean;
+  recap: RankRecap | null;
   status: "lobby" | "playing" | "complete" | "abandoned";
   seats: LiveSeat[];
   match: MatchState | null;
@@ -205,8 +212,9 @@ export class Hub {
     else if (message.type === "chat") this.chat(room, seat, message);
     else if (message.type === "continue") this.continueHand(room, seat);
     else if (message.type === "rematch") this.rematch(room, seat);
-    else if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
+    else     if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
     else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
+    else if (message.type === "set-casual") this.setCasual(room, seat, message.casual === true);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
   }
 
@@ -252,6 +260,8 @@ export class Hub {
         boneyardMode: message.boneyardMode,
         seriesLength: message.seriesLength,
       },
+      casual: message.casual === true,
+      recap: null,
       status: "lobby",
       seats: [],
       match: null,
@@ -275,6 +285,7 @@ export class Hub {
       status: room.status,
       created_at: created,
       rules_version: RULES_VERSION,
+      casual: room.casual ? 1 : 0,
     });
     this.store.insertPlayer({
       id: seat.id,
@@ -410,6 +421,7 @@ export class Hub {
       this.tell(seat, { type: "error", message: "That move doesn't make sense." });
       return;
     }
+    const before = room.match;
     const result = applyIntent(room.match, seat.id, intent);
     if (!result.ok || !room.handId) {
       this.tell(seat, { type: "error", message: result.error ?? "That move doesn't work." });
@@ -425,6 +437,7 @@ export class Hub {
       created_at: nowIso(),
     });
     room.match = result.match;
+    this.noteBigMoment(room, before, room.match);
     if (room.match.hand?.phase === "complete" && room.match.lastHand) {
       this.store.setHandResult(room.handId, JSON.stringify(room.match.lastHand));
       if (room.match.phase === "series_over") {
@@ -435,6 +448,7 @@ export class Hub {
       } else {
         this.holdForSummary(room);
       }
+      this.settleCompleted(room);
     }
     const holdMs = intent.type === "play" ? turnHoldMs(room.match.lastPlay?.awarded ?? 0) : 0;
     this.broadcast(room, holdMs);
@@ -484,6 +498,7 @@ export class Hub {
       return;
     }
     seat.missedTurn = true;
+    const before = room.match;
     const result = skipTurn(room.match, playerId);
     if (!result.ok || !room.handId) return;
     room.actionSeq += 1;
@@ -496,6 +511,7 @@ export class Hub {
     });
     const nextMatch = result.match;
     room.match = nextMatch;
+    this.noteBigMoment(room, before, room.match);
     if (nextMatch.hand?.phase === "complete" && nextMatch.lastHand) {
       this.store.setHandResult(room.handId, JSON.stringify(nextMatch.lastHand));
       if (nextMatch.phase === "series_over") {
@@ -504,6 +520,7 @@ export class Hub {
       } else {
         this.holdForSummary(room);
       }
+      this.settleCompleted(room);
     }
     this.broadcast(room);
   }
@@ -521,6 +538,7 @@ export class Hub {
     if (room.handId && room.match?.lastHand) {
       this.store.setHandResult(room.handId, JSON.stringify({ ...room.match.lastHand, abandoned: room.ended }));
     }
+    this.settleAbandoned(room, seat.id);
     this.broadcast(room);
   }
 
@@ -580,6 +598,7 @@ export class Hub {
     room.match = next;
     room.handId = handId;
     room.actionSeq = 0;
+    room.recap = null;
   }
 
   private solo(
@@ -787,6 +806,8 @@ export class Hub {
         boneyardMode: row.boneyard_mode as BoneyardMode,
         seriesLength: row.series_length as SeriesLength,
       },
+      casual: row.casual === 1,
+      recap: null,
       status: row.status as LiveRoom["status"],
       seats: players.map((player) =>
         this.makeSeat(
@@ -832,6 +853,16 @@ export class Hub {
         room.match = match;
         if (match.phase === "series_over") room.status = "complete";
       }
+    }
+    try {
+      if (room.match?.lastHand?.gameWinnerId) this.settleCompleted(room);
+      if (room.status === "abandoned" && room.match) {
+        const leaver = this.savedLeaver(room);
+        if (leaver) this.settleAbandoned(room, leaver);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The rating could not be saved.";
+      console.warn(`Room ${room.id} rating was not restored (${detail}).`);
     }
     this.remember(room);
     if (room.betweenHands) this.armContinue(room);
@@ -915,6 +946,117 @@ export class Hub {
     this.turnTimers.set(room.id, timer);
   }
 
+  private setCasual(room: LiveRoom, seat: LiveSeat, casual: boolean): void {
+    if (seat.id !== room.hostId) {
+      this.tell(seat, { type: "error", message: "Only the host can change that." });
+      return;
+    }
+    if (room.status !== "lobby") {
+      this.tell(seat, { type: "error", message: "The table is already dealing." });
+      return;
+    }
+    room.casual = casual;
+    this.store.updateRoom(room.id, { casual });
+    this.broadcast(room);
+  }
+
+  private noteBigMoment(room: LiveRoom, before: MatchState, after: MatchState): void {
+    const play = after.lastPlay;
+    if (!play || before.lastPlay?.seq === play.seq) return;
+    if (play.awarded < BIG_MOMENT_SCORE) return;
+    try {
+      this.store.addBigMoment(room.id, room.seriesId, after.gameNumber, play.playerId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The moment was not counted.";
+      console.warn(`Room ${room.id} missed a big moment (${detail}).`);
+    }
+  }
+
+  private settleCompleted(room: LiveRoom): void {
+    const hand = room.match?.lastHand;
+    if (!hand?.gameWinnerId || !room.match) return;
+    if (room.recap?.gameNumber === hand.gameNumber) return;
+    try {
+      room.recap = settleGame(this.store, {
+        roomId: room.id,
+        seriesId: room.seriesId,
+        gameNumber: hand.gameNumber,
+        casual: room.casual,
+        completed: true,
+        winnerId: hand.gameWinnerId,
+        now: new Date(),
+        seats: this.finishSeats(room, hand.scoresAfter, null, hand.gameNumber),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The rating could not be saved.";
+      console.warn(`Room ${room.id} rating was not saved (${detail}).`);
+    }
+  }
+
+  private settleAbandoned(room: LiveRoom, leaverId: string): void {
+    const gameNumber = room.match?.gameNumber ?? 0;
+    if (!room.match || gameNumber < 1) return;
+    if (room.recap?.gameNumber === gameNumber) return;
+    try {
+      room.recap = settleGame(this.store, {
+        roomId: room.id,
+        seriesId: room.seriesId,
+        gameNumber,
+        casual: room.casual,
+        completed: false,
+        winnerId: null,
+        now: new Date(),
+        seats: this.finishSeats(room, room.match.scores, leaverId, gameNumber),
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The rating could not be saved.";
+      console.warn(`Room ${room.id} rating was not saved (${detail}).`);
+    }
+  }
+
+  private finishSeats(room: LiveRoom, scores: Record<string, number>, leaverId: string | null, gameNumber: number) {
+    const moments = this.store.bigMoments(room.id, room.seriesId, gameNumber);
+    return room.seats.map((seat) => ({
+      playerId: seat.id,
+      name: seat.name,
+      userId: seat.userId,
+      bot: seat.bot,
+      score: scores[seat.id] ?? 0,
+      left: leaverId === seat.id,
+      bigMoments: moments[seat.id] ?? 0,
+    }));
+  }
+
+  private savedLeaver(room: LiveRoom): string | null {
+    const hands = this.store.handsForSeries(room.id, room.seriesId);
+    const last = hands[hands.length - 1];
+    if (!last?.result_json) return null;
+    try {
+      const parsed = JSON.parse(last.result_json) as { abandoned?: { playerId?: string } };
+      return typeof parsed.abandoned?.playerId === "string" ? parsed.abandoned.playerId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private showRecap(room: LiveRoom): boolean {
+    if (!room.recap) return false;
+    if (room.ended) return true;
+    const hand = room.match?.lastHand;
+    if (!hand?.gameWinnerId || hand.gameNumber !== room.recap.gameNumber) return false;
+    return room.betweenHands || room.status === "complete" || room.match?.phase === "series_over";
+  }
+
+  private rankFor(userId: string | null) {
+    if (!userId) return null;
+    try {
+      const standing = describePlayer(this.store, userId, new Date());
+      return standing ? seatRankOf(standing) : null;
+    } catch {
+      return null;
+    }
+  }
+
   private view(room: LiveRoom, playerId: string): PlayerView {
     return project(room.match, this.meta(room, playerId));
   }
@@ -930,8 +1072,10 @@ export class Hub {
         connected: seat.connected,
         bot: seat.bot,
         difficulty: seat.difficulty,
+        rank: this.rankFor(seat.userId),
       })),
-      settings: room.settings,
+      settings: { ...room.settings, casual: room.casual },
+      recap: this.showRecap(room) ? room.recap : null,
       youId,
       turnDeadline: room.turnDeadline,
       turnBudgetMs: this.turnLimitMs,

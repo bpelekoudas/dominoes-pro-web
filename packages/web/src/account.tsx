@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
 
-export interface AccountUser {
+export interface AccountUser extends RankFacts {
   id: string;
   displayName: string;
   avatarId: string | null;
@@ -29,8 +30,12 @@ export interface AccountController {
   devLink: string | null;
   conflict: ClaimConflict | null;
   busy: boolean;
-  openSheet: () => void;
+  page: "profile" | "board";
+  openSheet: (page?: "profile" | "board") => void;
   closeSheet: () => void;
+  showBoard: (board: "rating" | "season") => void;
+  board: "rating" | "season";
+  refresh: () => Promise<void>;
   ensureGuest: (displayName: string) => Promise<AccountUser | null>;
   saveName: (displayName: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -50,6 +55,8 @@ export function useAccount(): AccountController {
   const [devLink, setDevLink] = useState<string | null>(null);
   const [conflict, setConflict] = useState<ClaimConflict | null>(null);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState<"profile" | "board">("profile");
+  const [board, setBoard] = useState<"rating" | "season">("rating");
   const pending = useRef<PendingSignIn | null>(null);
 
   const remember = (next: AccountUser) => {
@@ -164,11 +171,25 @@ export function useAccount(): AccountController {
     devLink,
     conflict,
     busy,
-    openSheet: () => {
+    page,
+    board,
+    openSheet: (next?: "profile" | "board") => {
       setNotice(null);
+      setPage(next ?? "profile");
       setSheetOpen(true);
     },
     closeSheet: () => setSheetOpen(false),
+    showBoard: (next: "rating" | "season") => {
+      setBoard(next);
+      setPage("board");
+      setSheetOpen(true);
+    },
+    refresh: async () => {
+      const response = await fetch("/api/me", { credentials: "same-origin" });
+      if (!response.ok) return;
+      const body = (await response.json()) as { user?: AccountUser };
+      if (body.user) remember(body.user);
+    },
     ensureGuest: async (displayName) => {
       setError(null);
       const response = await postJson("/api/guest", { displayName });
@@ -258,7 +279,21 @@ export function AccountChip({
       <span className="avatar" aria-hidden="true">
         {letter}
       </span>
-      <span className="profile-name">{user.displayName}</span>
+      <span className="profile-copy">
+        {compact ? null : <span className="profile-name">{user.displayName}</span>}
+        {typeof user.rating === "number" ? (
+          <RankLine
+            tierId={user.tierId}
+            tierName={user.tierName}
+            step={user.tierStep}
+            rating={user.rating}
+            provisional={user.provisional}
+            compact
+          />
+        ) : (
+          <span className="profile-name">{user.displayName}</span>
+        )}
+      </span>
     </button>
   );
 }
@@ -337,11 +372,19 @@ export function AccountLayer({ account }: { account: AccountController }) {
       <button type="button" className="chat-scrim account-scrim" aria-label="Close account" onClick={account.closeSheet} />
       <section className="account-sheet" role="dialog" aria-label="Your account">
         <header>
-          <h2>{account.user ? "Your profile" : "Sign in"}</h2>
+          <h2>{account.page === "board" ? "Leaderboard" : account.user ? "Your profile" : "Sign in"}</h2>
           <button type="button" className="text-button" onClick={account.closeSheet}>
             Close
           </button>
         </header>
+        <div className="board-switch">
+          <button type="button" className={account.page === "profile" ? "primary" : "secondary"} onClick={() => account.openSheet("profile")}>
+            Profile
+          </button>
+          <button type="button" className={account.page === "board" ? "primary" : "secondary"} onClick={() => account.showBoard(account.board)}>
+            Leaderboard
+          </button>
+        </div>
         {account.user?.guest ? (
           <p className="hint">Signing in keeps this name and the games on this phone.</p>
         ) : null}
@@ -367,7 +410,11 @@ export function AccountLayer({ account }: { account: AccountController }) {
             <a href={account.devLink}>Open the test link</a>
           </p>
         ) : null}
-        {account.user ? (
+        {account.page === "board" ? (
+          <Leaderboard board={account.board} onBoard={account.showBoard} />
+        ) : null}
+        {account.page === "profile" && account.user ? <ProfileStats user={account.user} /> : null}
+        {account.page === "profile" && account.user ? (
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -383,42 +430,44 @@ export function AccountLayer({ account }: { account: AccountController }) {
             </button>
           </form>
         ) : null}
-        <div className="provider-list">
-          {googleClientId && !googleFailed ? <div className="google-host" ref={googleHost} /> : null}
-          <button
-            type="button"
-            className="provider-button google"
-            hidden={Boolean(googleClientId) && !googleFailed}
-            onClick={() => void account.signInGoogle("", false)}
-          >
-            Sign in with Google
-          </button>
-          <button type="button" className="provider-button apple" onClick={() => void startApple()} disabled={account.busy}>
-            Sign in with Apple
-          </button>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void account.requestMagicLink(email);
-            }}
-          >
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                autoComplete="email"
-                inputMode="email"
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
-            </label>
-            <button className="primary" type="submit" disabled={account.busy || !email.trim()}>
-              Email me a link
+        {account.page === "profile" ? (
+          <div className="provider-list">
+            {googleClientId && !googleFailed ? <div className="google-host" ref={googleHost} /> : null}
+            <button
+              type="button"
+              className="provider-button google"
+              hidden={Boolean(googleClientId) && !googleFailed}
+              onClick={() => void account.signInGoogle("", false)}
+            >
+              Sign in with Google
             </button>
-          </form>
-        </div>
-        {account.user ? (
+            <button type="button" className="provider-button apple" onClick={() => void startApple()} disabled={account.busy}>
+              Sign in with Apple
+            </button>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void account.requestMagicLink(email);
+              }}
+            >
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  autoComplete="email"
+                  inputMode="email"
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <button className="primary" type="submit" disabled={account.busy || !email.trim()}>
+                Email me a link
+              </button>
+            </form>
+          </div>
+        ) : null}
+        {account.page === "profile" && account.user ? (
           <button type="button" className="text-button sign-out" onClick={() => void account.signOut()} disabled={account.busy}>
             Sign out
           </button>

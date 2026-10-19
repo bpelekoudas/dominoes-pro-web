@@ -8,7 +8,8 @@ import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
-import { AccountChip, AccountLayer, useAccount } from "./account";
+import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
+import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 
 interface ChatLine {
   id: number;
@@ -155,6 +156,15 @@ export function App() {
     if (location.pathname !== "/") history.replaceState(null, "", "/");
   };
 
+  useEffect(() => {
+    if (!view?.recap) return;
+    void account.refresh();
+  }, [view?.recap, view?.roomCode]);
+
+  if (rankDemoRequested() && !view) {
+    return <RankDemo />;
+  }
+
   if (!view && preview) {
     return (
       <>
@@ -181,7 +191,8 @@ export function App() {
           }
           onJoin={(name, code) => void begin({ type: "join", name, code })}
           onGuest={(name) => void account.ensureGuest(name)}
-          onAccount={account.openSheet}
+          onAccount={() => account.openSheet("profile")}
+          onBoard={() => account.showBoard("rating")}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
         />
         <AccountLayer account={account} />
@@ -251,13 +262,14 @@ function Home({
   onJoin,
   onGuest,
   onAccount,
+  onBoard,
   onPreview,
 }: {
   presetCode: string;
   error: string | null;
   connecting: boolean;
   initialName: string;
-  user: { id: string; displayName: string; avatarId: string | null; guest: boolean; providers: string[] } | null;
+  user: AccountUser | null;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
   onSolo: (
     name: string,
@@ -269,6 +281,7 @@ function Home({
   onJoin: (name: string, code: string) => void;
   onGuest: (name: string) => void;
   onAccount: () => void;
+  onBoard: () => void;
   onPreview: (() => void) | null;
 }) {
   const [name, setName] = useState(initialName);
@@ -302,6 +315,9 @@ function Home({
         </button>
         <button type="button" className="secondary" onClick={onAccount}>
           Sign in
+        </button>
+        <button type="button" className="secondary" onClick={onBoard}>
+          Leaderboard
         </button>
       </div>
       <form
@@ -469,7 +485,7 @@ function Game({
   onLeaveArm: () => void;
   onLeave: () => void;
   onSend: (message: object) => void;
-  accountUser: { id: string; displayName: string; avatarId: string | null; guest: boolean; providers: string[] } | null;
+  accountUser: AccountUser | null;
   onAccount: () => void;
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
@@ -561,6 +577,7 @@ function Game({
         <section className="ended-screen" data-screen="player-left">
           <p className="result-kicker">Game ended - {view.ended.name} left</p>
           <ScoreList view={view} />
+          {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} /> : null}
         </section>
       ) : null}
       {view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended ? (
@@ -686,6 +703,15 @@ function Lobby({
                 {player.isYou ? `${player.name} (you)` : player.name}
                 {player.bot ? (
                   <small className="bot-label">Computer · {labelDifficulty(player.difficulty)}</small>
+                ) : player.rank ? (
+                  <RankLine
+                    tierId={player.rank.tierId}
+                    tierName={player.rank.tierName}
+                    step={player.rank.step}
+                    rating={player.rank.rating}
+                    provisional={player.rank.provisional}
+                    compact
+                  />
                 ) : null}
               </span>
             </span>
@@ -709,6 +735,19 @@ function Lobby({
           </li>
         ))}
       </ul>
+      {host ? (
+        <button
+          type="button"
+          className="secondary"
+          data-action="casual"
+          data-casual={view.settings.casual ? "true" : "false"}
+          onClick={() => onSend({ type: "set-casual", casual: !view.settings.casual })}
+        >
+          {view.settings.casual ? "Casual · ratings stay put" : "Ranked table"}
+        </button>
+      ) : (
+        <p className="hint">{view.settings.casual ? "Casual table. Ratings stay put." : "Ranked table."}</p>
+      )}
       {host && openSeats > 0 ? (
         <div className="bot-add">
           <fieldset>
@@ -810,6 +849,16 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
         </span>
         <span className="chip-meta">
           <strong>{player.score}</strong>
+          {player.rank ? (
+            <RankLine
+              tierId={player.rank.tierId}
+              tierName={player.rank.tierName}
+              step={player.rank.step}
+              rating={player.rank.rating}
+              provisional={player.rank.provisional}
+              compact
+            />
+          ) : null}
           {player.isYou ? null : <span className="tile-label">{player.tileCount} tiles</span>}
         </span>
       </span>
@@ -1026,6 +1075,7 @@ function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () =>
           ))}
       </div>
       <ScoreList view={view} />
+      {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} /> : null}
       {view.betweenHands ? (
         <button type="button" className="primary" data-action="continue" onClick={onContinue}>
           Continue{seconds !== null ? ` · ${seconds}` : ""}
@@ -1136,6 +1186,10 @@ function bubbleText(bubble: ChatLine | null, playerId: string): string | null {
 
 function handKey(view: PlayerView): string {
   return view.lastHand ? `${view.lastHand.gameNumber}-${view.lastHand.handNumber}` : "";
+}
+
+function playerNames(view: PlayerView): Map<string, string> {
+  return new Map(view.players.map((player) => [player.id, player.isYou ? "You" : player.name]));
 }
 
 function nameOf(view: PlayerView, playerId: string): string {

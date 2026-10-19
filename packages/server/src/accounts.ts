@@ -2,10 +2,11 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
 import { cleanName } from "./hub.js";
+import { describePlayer, type PublicStanding } from "./ranking.js";
 
 export type ProviderName = "google" | "apple" | "email" | "guest";
 
-export interface PublicUser {
+export interface PublicUser extends PublicStanding {
   id: string;
   displayName: string;
   avatarId: string | null;
@@ -404,12 +405,15 @@ export class Accounts {
     const user = this.store.user(userId);
     if (!user) return null;
     const providers = this.store.identitiesForUser(userId).map((row) => row.provider as ProviderName);
+    const standing = describePlayer(this.store, userId, this.now());
+    if (!standing) return null;
     return {
       id: user.id,
       displayName: user.display_name,
       avatarId: user.avatar_id,
       guest: user.is_guest === 1,
       providers,
+      ...standing,
     };
   }
 

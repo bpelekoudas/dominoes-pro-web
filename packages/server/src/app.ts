@@ -15,6 +15,7 @@ import {
 } from "./accounts.js";
 import { BOT_TURN_MS, Hub, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Store } from "./db.js";
+import { leaderboard } from "./ranking.js";
 import { publicBase } from "./public-url.js";
 
 export interface AppOptions {
@@ -75,6 +76,12 @@ export async function createApp(options: AppOptions = {}) {
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to see this profile." });
     return { user };
+  });
+
+  app.get("/api/leaderboard", async (request) => {
+    const query = request.query as { board?: string };
+    const board = query.board === "season" ? "season" : "rating";
+    return { board, ...leaderboard(store, board, new Date()) };
   });
 
   app.get("/api/auth/config", async () => accounts.config());

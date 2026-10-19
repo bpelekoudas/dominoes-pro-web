@@ -13,6 +13,8 @@ export interface RoomRow {
   created_at: string;
   /** Null on tables saved before this column existed. */
   rules_version: number | null;
+  /** 1 when the host marked the room casual. Older rows are ranked. */
+  casual?: number | null;
 }
 
 export interface PlayerRow {
@@ -36,6 +38,73 @@ export interface UserRow {
   created_at: string;
   updated_at: string;
   is_guest: number;
+  rating?: number;
+  ranked_games?: number;
+  ranked_wins?: number;
+  ranked_losses?: number;
+  vs_games?: number;
+  vs_wins?: number;
+  vs_losses?: number;
+  games_played?: number;
+  season_id?: number;
+  season_points?: number;
+  win_streak?: number;
+  last_win_day?: string | null;
+  peak_tier?: string;
+  peak_step?: string | null;
+}
+
+export interface StandingUpdate {
+  rating: number;
+  ranked_games: number;
+  ranked_wins: number;
+  ranked_losses: number;
+  vs_games: number;
+  vs_wins: number;
+  vs_losses: number;
+  games_played: number;
+  season_id: number;
+  season_points: number;
+  win_streak: number;
+  last_win_day: string | null;
+  peak_tier: string;
+  peak_step: string | null;
+  updated_at: string;
+}
+
+export interface RatingEventRow {
+  id: string;
+  user_id: string;
+  room_id: string;
+  series_id: string;
+  game_number: number;
+  player_id: string;
+  ranked: number;
+  provisional: number;
+  rating_before: number;
+  rating_after: number;
+  delta: number;
+  season_id: number;
+  points_earned: number;
+  points_before: number;
+  points_after: number;
+  tier_before: string;
+  tier_after: string;
+  step_before: "III" | "II" | "I" | null;
+  step_after: "III" | "II" | "I" | null;
+  stepped_up: number;
+  breakdown_json: string;
+  created_at: string;
+}
+
+export interface SeasonPeakRow {
+  user_id: string;
+  season_id: number;
+  tier: string;
+  step: string | null;
+  points: number;
+  reward_id: string;
+  created_at: string;
 }
 
 export interface IdentityRow {
@@ -216,15 +285,85 @@ export class Store {
       CREATE INDEX IF NOT EXISTS identities_email ON identities (email);
       CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
       CREATE INDEX IF NOT EXISTS players_user ON players (user_id);
+      CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS rating_history (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        room_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        player_id TEXT NOT NULL,
+        ranked INTEGER NOT NULL,
+        provisional INTEGER NOT NULL,
+        rating_before INTEGER NOT NULL,
+        rating_after INTEGER NOT NULL,
+        delta INTEGER NOT NULL,
+        season_id INTEGER NOT NULL,
+        points_earned INTEGER NOT NULL,
+        points_before INTEGER NOT NULL,
+        points_after INTEGER NOT NULL,
+        tier_before TEXT NOT NULL,
+        tier_after TEXT NOT NULL,
+        step_before TEXT,
+        step_after TEXT,
+        stepped_up INTEGER NOT NULL,
+        breakdown_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, room_id, series_id, game_number)
+      );
+      CREATE TABLE IF NOT EXISTS season_peaks (
+        user_id TEXT NOT NULL,
+        season_id INTEGER NOT NULL,
+        tier TEXT NOT NULL,
+        step TEXT,
+        points INTEGER NOT NULL,
+        reward_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, season_id)
+      );
+      CREATE TABLE IF NOT EXISTS game_moments (
+        room_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        player_id TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (room_id, series_id, game_number, player_id)
+      );
     `);
+    const roomsNow = this.db.prepare(`PRAGMA table_info(rooms)`).all() as Array<{ name: string }>;
+    if (!roomsNow.some((column) => column.name === "casual")) {
+      this.db.exec(`ALTER TABLE rooms ADD COLUMN casual INTEGER NOT NULL DEFAULT 0`);
+    }
+    const usersNow = this.db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>;
+    const userNames = new Set(usersNow.map((column) => column.name));
+    const addUser = (name: string, ddl: string) => {
+      if (!userNames.has(name)) this.db.exec(`ALTER TABLE users ADD COLUMN ${ddl}`);
+    };
+    addUser("rating", "rating INTEGER NOT NULL DEFAULT 1200");
+    addUser("ranked_games", "ranked_games INTEGER NOT NULL DEFAULT 0");
+    addUser("ranked_wins", "ranked_wins INTEGER NOT NULL DEFAULT 0");
+    addUser("ranked_losses", "ranked_losses INTEGER NOT NULL DEFAULT 0");
+    addUser("vs_games", "vs_games INTEGER NOT NULL DEFAULT 0");
+    addUser("vs_wins", "vs_wins INTEGER NOT NULL DEFAULT 0");
+    addUser("vs_losses", "vs_losses INTEGER NOT NULL DEFAULT 0");
+    addUser("games_played", "games_played INTEGER NOT NULL DEFAULT 0");
+    addUser("season_id", "season_id INTEGER NOT NULL DEFAULT 0");
+    addUser("season_points", "season_points INTEGER NOT NULL DEFAULT 0");
+    addUser("win_streak", "win_streak INTEGER NOT NULL DEFAULT 0");
+    addUser("last_win_day", "last_win_day TEXT");
+    addUser("peak_tier", "peak_tier TEXT NOT NULL DEFAULT 'rookie'");
+    addUser("peak_step", "peak_step TEXT");
   }
 
   insertRoom(room: RoomRow): void {
     this.db
       .prepare(
         `INSERT INTO rooms (
-          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         room.id,
@@ -237,23 +376,26 @@ export class Store {
         room.status,
         room.created_at,
         room.rules_version,
+        room.casual ? 1 : 0,
       );
   }
 
   updateRoom(
     id: string,
-    patch: { host_id?: string; series_id?: string; status?: string; rules_version?: number | null },
+    patch: { host_id?: string; series_id?: string; status?: string; rules_version?: number | null; casual?: boolean },
   ): void {
     const current = this.room(id);
     if (!current) throw new Error("Room disappeared.");
     const version = patch.rules_version === undefined ? current.rules_version : patch.rules_version;
+    const casual = patch.casual === undefined ? (current.casual ? 1 : 0) : patch.casual ? 1 : 0;
     this.db
-      .prepare(`UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ? WHERE id = ?`)
+      .prepare(`UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ?, casual = ? WHERE id = ?`)
       .run(
         patch.host_id ?? current.host_id,
         patch.series_id ?? current.series_id,
         patch.status ?? current.status,
         version,
+        casual,
         id,
       );
   }
@@ -467,5 +609,143 @@ export class Store {
 
   markMagicLinkUsed(id: string, usedAt: string): void {
     this.db.prepare(`UPDATE magic_links SET used_at = ? WHERE id = ? AND used_at IS NULL`).run(usedAt, id);
+  }
+
+  meta(key: string): string | null {
+    const row = this.db.prepare(`SELECT value FROM app_meta WHERE key = ?`).get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`).run(key, value);
+  }
+
+  saveStanding(userId: string, patch: StandingUpdate): void {
+    this.db
+      .prepare(
+        `UPDATE users SET
+          rating = ?, ranked_games = ?, ranked_wins = ?, ranked_losses = ?,
+          vs_games = ?, vs_wins = ?, vs_losses = ?, games_played = ?,
+          season_id = ?, season_points = ?, win_streak = ?, last_win_day = ?,
+          peak_tier = ?, peak_step = ?, updated_at = ?
+        WHERE id = ?`,
+      )
+      .run(
+        patch.rating,
+        patch.ranked_games,
+        patch.ranked_wins,
+        patch.ranked_losses,
+        patch.vs_games,
+        patch.vs_wins,
+        patch.vs_losses,
+        patch.games_played,
+        patch.season_id,
+        patch.season_points,
+        patch.win_streak,
+        patch.last_win_day,
+        patch.peak_tier,
+        patch.peak_step,
+        patch.updated_at,
+        userId,
+      );
+  }
+
+  allUsers(): UserRow[] {
+    return this.db.prepare(`SELECT * FROM users`).all() as unknown as UserRow[];
+  }
+
+  topByRating(limit: number): UserRow[] {
+    return this.db
+      .prepare(`SELECT * FROM users ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`)
+      .all(limit) as unknown as UserRow[];
+  }
+
+  topBySeason(limit: number): UserRow[] {
+    return this.db
+      .prepare(`SELECT * FROM users ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`)
+      .all(limit) as unknown as UserRow[];
+  }
+
+  ratingEvent(userId: string, roomId: string, seriesId: string, gameNumber: number): RatingEventRow | null {
+    return (
+      (this.db
+        .prepare(
+          `SELECT * FROM rating_history WHERE user_id = ? AND room_id = ? AND series_id = ? AND game_number = ?`,
+        )
+        .get(userId, roomId, seriesId, gameNumber) as RatingEventRow | undefined) ?? null
+    );
+  }
+
+  insertRatingEvent(row: RatingEventRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO rating_history (
+          id, user_id, room_id, series_id, game_number, player_id, ranked, provisional,
+          rating_before, rating_after, delta, season_id, points_earned, points_before, points_after,
+          tier_before, tier_after, step_before, step_after, stepped_up, breakdown_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.user_id,
+        row.room_id,
+        row.series_id,
+        row.game_number,
+        row.player_id,
+        row.ranked,
+        row.provisional,
+        row.rating_before,
+        row.rating_after,
+        row.delta,
+        row.season_id,
+        row.points_earned,
+        row.points_before,
+        row.points_after,
+        row.tier_before,
+        row.tier_after,
+        row.step_before,
+        row.step_after,
+        row.stepped_up,
+        row.breakdown_json,
+        row.created_at,
+      );
+  }
+
+  saveSeasonPeak(row: SeasonPeakRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO season_peaks (user_id, season_id, tier, step, points, reward_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, season_id) DO UPDATE SET
+           tier = excluded.tier, step = excluded.step, points = excluded.points, reward_id = excluded.reward_id`,
+      )
+      .run(row.user_id, row.season_id, row.tier, row.step, row.points, row.reward_id, row.created_at);
+  }
+
+  seasonPeak(userId: string, seasonId: number): SeasonPeakRow | null {
+    return (
+      (this.db.prepare(`SELECT * FROM season_peaks WHERE user_id = ? AND season_id = ?`).get(userId, seasonId) as
+        | SeasonPeakRow
+        | undefined) ?? null
+    );
+  }
+
+  addBigMoment(roomId: string, seriesId: string, gameNumber: number, playerId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO game_moments (room_id, series_id, game_number, player_id, count)
+         VALUES (?, ?, ?, ?, 1)
+         ON CONFLICT(room_id, series_id, game_number, player_id) DO UPDATE SET count = count + 1`,
+      )
+      .run(roomId, seriesId, gameNumber, playerId);
+  }
+
+  bigMoments(roomId: string, seriesId: string, gameNumber: number): Record<string, number> {
+    const rows = this.db
+      .prepare(`SELECT player_id, count FROM game_moments WHERE room_id = ? AND series_id = ? AND game_number = ?`)
+      .all(roomId, seriesId, gameNumber) as unknown as Array<{ player_id: string; count: number }>;
+    const counts: Record<string, number> = {};
+    for (const row of rows) counts[row.player_id] = row.count;
+    return counts;
   }
 }
