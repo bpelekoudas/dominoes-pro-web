@@ -1,0 +1,98 @@
+import { useState } from "react";
+import { AVATARS, resolveAvatar } from "../../rules/src/avatars.js";
+import { playUiClick } from "./sound";
+
+export function Portrait({
+  id,
+  size = "chip",
+}: {
+  id: string | null | undefined;
+  size?: "chip" | "hero" | "grid";
+}) {
+  const avatar = resolveAvatar(id);
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className={`portrait-fallback portrait-${size}`}>{avatar.slice(0, 1).toUpperCase()}</span>;
+  }
+  const src = size === "chip" ? `/avatars/${avatar}-256.webp` : `/avatars/${avatar}.webp`;
+  return (
+    <img
+      className={`portrait portrait-${size}`}
+      src={src}
+      alt=""
+      draggable={false}
+      data-avatar={avatar}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/** Round portrait. `timer` is the fraction of the turn still left, from 1 down to 0. */
+export function AvatarFace({
+  id,
+  bot = false,
+  timer = null,
+}: {
+  id: string | null | undefined;
+  bot?: boolean;
+  timer?: number | null;
+}) {
+  const ratio = timer == null ? null : Math.max(0, Math.min(1, timer));
+  return (
+    <span className={`avatar${bot ? " bot" : ""}`} data-avatar={resolveAvatar(id)} aria-hidden="true">
+      {ratio != null ? (
+        <svg className="timer-ring" viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="16" pathLength="100" />
+          <circle
+            cx="18"
+            cy="18"
+            r="16"
+            pathLength="100"
+            className="timer-arc"
+            style={{ strokeDashoffset: `${100 - ratio * 100}` }}
+          />
+        </svg>
+      ) : null}
+      <Portrait id={id} size="chip" />
+      {bot ? (
+        <svg className="bot-mark" viewBox="0 0 24 36">
+          <rect x="1.5" y="1.5" width="21" height="33" rx="3" />
+          <line x1="2" y1="18" x2="22" y2="18" />
+          <circle cx="12" cy="9" r="2.2" />
+          <circle cx="8.2" cy="27" r="2" />
+          <circle cx="15.8" cy="27" r="2" />
+        </svg>
+      ) : null}
+    </span>
+  );
+}
+
+export function AvatarPicker({
+  selected,
+  onPick,
+}: {
+  selected: string | null | undefined;
+  onPick: (id: string) => void;
+}) {
+  const current = resolveAvatar(selected);
+  return (
+    <div className="avatar-grid" data-screen="picker">
+      {AVATARS.map((avatar) => (
+        <button
+          type="button"
+          key={avatar.id}
+          className={avatar.id === current ? "picked" : ""}
+          aria-pressed={avatar.id === current}
+          data-avatar={avatar.id}
+          onClick={() => {
+            playUiClick();
+            onPick(avatar.id);
+          }}
+        >
+          <Portrait id={avatar.id} size="grid" />
+          <span>{avatar.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
+import { AvatarFace, AvatarPicker } from "./avatars";
 
 export interface AccountUser extends RankFacts {
   id: string;
@@ -30,14 +31,15 @@ export interface AccountController {
   devLink: string | null;
   conflict: ClaimConflict | null;
   busy: boolean;
-  page: "profile" | "board";
-  openSheet: (page?: "profile" | "board") => void;
+  page: "profile" | "board" | "look";
+  openSheet: (page?: "profile" | "board" | "look") => void;
   closeSheet: () => void;
   showBoard: (board: "rating" | "season") => void;
   board: "rating" | "season";
   refresh: () => Promise<void>;
   ensureGuest: (displayName: string) => Promise<AccountUser | null>;
   saveName: (displayName: string) => Promise<void>;
+  saveAvatar: (avatarId: string) => Promise<void>;
   signOut: () => Promise<void>;
   signInGoogle: (idToken: string, confirm: boolean) => Promise<void>;
   signInApple: (idToken: string, confirm: boolean) => Promise<void>;
@@ -55,7 +57,7 @@ export function useAccount(): AccountController {
   const [devLink, setDevLink] = useState<string | null>(null);
   const [conflict, setConflict] = useState<ClaimConflict | null>(null);
   const [busy, setBusy] = useState(false);
-  const [page, setPage] = useState<"profile" | "board">("profile");
+  const [page, setPage] = useState<"profile" | "board" | "look">("profile");
   const [board, setBoard] = useState<"rating" | "season">("rating");
   const pending = useRef<PendingSignIn | null>(null);
 
@@ -173,7 +175,7 @@ export function useAccount(): AccountController {
     busy,
     page,
     board,
-    openSheet: (next?: "profile" | "board") => {
+    openSheet: (next?: "profile" | "board" | "look") => {
       setNotice(null);
       setPage(next ?? "profile");
       setSheetOpen(true);
@@ -200,6 +202,17 @@ export function useAccount(): AccountController {
       }
       remember(body.user);
       return body.user;
+    },
+    saveAvatar: async (avatarId) => {
+      setBusy(true);
+      setNotice(null);
+      try {
+        const response = await postJson("/api/profile", { avatarId });
+        const ok = await applyAuth(response);
+        if (ok) setNotice("Look saved.");
+      } finally {
+        setBusy(false);
+      }
     },
     saveName: async (displayName) => {
       setBusy(true);
@@ -273,12 +286,9 @@ export function AccountChip({
   compact?: boolean;
   onOpen: () => void;
 }) {
-  const letter = user.displayName.trim().charAt(0).toUpperCase() || "?";
   return (
     <button type="button" className={`profile-chip${compact ? " compact" : ""}`} onClick={onOpen}>
-      <span className="avatar" aria-hidden="true">
-        {letter}
-      </span>
+      <AvatarFace id={user.avatarId} />
       <span className="profile-copy">
         {compact ? null : <span className="profile-name">{user.displayName}</span>}
         {typeof user.rating === "number" ? (
@@ -372,7 +382,7 @@ export function AccountLayer({ account }: { account: AccountController }) {
       <button type="button" className="chat-scrim account-scrim" aria-label="Close account" onClick={account.closeSheet} />
       <section className="account-sheet" role="dialog" aria-label="Your account">
         <header>
-          <h2>{account.page === "board" ? "Leaderboard" : account.user ? "Your profile" : "Sign in"}</h2>
+          <h2>{account.page === "board" ? "Leaderboard" : account.page === "look" ? "Your look" : account.user ? "Your profile" : "Sign in"}</h2>
           <button type="button" className="text-button" onClick={account.closeSheet}>
             Close
           </button>
@@ -413,7 +423,17 @@ export function AccountLayer({ account }: { account: AccountController }) {
         {account.page === "board" ? (
           <Leaderboard board={account.board} onBoard={account.showBoard} />
         ) : null}
-        {account.page === "profile" && account.user ? <ProfileStats user={account.user} /> : null}
+        {account.page === "look" && account.user ? (
+          <AvatarPicker selected={account.user.avatarId} onPick={(id) => void account.saveAvatar(id)} />
+        ) : null}
+        {account.page === "profile" && account.user ? (
+          <>
+            <ProfileStats user={account.user} avatarId={account.user.avatarId} />
+            <button type="button" className="secondary" onClick={() => account.openSheet("look")}>
+              Change look
+            </button>
+          </>
+        ) : null}
         {account.page === "profile" && account.user ? (
           <form
             onSubmit={(event) => {

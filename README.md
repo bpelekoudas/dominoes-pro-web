@@ -12,10 +12,10 @@ The old single-player page is still here, untouched, so the current site can kee
 
 ## How a table works
 
-1. Someone creates a room and picks 2–4 players, a boneyard rule, and a best-of-3, 5, or 7 series.
-2. They share a short code or a link (`/r/CODE`).
-3. Everyone else joins with a display name. There are no accounts yet.
-4. The host deals when the table is full. Empty seats can be filled with computers (Easy, Medium, Hard, or Expert) and removed again before the deal. An older table that stored "Normal" is treated as Medium. Play vs computer on the home screen fills the player count you picked (one, two, or three computers) and deals immediately, using that boneyard and series. Each computer waits two seconds, then plays on the server, so you can watch.
+1. Home has two ways in. Play vs computer deals against the computer. Multiplayer can create a private room, join with a code, or Quick Match into a public table. A private room picks 2–4 players, a boneyard rule, and a best-of-3, 5, or 7 series. Quick Match is best of 3, draw until you can play, and it deals when the seats are full.
+2. A private room shares a short code or a link (`/r/CODE`).
+3. A nickname is enough. Sign-in is optional and keeps that same profile, including the character they picked.
+4. The host deals a private table when it is full. Empty seats can be filled with computers (Easy, Medium, Hard, or Expert) and removed again before the deal. An older table that stored "Normal" is treated as Medium. Play vs computer fills the player count you picked (one, two, or three computers) and deals immediately. Each computer waits two seconds, then plays on the server, so you can watch. A quick table stays all human, so it counts toward the rating, until someone chooses to fill the empty seats with computers.
 5. The first player to reach 150 wins the game, including a score played in the middle of a hand. The hand stops on that play and the table shows the game summary. If the series is still going, the next game starts from there. Refreshing the phone puts you back in your seat.
 
 Each person has 30 seconds when it is their turn. A ring on their seat and a bar over their hand count it down. If the clock runs out, the server skips the turn. It does not play a tile for them and it does not draw. If that same person misses the next time the turn comes back, the game ends for everyone. The screen says `Game ended - <name> left`, with the scores as they stood. Coming back before that next turn expires keeps them in. Computers are not on the clock.

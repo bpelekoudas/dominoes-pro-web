@@ -118,6 +118,24 @@ export function playCues(cues: Cue[]): void {
   if (waiting.length) void ensureDecoded(ctx);
 }
 
+/** A short soft click for menus. Mute and the first-tap unlock still apply. */
+export function playUiClick(): void {
+  const ctx = audio();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = 720;
+  const start = ctx.currentTime;
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(0.045, start + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.07);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(start);
+  osc.stop(start + 0.08);
+}
+
 /** Heavy slam, glass, and the cha-ching, in time with the tile landing. */
 export function playUhOh(): void {
   playCues(cuesForPlay(25, "0-1"));

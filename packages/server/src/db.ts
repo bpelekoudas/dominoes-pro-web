@@ -15,6 +15,8 @@ export interface RoomRow {
   rules_version: number | null;
   /** 1 when the host marked the room casual. Older rows are ranked. */
   casual?: number | null;
+  /** 1 when the room is a public quick-match table. Older rows are private. */
+  listed?: number | null;
 }
 
 export interface PlayerRow {
@@ -29,6 +31,8 @@ export interface PlayerRow {
   difficulty: string | null;
   /** Account that sat down, when this phone had one. Null on older rows and on computers. */
   user_id?: string | null;
+  /** Portrait id. Null on rows saved before avatars; the server fills a default. */
+  avatar_id?: string | null;
 }
 
 export interface UserRow {
@@ -337,6 +341,13 @@ export class Store {
     if (!roomsNow.some((column) => column.name === "casual")) {
       this.db.exec(`ALTER TABLE rooms ADD COLUMN casual INTEGER NOT NULL DEFAULT 0`);
     }
+    if (!roomsNow.some((column) => column.name === "listed")) {
+      this.db.exec(`ALTER TABLE rooms ADD COLUMN listed INTEGER NOT NULL DEFAULT 0`);
+    }
+    const playersNow = this.db.prepare(`PRAGMA table_info(players)`).all() as Array<{ name: string }>;
+    if (!playersNow.some((column) => column.name === "avatar_id")) {
+      this.db.exec(`ALTER TABLE players ADD COLUMN avatar_id TEXT`);
+    }
     const usersNow = this.db.prepare(`PRAGMA table_info(users)`).all() as Array<{ name: string }>;
     const userNames = new Set(usersNow.map((column) => column.name));
     const addUser = (name: string, ddl: string) => {
@@ -362,8 +373,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO rooms (
-          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual, listed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         room.id,
@@ -377,25 +388,37 @@ export class Store {
         room.created_at,
         room.rules_version,
         room.casual ? 1 : 0,
+        room.listed ? 1 : 0,
       );
   }
 
   updateRoom(
     id: string,
-    patch: { host_id?: string; series_id?: string; status?: string; rules_version?: number | null; casual?: boolean },
+    patch: {
+      host_id?: string;
+      series_id?: string;
+      status?: string;
+      rules_version?: number | null;
+      casual?: boolean;
+      listed?: boolean;
+    },
   ): void {
     const current = this.room(id);
     if (!current) throw new Error("Room disappeared.");
     const version = patch.rules_version === undefined ? current.rules_version : patch.rules_version;
     const casual = patch.casual === undefined ? (current.casual ? 1 : 0) : patch.casual ? 1 : 0;
+    const listed = patch.listed === undefined ? (current.listed ? 1 : 0) : patch.listed ? 1 : 0;
     this.db
-      .prepare(`UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ?, casual = ? WHERE id = ?`)
+      .prepare(
+        `UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ?, casual = ?, listed = ? WHERE id = ?`,
+      )
       .run(
         patch.host_id ?? current.host_id,
         patch.series_id ?? current.series_id,
         patch.status ?? current.status,
         version,
         casual,
+        listed,
         id,
       );
   }
@@ -421,7 +444,7 @@ export class Store {
   insertPlayer(player: PlayerRow): void {
     this.db
       .prepare(
-        `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty, user_id, avatar_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         player.id,
@@ -433,6 +456,7 @@ export class Store {
         player.bot,
         player.difficulty,
         player.user_id ?? null,
+        player.avatar_id ?? null,
       );
   }
 

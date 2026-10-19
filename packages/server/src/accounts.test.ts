@@ -25,6 +25,22 @@ function welcomeCode(messages: ServerMessage[]): string {
 }
 
 describe("accounts", () => {
+  it("starts on the house portrait and keeps a chosen look", () => {
+    const store = new Store(":memory:");
+    const accounts = accountsFor(store);
+    const created = accounts.createGuest("Ada", null);
+    expect(created.outcome).toBe("ok");
+    if (created.outcome !== "ok" || !created.token) throw new Error("Guest was not created.");
+    expect(created.user.avatarId).toBe("homescreen");
+    const saved = accounts.setAvatar(created.user.id, "golfer");
+    expect(saved.outcome).toBe("ok");
+    if (saved.outcome !== "ok") throw new Error("Look was not saved.");
+    expect(saved.user.avatarId).toBe("golfer");
+    expect(accounts.userFromCookieValue(created.token)?.avatarId).toBe("golfer");
+    expect(accounts.setAvatar(created.user.id, "nope").outcome).toBe("invalid");
+    expect(accounts.userFromCookieValue(created.token)?.avatarId).toBe("golfer");
+  });
+
   it("keeps the same guest across a later visit", () => {
     const store = new Store(":memory:");
     const accounts = accountsFor(store);

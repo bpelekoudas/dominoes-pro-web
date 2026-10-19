@@ -47,6 +47,7 @@ export async function createApp(options: AppOptions = {}) {
     () => envMs("BOT_PACE_MS", BOT_TURN_MS),
     envMs("TURN_LIMIT_MS", 30_000),
     envMs("CONTINUE_MS", 9_000),
+    envMs("QUICK_WAIT_MS", 60_000),
   );
   const app = Fastify({
     logger: true,
@@ -78,6 +79,8 @@ export async function createApp(options: AppOptions = {}) {
     return { user };
   });
 
+  app.get("/api/open-tables", async () => ({ tables: hub.openTables() }));
+
   app.get("/api/leaderboard", async (request) => {
     const query = request.query as { board?: string };
     const board = query.board === "season" ? "season" : "rating";
@@ -97,7 +100,11 @@ export async function createApp(options: AppOptions = {}) {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to change your name." });
-    const body = request.body as { displayName?: string };
+    const body = request.body as { displayName?: string; avatarId?: string };
+    if (typeof body.avatarId === "string") {
+      const saved = accounts.setAvatar(user.id, body.avatarId);
+      if (saved.outcome !== "ok" || typeof body.displayName !== "string") return sendAuth(reply, request, saved);
+    }
     return sendAuth(reply, request, accounts.rename(user.id, body.displayName ?? ""));
   });
 

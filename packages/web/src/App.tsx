@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
-import { Logo } from "./logo.js";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
 import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
@@ -10,6 +9,8 @@ import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound
 import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
+import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
+import { AvatarFace } from "./avatars";
 
 interface ChatLine {
   id: number;
@@ -42,6 +43,13 @@ export function App() {
   const [leaveArmed, setLeaveArmed] = useState(false);
   const [preview, setPreview] = useState(demoRequested);
   const account = useAccount();
+  const [splash, setSplash] = useState(() => {
+    if (typeof sessionStorage === "undefined") return false;
+    if (sessionStorage.getItem("uhoh.splash") === "1") return false;
+    if (localStorage.getItem(TOKEN_KEY)) return false;
+    return true;
+  });
+  const [iris, setIris] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const leaveRef = useRef(false);
   const connectRef = useRef<(first?: object) => void>(() => undefined);
@@ -161,6 +169,26 @@ export function App() {
     void account.refresh();
   }, [view?.recap, view?.roomCode]);
 
+  const seenRoom = useRef<{ code: string | null; status: string | null }>({ code: null, status: null });
+  useEffect(() => {
+    const previous = seenRoom.current;
+    const intoMatch = Boolean(view && view.status === "playing" && (previous.code !== view.roomCode || previous.status !== "playing"));
+    seenRoom.current = { code: view?.roomCode ?? null, status: view?.status ?? null };
+    if (!intoMatch || reducedMotion()) return;
+    setIris(true);
+    const timer = window.setTimeout(() => setIris(false), 700);
+    return () => window.clearTimeout(timer);
+  }, [view?.roomCode, view?.status]);
+
+  const finishSplash = () => {
+    sessionStorage.setItem("uhoh.splash", "1");
+    setSplash(false);
+  };
+
+  if (menuDemoRequested() && !view) {
+    return <MenuDemo />;
+  }
+
   if (rankDemoRequested() && !view) {
     return <RankDemo />;
   }
@@ -177,7 +205,7 @@ export function App() {
   if (!view) {
     return (
       <>
-        <Home
+        <ArcadeHome
           presetCode={roomFromLocation() ?? ""}
           error={error ?? account.error}
           connecting={status === "connecting"}
@@ -190,11 +218,14 @@ export function App() {
             void begin({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
           }
           onJoin={(name, code) => void begin({ type: "join", name, code })}
+          onQuick={(name, size) => void begin({ type: "quick", name, size })}
           onGuest={(name) => void account.ensureGuest(name)}
           onAccount={() => account.openSheet("profile")}
           onBoard={() => account.showBoard("rating")}
+          onLook={() => account.openSheet("look")}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
         />
+        {splash ? <Splash onDone={finishSplash} /> : null}
         <AccountLayer account={account} />
       </>
     );
@@ -216,6 +247,11 @@ export function App() {
         onDismiss={() => setDismissedHand(handKey(view))}
         onLeaveArm={() => setLeaveArmed(true)}
         onLeave={leave}
+        onCancelQuick={() => {
+          send({ type: "cancel-quick" });
+          leave();
+        }}
+        iris={iris}
         onSend={(message) => send(message)}
         accountUser={account.user}
         onAccount={account.openSheet}
@@ -249,183 +285,6 @@ function handleMessage(
     setError(message.message);
   }
   return message;
-}
-
-function Home({
-  presetCode,
-  error,
-  connecting,
-  initialName,
-  user,
-  onCreate,
-  onSolo,
-  onJoin,
-  onGuest,
-  onAccount,
-  onBoard,
-  onPreview,
-}: {
-  presetCode: string;
-  error: string | null;
-  connecting: boolean;
-  initialName: string;
-  user: AccountUser | null;
-  onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
-  onSolo: (
-    name: string,
-    playerCount: number,
-    boneyardMode: BoneyardMode,
-    seriesLength: SeriesLength,
-    difficulty: "easy" | "medium" | "hard" | "expert",
-  ) => void;
-  onJoin: (name: string, code: string) => void;
-  onGuest: (name: string) => void;
-  onAccount: () => void;
-  onBoard: () => void;
-  onPreview: (() => void) | null;
-}) {
-  const [name, setName] = useState(initialName);
-  useEffect(() => {
-    if (initialName) setName((current) => current || initialName);
-  }, [initialName]);
-  const [playerCount, setPlayerCount] = useState(2);
-  const [boneyardMode, setBoneyardMode] = useState<BoneyardMode>("draw_until");
-  const [seriesLength, setSeriesLength] = useState<SeriesLength>(3);
-  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
-  const [code, setCode] = useState(presetCode);
-
-  return (
-    <main className="home" data-skin="ivory">
-      <header className="brand">
-        <div className="brand-top">
-          <Logo />
-          {user ? <AccountChip user={user} onOpen={onAccount} /> : null}
-        </div>
-        <p className="lede">A private table for friends. The server deals, checks every tile, and keeps score.</p>
-      </header>
-      {error ? <p className="banner error">{error}</p> : null}
-      {connecting ? <p className="banner">Connecting…</p> : null}
-      <label className="name-field">
-        Your name
-        <input value={name} maxLength={16} autoComplete="nickname" onChange={(event) => setName(event.target.value)} />
-      </label>
-      <div className="account-row">
-        <button type="button" className="secondary" disabled={connecting || !name.trim()} onClick={() => onGuest(name)}>
-          Continue as guest
-        </button>
-        <button type="button" className="secondary" onClick={onAccount}>
-          Sign in
-        </button>
-        <button type="button" className="secondary" onClick={onBoard}>
-          Leaderboard
-        </button>
-      </div>
-      <form
-        className="card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!name.trim()) return;
-          onCreate(name, playerCount, boneyardMode, seriesLength);
-        }}
-      >
-        <h2>Start a table</h2>
-        <fieldset>
-          <legend>Players</legend>
-          <Choice
-            value={playerCount}
-            options={[
-              { value: 2, label: "2" },
-              { value: 3, label: "3" },
-              { value: 4, label: "4" },
-            ]}
-            onChange={setPlayerCount}
-          />
-        </fieldset>
-        <fieldset>
-          <legend>Boneyard</legend>
-          <Choice
-            value={boneyardMode}
-            options={[
-              { value: "draw_until", label: "Draw until" },
-              { value: "draw_one", label: "Draw one" },
-            ]}
-            onChange={setBoneyardMode}
-          />
-        </fieldset>
-        <fieldset>
-          <legend>Series</legend>
-          <Choice
-            value={seriesLength}
-            options={[
-              { value: 3, label: "Best of 3" },
-              { value: 5, label: "Best of 5" },
-              { value: 7, label: "Best of 7" },
-            ]}
-            onChange={setSeriesLength}
-          />
-        </fieldset>
-        <button className="primary" type="submit" disabled={connecting || !name.trim()}>
-          Create room
-        </button>
-        <fieldset>
-          <legend>Computer</legend>
-          <Choice
-            value={difficulty}
-            options={[
-              { value: "easy", label: "Easy" },
-              { value: "medium", label: "Medium" },
-              { value: "hard", label: "Hard" },
-              { value: "expert", label: "Expert" },
-            ]}
-            onChange={setDifficulty}
-          />
-        </fieldset>
-        <button
-          className="primary computer"
-          type="button"
-          disabled={connecting || !name.trim()}
-          onClick={() => onSolo(name, playerCount, boneyardMode, seriesLength, difficulty)}
-        >
-          Play vs computer
-        </button>
-        <p className="solo-note">
-          You and {playerCount === 2 ? "one computer" : playerCount === 3 ? "two computers" : "three computers"} on{" "}
-          {difficulty}. The hand starts right away, using the players, boneyard, and series above. Each computer waits
-          two seconds.
-        </p>
-      </form>
-      <form
-        className="card join-card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!name.trim()) return;
-          onJoin(name, code);
-        }}
-      >
-        <h2>Join with a code</h2>
-        <label>
-          Room code
-          <input
-            className="code-input"
-            value={code}
-            maxLength={6}
-            autoCapitalize="characters"
-            autoCorrect="off"
-            onChange={(event) => setCode(event.target.value.toUpperCase())}
-            required
-          />
-        </label>
-        <button className="primary" type="submit" disabled={connecting || !name.trim()}>
-          Sit down
-        </button>
-      </form>
-      {onPreview ? (
-        <button type="button" className="uhoh-test" data-demo="uhoh" onClick={onPreview}>
-          Preview UH-OH
-        </button>
-      ) : null}
-    </main>
-  );
 }
 
 function Choice<T extends string | number>({
@@ -467,6 +326,8 @@ function Game({
   onDismiss,
   onLeaveArm,
   onLeave,
+  onCancelQuick,
+  iris,
   onSend,
   accountUser,
   onAccount,
@@ -484,6 +345,8 @@ function Game({
   onDismiss: () => void;
   onLeaveArm: () => void;
   onLeave: () => void;
+  onCancelQuick: () => void;
+  iris: boolean;
   onSend: (message: object) => void;
   accountUser: AccountUser | null;
   onAccount: () => void;
@@ -517,7 +380,7 @@ function Game({
 
   const playing = view.status !== "lobby";
   return (
-    <main className={`felt-app${chatOpen ? " chat-open" : ""}`} data-skin="ivory">
+    <main className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}`} data-skin="ivory">
       <div className="felt-column">
       <header className="playbar">
         <PlayMark />
@@ -577,14 +440,25 @@ function Game({
         <section className="ended-screen" data-screen="player-left">
           <p className="result-kicker">Game ended - {view.ended.name} left</p>
           <ScoreList view={view} />
-          {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} /> : null}
+          {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
         </section>
       ) : null}
       {view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended ? (
         <HandSummary view={view} onContinue={() => onSend({ type: "continue" })} />
       ) : null}
 
-      {view.status === "lobby" ? (
+      {view.status === "lobby" && view.quick ? (
+        <QuickWait
+          players={view.players}
+          playerCount={view.settings.playerCount}
+          waitUntil={view.quick.waitUntil}
+          canFill={view.quick.canFill}
+          serverNow={view.serverNow}
+          onCancel={onCancelQuick}
+          onFill={() => onSend({ type: "fill-quick" })}
+          onKeep={() => onSend({ type: "keep-waiting" })}
+        />
+      ) : view.status === "lobby" ? (
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
@@ -698,7 +572,7 @@ function Lobby({
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
             <span className="who">
-              {player.bot ? <BotMark /> : null}
+              <AvatarFace id={player.avatarId} bot={player.bot} />
               <span>
                 {player.isYou ? `${player.name} (you)` : player.name}
                 {player.bot ? (
@@ -815,7 +689,6 @@ function SeatRail({
 }
 
 function SeatChip({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
-  const initial = player.name.trim().charAt(0).toUpperCase() || "?";
   const clock = useServerNow(view.serverNow);
   const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
@@ -826,22 +699,11 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
       data-turn={player.isTurn ? "true" : "false"}
       data-turn-timer={player.isTurn && view.turnDeadline ? "true" : "false"}
     >
-      <span className="avatar" aria-hidden="true">
-        {player.isTurn && view.turnDeadline ? (
-          <svg className="timer-ring" viewBox="0 0 36 36">
-            <circle cx="18" cy="18" r="16" pathLength="100" />
-            <circle
-              cx="18"
-              cy="18"
-              r="16"
-              pathLength="100"
-              className="timer-arc"
-              style={{ strokeDashoffset: `${100 - ratio * 100}` }}
-            />
-          </svg>
-        ) : null}
-        {player.bot ? <BotMark /> : initial}
-      </span>
+      <AvatarFace
+        id={player.avatarId}
+        bot={player.bot}
+        timer={player.isTurn && view.turnDeadline ? ratio : null}
+      />
       <span className="chip-text">
         <span className="chip-name">
           {player.isYou ? "You" : player.name}
@@ -969,18 +831,6 @@ function LeaveIcon() {
   );
 }
 
-function BotMark() {
-  return (
-    <svg className="bot-mark" viewBox="0 0 24 36" aria-hidden="true">
-      <rect x="1.5" y="1.5" width="21" height="33" rx="3" />
-      <line x1="2" y1="18" x2="22" y2="18" />
-      <circle cx="12" cy="9" r="2.2" />
-      <circle cx="8.2" cy="27" r="2" />
-      <circle cx="15.8" cy="27" r="2" />
-    </svg>
-  );
-}
-
 function scoreMathOn(): boolean {
   return window.__UHOH__?.showScoreMath !== false;
 }
@@ -1075,7 +925,7 @@ function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () =>
           ))}
       </div>
       <ScoreList view={view} />
-      {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} /> : null}
+      {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} faces={playerFaces(view)} /> : null}
       {view.betweenHands ? (
         <button type="button" className="primary" data-action="continue" onClick={onContinue}>
           Continue{seconds !== null ? ` · ${seconds}` : ""}
@@ -1190,6 +1040,10 @@ function handKey(view: PlayerView): string {
 
 function playerNames(view: PlayerView): Map<string, string> {
   return new Map(view.players.map((player) => [player.id, player.isYou ? "You" : player.name]));
+}
+
+function playerFaces(view: PlayerView): Map<string, string> {
+  return new Map(view.players.map((player) => [player.id, player.avatarId]));
 }
 
 function nameOf(view: PlayerView, playerId: string): string {

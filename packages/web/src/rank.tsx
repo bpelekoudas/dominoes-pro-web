@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Portrait } from "./avatars";
 import type { RankRecap } from "@uhoh/rules";
 
 export interface RankFacts {
@@ -64,12 +65,17 @@ export function RankLine({
   );
 }
 
-export function ProfileStats({ user }: { user: RankFacts }) {
+export function ProfileStats({ user, avatarId }: { user: RankFacts; avatarId?: string | null }) {
   const span = user.nextAt == null ? 1 : Math.max(1, user.nextAt - user.stepFloor);
   const filled = user.nextAt == null ? 1 : Math.min(1, Math.max(0, (user.seasonPoints - user.stepFloor) / span));
   const nextLabel = user.nextAt == null ? "Top of the ladder" : `${user.nextAt.toLocaleString()} pts`;
   return (
     <section className="profile-stats" data-screen="profile">
+      {avatarId ? (
+        <div className="profile-portrait">
+          <Portrait id={avatarId} size="grid" />
+        </div>
+      ) : null}
       <div className="profile-rank-row">
         <RankBadge tier={user.tierId} />
         <div>
@@ -129,7 +135,15 @@ export function ProfileStats({ user }: { user: RankFacts }) {
   );
 }
 
-export function RankRecapView({ recap, names }: { recap: RankRecap; names: Map<string, string> }) {
+export function RankRecapView({
+  recap,
+  names,
+  faces,
+}: {
+  recap: RankRecap;
+  names: Map<string, string>;
+  faces?: Map<string, string>;
+}) {
   return (
     <div className="rank-recap" data-ranked={recap.ranked ? "true" : "false"} data-screen="rank-recap">
       <p className="eyebrow">{recap.ranked ? "Rating" : "Season points"}</p>
@@ -150,7 +164,10 @@ export function RankRecapView({ recap, names }: { recap: RankRecap; names: Map<s
           return (
             <li key={player.playerId} data-player-id={player.playerId}>
               <div className="recap-head">
-                <strong>{names.get(player.playerId) ?? "Player"}</strong>
+                <strong className="recap-who">
+                  {faces?.get(player.playerId) ? <Portrait id={faces.get(player.playerId)} size="chip" /> : null}
+                  {names.get(player.playerId) ?? "Player"}
+                </strong>
                 {player.ranked && player.ratingBefore != null && player.ratingAfter != null ? (
                   <span className={`recap-delta${player.provisional ? " provisional" : ""}`} data-delta={player.delta ?? 0}>
                     {player.ratingBefore} → {player.ratingAfter}
@@ -195,6 +212,7 @@ export function RankRecapView({ recap, names }: { recap: RankRecap; names: Map<s
 
 interface BoardRow {
   name: string;
+  avatarId?: string;
   guest: boolean;
   rating: number;
   provisional: boolean;
@@ -249,6 +267,7 @@ export function Leaderboard({
         {rows.map((row, index) => (
           <li key={`${row.name}-${index}`}>
             <span className="board-place">{index + 1}</span>
+            {row.avatarId ? <Portrait id={row.avatarId} size="chip" /> : null}
             <RankBadge tier={row.tierId} />
             <span className="board-name">
               {row.name}

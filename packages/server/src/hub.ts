@@ -15,6 +15,9 @@ import {
   randomSeed,
   RULES_VERSION,
   turnHoldMs,
+  avatarForSeed,
+  pickDistinctAvatar,
+  resolveAvatar,
   BIG_MOMENT_SCORE,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
@@ -54,8 +57,14 @@ export type ClientMessage =
       boneyardMode: string;
       seriesLength: number;
       casual?: boolean;
+      /** Public quick-match table. The phone does not send this for a private room. */
+      listed?: boolean;
     }
   | { type: "set-casual"; casual: boolean }
+  | { type: "quick"; name: string; size: number | "any" }
+  | { type: "fill-quick" }
+  | { type: "keep-waiting" }
+  | { type: "cancel-quick" }
   | { type: "join"; code: string; name: string }
   | { type: "reconnect"; token: string }
   | { type: "start" }
@@ -90,6 +99,7 @@ interface LiveSeat {
   missedTurn: boolean;
   /** Account that sat down, when the phone had one. Computers stay null. */
   userId: string | null;
+  avatarId: string;
 }
 
 interface LiveRoom {
@@ -103,6 +113,11 @@ interface LiveRoom {
     seriesLength: SeriesLength;
   };
   casual: boolean;
+  /** Public quick-match table others can find while it is waiting. */
+  listed: boolean;
+  createdAt: number;
+  /** When the wait offer may appear. Null on a private room. */
+  quickWaitUntil: number | null;
   recap: RankRecap | null;
   status: "lobby" | "playing" | "complete" | "abandoned";
   seats: LiveSeat[];
@@ -125,6 +140,9 @@ const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
 
 /** Computers wait this long before they play, so a person can watch the tile. */
 export const BOT_TURN_MS = 2_000;
+
+/** How long a quick table waits before it offers to fill empty seats with computers. */
+export const QUICK_WAIT_MS = 60_000;
 
 function defaultBotPace(): number {
   return BOT_TURN_MS;
@@ -184,6 +202,7 @@ export class Hub {
     private readonly botPace: () => number = defaultBotPace,
     private readonly turnLimitMs = 30_000,
     private readonly continueMs = 9_000,
+    private readonly quickWaitMs = QUICK_WAIT_MS,
   ) {
     this.restore();
   }
@@ -200,6 +219,7 @@ export class Hub {
     if (message.type === "join") return this.join(message, send, close, accountUserId);
     if (message.type === "reconnect") return this.reconnect(message.token, send, close, accountUserId);
     if (message.type === "solo") return this.solo(message, send, close, accountUserId);
+    if (message.type === "quick") return this.quick(message, send, close, accountUserId);
     return { ok: false, error: "Join a table first." };
   }
 
@@ -215,7 +235,52 @@ export class Hub {
     else     if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
     else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
     else if (message.type === "set-casual") this.setCasual(room, seat, message.casual === true);
+    else if (message.type === "fill-quick") this.fillQuick(room, seat);
+    else if (message.type === "keep-waiting") this.keepWaiting(room, seat);
+    else if (message.type === "cancel-quick") this.cancelQuick(room, seat);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
+  }
+
+  /** Public quick tables that are still waiting. */
+  openTables(): Array<{
+    code: string;
+    playerCount: number;
+    seated: number;
+    players: Array<{
+      name: string;
+      avatarId: string;
+      rating: number;
+      provisional: boolean;
+      tierId: string;
+      tierName: string;
+      step: "III" | "II" | "I" | null;
+    }>;
+  }> {
+    const tables = [];
+    for (const room of this.rooms.values()) {
+      if (!room.listed || room.status !== "lobby") continue;
+      if (room.seats.length >= room.settings.playerCount) continue;
+      const humans = room.seats.filter((seat) => !seat.bot);
+      tables.push({
+        code: room.code,
+        playerCount: room.settings.playerCount,
+        seated: humans.length,
+        players: humans.map((seat) => {
+          const rank = this.rankFor(seat.userId);
+          return {
+            name: seat.name,
+            avatarId: this.avatarFor(seat),
+            rating: rank?.rating ?? 1200,
+            provisional: rank?.provisional ?? true,
+            tierId: rank?.tierId ?? "rookie",
+            tierName: rank?.tierName ?? "Rookie",
+            step: rank?.step ?? null,
+          };
+        }),
+      });
+    }
+    tables.sort((a, b) => b.seated - a.seated || a.code.localeCompare(b.code));
+    return tables;
   }
 
   disconnect(playerId: string, generation: number): void {
@@ -260,7 +325,10 @@ export class Hub {
         boneyardMode: message.boneyardMode,
         seriesLength: message.seriesLength,
       },
-      casual: message.casual === true,
+      casual: message.listed === true ? false : message.casual === true,
+      listed: message.listed === true,
+      createdAt: Date.now(),
+      quickWaitUntil: message.listed === true ? Date.now() + this.quickWaitMs : null,
       recap: null,
       status: "lobby",
       seats: [],
@@ -272,7 +340,16 @@ export class Hub {
       continueDeadline: null,
       ended: null,
     };
-    const seat = this.makeSeat(room.hostId, name, undefined, false, false, null, accountUserId);
+    const seat = this.makeSeat(
+      room.hostId,
+      name,
+      undefined,
+      false,
+      false,
+      null,
+      accountUserId,
+      this.portraitFor(accountUserId),
+    );
     room.seats.push(seat);
     this.store.insertRoom({
       id: room.id,
@@ -286,6 +363,7 @@ export class Hub {
       created_at: created,
       rules_version: RULES_VERSION,
       casual: room.casual ? 1 : 0,
+      listed: room.listed ? 1 : 0,
     });
     this.store.insertPlayer({
       id: seat.id,
@@ -297,6 +375,7 @@ export class Hub {
       bot: 0,
       difficulty: null,
       user_id: accountUserId,
+      avatar_id: seat.avatarId,
     });
     this.remember(room);
     const generation = this.bind(seat, send, close);
@@ -317,7 +396,16 @@ export class Hub {
     if (!room) return { ok: false, error: "No table with that code." };
     if (room.status !== "lobby") return { ok: false, error: "That game has already started." };
     if (room.seats.length >= room.settings.playerCount) return { ok: false, error: "That table is full." };
-    const seat = this.makeSeat(makeId("p"), name, undefined, false, false, null, accountUserId);
+    const seat = this.makeSeat(
+      makeId("p"),
+      name,
+      undefined,
+      false,
+      false,
+      null,
+      accountUserId,
+      this.portraitFor(accountUserId),
+    );
     room.seats.push(seat);
     this.byPlayer.set(seat.id, room.id);
     this.store.insertPlayer({
@@ -330,9 +418,18 @@ export class Hub {
       bot: 0,
       difficulty: null,
       user_id: accountUserId,
+      avatar_id: seat.avatarId,
     });
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
+    if (room.listed) {
+      room.quickWaitUntil = Date.now() + this.quickWaitMs;
+      if (room.seats.length >= room.settings.playerCount) {
+        const host = room.seats.find((candidate) => candidate.id === room.hostId);
+        if (host) this.start(room, host);
+        return { ok: true, session: { playerId: seat.id, generation } };
+      }
+    }
     this.broadcast(room);
     return { ok: true, session: { playerId: seat.id, generation } };
   }
@@ -645,12 +742,22 @@ export class Hub {
       this.tell(host, { type: "error", message: "That table is full." });
       return;
     }
+    if (room.listed) {
+      this.tell(host, { type: "error", message: "A quick table stays all human until you fill the empty seats." });
+      return;
+    }
     if (room.seats.filter((seat) => seat.bot).length >= 3) {
       this.tell(host, { type: "error", message: "Three computers is the table limit." });
       return;
     }
+    this.pushBot(room, difficulty);
+    this.broadcast(room);
+  }
+
+  private pushBot(room: LiveRoom, difficulty: BotDifficulty): void {
     const name = this.nextBotName(room);
-    const seat = this.makeSeat(makeId("p"), name, randomBytes(32).toString("hex"), true, true, difficulty);
+    const avatarId = pickDistinctAvatar(room.seats.map((seat) => seat.avatarId), Math.random);
+    const seat = this.makeSeat(makeId("p"), name, randomBytes(32).toString("hex"), true, true, difficulty, null, avatarId);
     room.seats.push(seat);
     this.byPlayer.set(seat.id, room.id);
     this.store.insertPlayer({
@@ -662,8 +769,8 @@ export class Hub {
       created_at: nowIso(),
       bot: 1,
       difficulty,
+      avatar_id: avatarId,
     });
-    this.broadcast(room);
   }
 
   private removeBot(room: LiveRoom, host: LiveSeat, playerId: string): void {
@@ -807,19 +914,12 @@ export class Hub {
         seriesLength: row.series_length as SeriesLength,
       },
       casual: row.casual === 1,
+      listed: row.listed === 1,
+      createdAt: Date.parse(row.created_at) || Date.now(),
+      quickWaitUntil: row.listed === 1 && row.status === "lobby" ? Date.now() + this.quickWaitMs : null,
       recap: null,
       status: row.status as LiveRoom["status"],
-      seats: players.map((player) =>
-        this.makeSeat(
-          player.id,
-          player.name,
-          player.token,
-          player.bot === 1,
-          player.bot === 1,
-          asDifficulty(player.difficulty),
-          player.user_id ?? null,
-        ),
-      ),
+      seats: [],
       match: null,
       handId: null,
       actionSeq: 0,
@@ -828,6 +928,28 @@ export class Hub {
       continueDeadline: null,
       ended: null,
     };
+    const worn = new Set<string>();
+    for (const player of players) {
+      const avatar =
+        player.avatar_id && player.avatar_id.length > 0
+          ? player.avatar_id
+          : player.bot === 1
+            ? avatarForSeed(player.id, worn)
+            : this.portraitFor(player.user_id ?? null);
+      worn.add(avatar);
+      room.seats.push(
+        this.makeSeat(
+          player.id,
+          player.name,
+          player.token,
+          player.bot === 1,
+          player.bot === 1,
+          asDifficulty(player.difficulty),
+          player.user_id ?? null,
+          avatar,
+        ),
+      );
+    }
     if (row.status !== "lobby") {
       const logged = this.store.handsForSeries(row.id, row.series_id).map((hand) => ({
         deck: JSON.parse(hand.deck_json) as string[],
@@ -883,6 +1005,7 @@ export class Hub {
     bot = false,
     difficulty: BotDifficulty | null = null,
     userId: string | null = null,
+    avatarId: string | null = null,
   ): LiveSeat {
     return {
       id,
@@ -898,6 +1021,7 @@ export class Hub {
       leaveTimer: null,
       chatTimes: [],
       userId: bot ? null : userId,
+      avatarId: resolveAvatar(avatarId),
     };
   }
 
@@ -946,7 +1070,103 @@ export class Hub {
     this.turnTimers.set(room.id, timer);
   }
 
+  private quick(
+    message: Extract<ClientMessage, { type: "quick" }>,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+    accountUserId: string | null,
+  ): { ok: true; session: BoundSession } | { ok: false; error: string } {
+    const name = cleanName(message.name);
+    if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+    const size = message.size;
+    if (size !== 2 && size !== 3 && size !== 4 && size !== "any") {
+      return { ok: false, error: "Pick 2, 3, 4, or any size." };
+    }
+    const existing = this.findQuick(size);
+    if (existing) return this.join({ type: "join", name, code: existing.code }, send, close, accountUserId);
+    return this.create(
+      {
+        type: "create",
+        name,
+        playerCount: size === "any" ? 4 : size,
+        boneyardMode: "draw_until",
+        seriesLength: 3,
+        listed: true,
+      },
+      send,
+      close,
+      accountUserId,
+    );
+  }
+
+  private findQuick(size: 2 | 3 | 4 | "any"): LiveRoom | null {
+    const open = [...this.rooms.values()].filter(
+      (room) =>
+        room.listed &&
+        room.status === "lobby" &&
+        room.seats.length < room.settings.playerCount &&
+        room.seats.every((seat) => !seat.bot) &&
+        (size === "any" || room.settings.playerCount === size),
+    );
+    open.sort((a, b) => b.seats.length - a.seats.length || a.createdAt - b.createdAt);
+    return open[0] ?? null;
+  }
+
+  private fillQuick(room: LiveRoom, seat: LiveSeat): void {
+    if (!room.listed || room.status !== "lobby") {
+      this.tell(seat, { type: "error", message: "This table has already started." });
+      return;
+    }
+    if (Date.now() < (room.quickWaitUntil ?? 0)) {
+      this.tell(seat, { type: "error", message: "Give the table a minute." });
+      return;
+    }
+    while (room.seats.length < room.settings.playerCount) this.pushBot(room, "medium");
+    const host = room.seats.find((candidate) => candidate.id === room.hostId) ?? seat;
+    this.start(room, host);
+  }
+
+  private keepWaiting(room: LiveRoom, seat: LiveSeat): void {
+    if (!room.listed || room.status !== "lobby") return;
+    room.quickWaitUntil = Date.now() + this.quickWaitMs;
+    this.broadcast(room);
+    void seat;
+  }
+
+  private cancelQuick(room: LiveRoom, seat: LiveSeat): void {
+    if (!room.listed || room.status !== "lobby") {
+      this.tell(seat, { type: "error", message: "This table has already started." });
+      return;
+    }
+    seat.connected = false;
+    const close = seat.close;
+    seat.send = null;
+    seat.close = null;
+    if (seat.leaveTimer) clearTimeout(seat.leaveTimer);
+    seat.leaveTimer = null;
+    this.removeLobbySeat(room.id, seat.id);
+    close?.();
+  }
+
+  private portraitFor(userId: string | null): string {
+    if (!userId) return resolveAvatar(null);
+    try {
+      return resolveAvatar(this.store.user(userId)?.avatar_id);
+    } catch {
+      return resolveAvatar(null);
+    }
+  }
+
+  private avatarFor(seat: LiveSeat): string {
+    if (!seat.bot && seat.userId) return this.portraitFor(seat.userId);
+    return resolveAvatar(seat.avatarId);
+  }
+
   private setCasual(room: LiveRoom, seat: LiveSeat, casual: boolean): void {
+    if (room.listed) {
+      this.tell(seat, { type: "error", message: "A quick table stays ranked until computers sit down." });
+      return;
+    }
     if (seat.id !== room.hostId) {
       this.tell(seat, { type: "error", message: "Only the host can change that." });
       return;
@@ -1073,9 +1293,14 @@ export class Hub {
         bot: seat.bot,
         difficulty: seat.difficulty,
         rank: this.rankFor(seat.userId),
+        avatarId: this.avatarFor(seat),
       })),
       settings: { ...room.settings, casual: room.casual },
       recap: this.showRecap(room) ? room.recap : null,
+      quick:
+        room.listed && room.status === "lobby"
+          ? { waitUntil: room.quickWaitUntil ?? 0, canFill: Date.now() >= (room.quickWaitUntil ?? 0) }
+          : null,
       youId,
       turnDeadline: room.turnDeadline,
       turnBudgetMs: this.turnLimitMs,

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PointBreakdown, RankRecap, RankedPlayerRecap, SeatRank, TierStep } from "@uhoh/rules";
+import { resolveAvatar, type PointBreakdown, type RankRecap, type RankedPlayerRecap, type SeatRank, type TierStep } from "@uhoh/rules";
 import type { StandingUpdate, Store, UserRow } from "./db.js";
 
 export const START_RATING = 1200;
@@ -343,6 +343,7 @@ export function leaderboard(store: Store, board: "rating" | "season", now: Date,
       const tier = tierAt(user.season_points ?? 0);
       return {
         name: user.display_name,
+        avatarId: resolveAvatar(user.avatar_id),
         guest: user.is_guest === 1,
         rating: user.rating ?? START_RATING,
         provisional: provisional(user.ranked_games ?? 0),

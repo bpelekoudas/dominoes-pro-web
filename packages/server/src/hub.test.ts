@@ -739,6 +739,86 @@ async function untilBotActs(
   throw new Error("A computer never moved.");
 }
 
+describe("quick match", () => {
+  it("seats two players at the same public table and deals when it is full", () => {
+    const { hub, connect } = setup();
+    const ada = connect({ type: "quick", name: "Ada", size: 2 });
+    const waiting = latestView(ada.messages);
+    expect(waiting?.status).toBe("lobby");
+    expect(waiting?.quick?.canFill).toBe(false);
+    expect(waiting?.players[0]?.avatarId).toBe("homescreen");
+    expect(hub.openTables()).toHaveLength(1);
+
+    const bo = connect({ type: "quick", name: "Bo", size: 2 });
+    const started = latestView(bo.messages);
+    expect(started?.status).toBe("playing");
+    expect(started?.roomCode).toBe(waiting?.roomCode);
+    expect(started?.players.every((player) => !player.bot)).toBe(true);
+    expect(hub.openTables()).toHaveLength(0);
+    expect(latestView(ada.messages)?.status).toBe("playing");
+  });
+
+  it("lets Any join an open table, and a different size opens another", () => {
+    const { hub, connect } = setup();
+    const ada = connect({ type: "quick", name: "Ada", size: 4 });
+    const any = connect({ type: "quick", name: "Bo", size: "any" });
+    expect(latestView(any.messages)?.roomCode).toBe(latestView(ada.messages)?.roomCode);
+    expect(latestView(any.messages)?.settings.playerCount).toBe(4);
+    expect(latestView(any.messages)?.status).toBe("lobby");
+
+    const other = connect({ type: "quick", name: "Cy", size: 2 });
+    expect(latestView(other.messages)?.roomCode).not.toBe(latestView(ada.messages)?.roomCode);
+    expect(hub.openTables()).toHaveLength(2);
+    const codes = hub.openTables().map((table) => table.code);
+    expect(codes).toContain(latestView(ada.messages)?.roomCode);
+  });
+
+  it("refuses computers until the wait is up, then an all-computer fill is unranked", () => {
+    const { hub, connect } = setup();
+    const ada = connect({ type: "quick", name: "Ada", size: 2 });
+    hub.command(ada.playerId, { type: "fill-quick" });
+    expect(ada.messages.at(-1)?.type).toBe("error");
+    expect(latestView(ada.messages)?.status).toBe("lobby");
+
+    const store = new Store(":memory:");
+    const fast = new Hub(store, 30, () => 1, 30_000, 9_000, 0);
+    const messages: ServerMessage[] = [];
+    const seated = fast.connect(
+      { type: "quick", name: "Ada", size: 2 },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!seated.ok) throw new Error(seated.error);
+    fast.command(seated.session.playerId, { type: "fill-quick" });
+    const view = latestView(messages);
+    expect(view?.status).toBe("playing");
+    expect(view?.players.filter((player) => player.bot)).toHaveLength(1);
+    const portraits = view?.players.map((player) => player.avatarId) ?? [];
+    expect(new Set(portraits).size).toBe(portraits.length);
+    expect(portraits.filter((id) => id !== "homescreen").length).toBe(1);
+  });
+
+  it("drops a waiting seat on cancel and keeps a private room off the list", () => {
+    const { hub, connect } = setup();
+    const ada = connect({ type: "quick", name: "Ada", size: 4 });
+    hub.command(ada.playerId, { type: "cancel-quick" });
+    expect(hub.openTables()).toHaveLength(0);
+
+    connect({ type: "create", name: "Pat", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 });
+    expect(hub.openTables()).toHaveLength(0);
+  });
+
+  it("brings a waiting quick table back after a restart", () => {
+    const { store, connect } = setup();
+    const ada = connect({ type: "quick", name: "Ada", size: 3 });
+    const code = latestView(ada.messages)?.roomCode;
+    const again = new Hub(store, 30);
+    const tables = again.openTables();
+    expect(tables.map((table) => table.code)).toContain(code);
+    expect(tables[0]?.players[0]?.avatarId).toBe("homescreen");
+  });
+});
+
 function boardIds(view: PlayerView | null): string[] {
   if (!view?.board) return [];
   const ids: string[] = [];

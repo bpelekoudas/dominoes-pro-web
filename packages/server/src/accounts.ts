@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
 import { cleanName } from "./hub.js";
+import { isAvatarId, resolveAvatar } from "@uhoh/rules";
 import { describePlayer, type PublicStanding } from "./ranking.js";
 
 export type ProviderName = "google" | "apple" | "email" | "guest";
@@ -185,6 +186,14 @@ export class Accounts {
       created_at: stamp,
     });
     return { outcome: "ok", user: this.present(user.id)!, token: this.issue(user.id) };
+  }
+
+  setAvatar(userId: string, avatarId: string): SignInResult {
+    if (!isAvatarId(avatarId)) return { outcome: "invalid", error: "Pick one of the characters." };
+    const user = this.store.user(userId);
+    if (!user) return { outcome: "invalid", error: "That profile is gone." };
+    this.store.updateUser(userId, { avatar_id: avatarId, updated_at: this.stamp() });
+    return { outcome: "ok", user: this.present(userId)!, token: null };
   }
 
   rename(userId: string, displayName: string): SignInResult {
@@ -410,7 +419,7 @@ export class Accounts {
     return {
       id: user.id,
       displayName: user.display_name,
-      avatarId: user.avatar_id,
+      avatarId: resolveAvatar(user.avatar_id),
       guest: user.is_guest === 1,
       providers,
       ...standing,

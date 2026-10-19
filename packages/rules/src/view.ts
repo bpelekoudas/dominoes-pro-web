@@ -107,6 +107,7 @@ export interface PlayerView {
     bot: boolean;
     difficulty: BotDifficulty | null;
     rank: SeatRank | null;
+    avatarId: string;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -149,6 +150,8 @@ export interface PlayerView {
     handNumber: number;
   } | null;
   recap: RankRecap | null;
+  /** Set while a public quick table is still waiting for people. */
+  quick: { waitUntil: number; canFill: boolean } | null;
   lastPlay: LastPlay | null;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
@@ -161,6 +164,7 @@ export interface TableSeat {
   bot: boolean;
   difficulty: BotDifficulty | null;
   rank?: SeatRank | null;
+  avatarId?: string | null;
 }
 
 export interface TableMeta {
@@ -175,6 +179,7 @@ export interface TableMeta {
     casual?: boolean;
   };
   recap?: RankRecap | null;
+  quick?: { waitUntil: number; canFill: boolean } | null;
   youId: string;
   turnDeadline?: number | null;
   turnBudgetMs?: number;
@@ -232,6 +237,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       bot: seat.bot,
       difficulty: seat.difficulty,
       rank: seat.rank ?? null,
+      avatarId: seat.avatarId || "homescreen",
     })),
     you: { hand: youHand },
     board,
@@ -287,6 +293,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
         }
       : null,
     recap: meta.recap ?? null,
+    quick: meta.quick ?? null,
     lastPlay: match?.lastPlay ?? null,
     lastDraw,
     taunts: tauntsForPlayer(),
