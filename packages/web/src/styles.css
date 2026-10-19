@@ -436,6 +436,7 @@ input {
 }
 .hint, .draw-note { margin: 2px 0; font-size: 0.85rem; }
 .table-scroll {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -461,6 +462,8 @@ input {
 .board-tile .half { padding: 3px; }
 .board-tile .half i { width: 5px; height: 5px; }
 .board-tile.last-move { z-index: 1; }
+.board-tile.is-slamming,
+.uhoh-spot.is-slamming { visibility: hidden; }
 .board-tile.last-move .domino {
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.45),
@@ -779,8 +782,171 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .reveal-tiles .domino { width: 44px; height: 88px; }
 .round-note { color: var(--gold); }
 
+.uhoh-test {
+  align-self: flex-start;
+  min-height: 44px;
+  margin: 8px 14px 16px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--gold);
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
+}
+.tray-copy .uhoh-test { margin: 0; min-height: 32px; padding: 0 4px; font-size: 0.95rem; }
+
+.uhoh-preview {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--streaks);
+}
+.uhoh-stage {
+  position: relative;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.uhoh-chain { display: flex; align-items: center; gap: 2px; }
+.uhoh-spot .domino.vertical { width: 44px; height: 88px; }
+.uhoh-spot .domino.horizontal { width: 88px; height: 44px; }
+.uhoh-preview-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+}
+.uhoh-preview-bar .primary { min-height: 44px; }
+
+.uhoh-cracks,
+.uhoh-flash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+.uhoh-flash {
+  opacity: 0;
+  background: radial-gradient(circle at var(--hit-x, 50%) var(--hit-y, 46%), rgba(239, 239, 239, 0.42), transparent 32%);
+  animation: uhoh-impact 420ms ease-out 260ms forwards;
+}
+@keyframes uhoh-impact {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+.uhoh-slam {
+  position: fixed;
+  z-index: 72;
+  pointer-events: none;
+  transform-origin: center center;
+  animation: uhoh-slam 280ms cubic-bezier(0.15, 0.85, 0.2, 1) forwards;
+}
+.uhoh-slam .domino { width: 100%; height: 100%; }
+@keyframes uhoh-slam {
+  0% {
+    transform: translate3d(-50%, calc(-50% - 56px), 0) scale(1.6);
+    filter: blur(2.5px) drop-shadow(0 26px 12px rgba(0, 0, 0, 0.5));
+  }
+  76% {
+    transform: translate3d(-50%, -50%, 0) scale(1.05);
+    filter: blur(0) drop-shadow(0 3px 0 rgba(0, 0, 0, 0.55));
+  }
+  88% { transform: translate3d(-50%, calc(-50% - 7px), 0) scale(0.98); filter: none; }
+  100% { transform: translate3d(-50%, -50%, 0) scale(1); filter: none; }
+}
+.uhoh-title {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  z-index: 80;
+  margin: 0;
+  pointer-events: none;
+  text-align: center;
+  opacity: 0;
+  animation: uhoh-title 1400ms ease-out 220ms forwards;
+}
+.uhoh-word {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-size: min(22vw, 112px);
+  line-height: 0.85;
+  letter-spacing: 0.02em;
+  color: #e31e26;
+  -webkit-text-stroke: 2px #d5a336;
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 1px #efefef,
+    0 0 10px rgba(213, 163, 54, 0.95),
+    0 0 22px rgba(213, 163, 54, 0.75),
+    0 2px 0 rgba(239, 239, 239, 0.35);
+}
+.uhoh-hyphen { width: min(8vw, 36px); height: auto; flex: none; filter: drop-shadow(0 0 8px rgba(213, 163, 54, 0.8)); }
+.uhoh-points {
+  margin: 2px 0 0;
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-size: min(12vw, 56px);
+  line-height: 1;
+  color: #d5a336;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(213, 163, 54, 0.7);
+}
+@keyframes uhoh-title {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.55); }
+  16% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.12); }
+  30% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
+  70% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(-50%, -46%, 0) scale(1.03); }
+}
+@keyframes uhoh-flash {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0); }
+  12% { opacity: 1; transform: translate3d(-50%, -50%, 0); }
+  68% { opacity: 1; transform: translate3d(-50%, -50%, 0); }
+  100% { opacity: 0; transform: translate3d(-50%, -50%, 0); }
+}
+.uhoh-title.reduced { animation: uhoh-flash 900ms ease-out forwards; }
+@keyframes uhoh-shake-small {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-4px, 2px, 0); }
+  40% { transform: translate3d(5px, -3px, 0); }
+  60% { transform: translate3d(-3px, 3px, 0); }
+  80% { transform: translate3d(2px, -1px, 0); }
+}
+@keyframes uhoh-shake-medium {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-8px, 4px, 0); }
+  40% { transform: translate3d(10px, -6px, 0); }
+  60% { transform: translate3d(-6px, 6px, 0); }
+  80% { transform: translate3d(3px, -2px, 0); }
+}
+@keyframes uhoh-shake-big {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  15% { transform: translate3d(-14px, 8px, 0); }
+  32% { transform: translate3d(16px, -10px, 0); }
+  50% { transform: translate3d(-11px, 9px, 0); }
+  68% { transform: translate3d(7px, -5px, 0); }
+  84% { transform: translate3d(-3px, 2px, 0); }
+}
+.table-scroll.shaking,
+.uhoh-preview.shaking { animation-duration: 380ms; animation-timing-function: linear; }
+.table-scroll[data-shake="small"],
+.uhoh-preview[data-shake="small"] { animation-name: uhoh-shake-small; }
+.table-scroll[data-shake="medium"],
+.uhoh-preview[data-shake="medium"] { animation-name: uhoh-shake-medium; }
+.table-scroll[data-shake="big"],
+.uhoh-preview[data-shake="big"] { animation-name: uhoh-shake-big; }
+
 @media (prefers-reduced-motion: reduce) {
   .hand-tile, .hand-tile.playable, .hand-tile.selected { transform: none; }
   .board-stage, .drag-ghost.spring, .score-pop, .bone-pile.pulse { animation: none; transition: none; }
   .score-pop { opacity: 1; }
+  .uhoh-slam, .uhoh-cracks, .uhoh-flash { display: none; }
+  .table-scroll.shaking, .uhoh-preview.shaking { animation: none; }
+  .uhoh-title { animation: uhoh-flash 900ms ease-out forwards; }
 }

@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { demoAward, MomentLayer, type HitBox } from "./moment.js";
 import {
   chooseDropEnd,
   type DropBox,
@@ -66,6 +68,7 @@ export function Table({
   aimEndId,
   onPlay,
   onSelect,
+  replayToken = 0,
 }: {
   view: PlayerView;
   selectedTile: string | null;
@@ -73,6 +76,7 @@ export function Table({
   aimEndId: string | null;
   onPlay: (tileId: string, endId: string) => void;
   onSelect: (tileId: string | null) => void;
+  replayToken?: number;
 }) {
   const board = view.board;
   const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
@@ -112,10 +116,16 @@ export function Table({
   const pop = useScorePop(view.lastPlay);
   const popAt = useAnchor(stageRef, layout, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const lastTileId = view.lastPlay?.tileId ?? null;
+  const { moment, dismissMoment } = useBigMoment(view.lastPlay, replayToken);
+  const [shake, setShake] = useState<BigMomentLevel | null>(null);
+  const [slamming, setSlamming] = useState(false);
+  const anchor = useHitBox(stageRef, moment?.tileId ?? null, moment?.key ?? "", layout, scale);
+  const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
   return (
     <div
-      className={`table-scroll${dropLead ? " drop-ready" : ""}`}
+      className={`table-scroll${dropLead ? " drop-ready" : ""}${shake ? " shaking" : ""}`}
+      data-shake={shake ?? "off"}
       ref={viewportRef}
       data-open-total={view.openTotal}
       data-board-scale={scale.toFixed(2)}
@@ -133,7 +143,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 style={place(tile, layout.fit)}
                 data-board-tile={tile.tileId}
               >
@@ -159,6 +169,26 @@ export function Table({
           </div>
         </div>
       )}
+      {moment ? (
+        <MomentLayer
+          token={moment.key}
+          awarded={moment.awarded}
+          tileId={moment.tileId}
+          tile={{
+            a: placed?.a ?? faceOf(moment.tileId).a,
+            b: placed?.b ?? faceOf(moment.tileId).b,
+            orientation: placed?.orientation ?? "vertical",
+            spinner: placed?.spinner,
+          }}
+          anchor={anchor}
+          onShake={setShake}
+          onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
+          onDone={() => {
+            setSlamming(false);
+            dismissMoment();
+          }}
+        />
+      ) : null}
       {slots.map((slot) =>
         createPortal(
           <div
@@ -235,8 +265,63 @@ function useScreenBoxes(
   return placed;
 }
 
+function useBigMoment(
+  lastPlay: PlayerView["lastPlay"],
+  replayToken: number,
+): {
+  moment: { key: string; awarded: number; tileId: string | null } | null;
+  dismissMoment: () => void;
+} {
+  const liveKey = lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}` : "";
+  const skip = useRef(liveKey);
+  const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null } | null>(null);
+  const dismiss = () => setMoment(null);
+  useEffect(() => {
+    if (liveKey === skip.current) return;
+    skip.current = liveKey;
+    if (!liveKey || !lastPlay) return;
+    setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId });
+  }, [liveKey, lastPlay]);
+  const tileRef = useRef(lastPlay?.tileId ?? null);
+  tileRef.current = lastPlay?.tileId ?? null;
+  useEffect(() => {
+    if (replayToken <= 0) return;
+    setMoment({ key: `demo-${replayToken}`, awarded: demoAward(), tileId: tileRef.current });
+  }, [replayToken]);
+  return { moment, dismissMoment: dismiss };
+}
+
+function useHitBox(
+  stageRef: { current: HTMLDivElement | null },
+  tileId: string | null,
+  key: string,
+  layout: BoardLayout | null,
+  scale: number,
+): HitBox | null {
+  const [box, setBox] = useState<HitBox | null>(null);
+  useLayoutEffect(() => {
+    if (!key) return;
+    const stage = stageRef.current;
+    const el = tileId ? stage?.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`) : null;
+    const rect = (el ?? stage)?.getBoundingClientRect();
+    if (!rect) return;
+    if (el) {
+      setBox({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, w: rect.width, h: rect.height });
+      return;
+    }
+    setBox({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, w: 44, h: 88 });
+  }, [stageRef, tileId, key, layout, scale]);
+  return box;
+}
+
+function faceOf(tileId: string | null): { a: number; b: number } {
+  const [low, high] = (tileId ?? "6-6").split("-").map((part) => Number(part));
+  return { a: Number.isFinite(low) ? low! : 6, b: Number.isFinite(high) ? high! : 6 };
+}
+
 function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string } | null {
-  const seq = lastPlay && lastPlay.awarded > 0 ? lastPlay.seq : -1;
+  const big = bigMomentLevel(lastPlay?.awarded ?? 0) !== null;
+  const seq = lastPlay && lastPlay.awarded > 0 && !big ? lastPlay.seq : -1;
   const awarded = lastPlay?.awarded ?? 0;
   const tileId = lastPlay?.tileId ?? "";
   const endId = lastPlay?.endId ?? "";

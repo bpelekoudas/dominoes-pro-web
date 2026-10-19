@@ -14,6 +14,7 @@ import {
   tauntsForPlayer,
   randomSeed,
   RULES_VERSION,
+  turnHoldMs,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
   type BotDifficulty,
@@ -417,7 +418,8 @@ export class Hub {
         this.holdForSummary(room);
       }
     }
-    this.broadcast(room);
+    const holdMs = intent.type === "play" ? turnHoldMs(room.match.lastPlay?.awarded ?? 0) : 0;
+    this.broadcast(room, holdMs);
   }
 
   private continueHand(room: LiveRoom, seat: LiveSeat): void {
@@ -867,8 +869,8 @@ export class Hub {
     this.tell(seat, { type: "state", view: this.view(room, seat.id) });
   }
 
-  private broadcast(room: LiveRoom): void {
-    this.armTurn(room);
+  private broadcast(room: LiveRoom, holdMs = 0): void {
+    this.armTurn(room, holdMs);
     for (const seat of room.seats) {
       if (!seat.send) continue;
       seat.send({ type: "state", view: this.view(room, seat.id) });
@@ -876,15 +878,16 @@ export class Hub {
     this.scheduleBot(room);
   }
 
-  private armTurn(room: LiveRoom): void {
+  private armTurn(room: LiveRoom, holdMs = 0): void {
     this.clearTimer(this.turnTimers, room.id);
     room.turnDeadline = null;
     if (room.ended || room.betweenHands || room.status !== "playing" || !room.match) return;
     const turnId = currentPlayerId(room.match);
     const seat = room.seats.find((candidate) => candidate.id === turnId);
     if (!seat || seat.bot) return;
-    room.turnDeadline = Date.now() + this.turnLimitMs;
-    const timer = setTimeout(() => this.onTurnTimeout(room.id, seat.id), this.turnLimitMs);
+    const budget = this.turnLimitMs + Math.max(0, holdMs);
+    room.turnDeadline = Date.now() + budget;
+    const timer = setTimeout(() => this.onTurnTimeout(room.id, seat.id), budget);
     timer.unref?.();
     this.turnTimers.set(room.id, timer);
   }

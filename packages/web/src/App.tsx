@@ -3,6 +3,8 @@ import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { Logo } from "./logo.js";
 import { seatAround, type SeatEdge } from "./seats.js";
+import { bigMomentLevel } from "../../rules/src/moment.js";
+import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
 import { isMuted, playBuzz, playScore, playTile, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
 
@@ -35,6 +37,7 @@ export function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [dismissedHand, setDismissedHand] = useState<string | null>(null);
   const [leaveArmed, setLeaveArmed] = useState(false);
+  const [preview, setPreview] = useState(demoRequested);
   const socketRef = useRef<WebSocket | null>(null);
   const leaveRef = useRef(false);
   const connectRef = useRef<(first?: object) => void>(() => undefined);
@@ -135,6 +138,10 @@ export function App() {
     if (location.pathname !== "/") history.replaceState(null, "", "/");
   };
 
+  if (!view && preview) {
+    return <UhOhPreview award={demoAward()} onClose={() => setPreview(false)} />;
+  }
+
   if (!view) {
     return (
       <Home
@@ -148,6 +155,7 @@ export function App() {
           openSocket({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
         }
         onJoin={(name, code) => openSocket({ type: "join", name, code })}
+        onPreview={scoreMathOn() ? () => setPreview(true) : null}
       />
     );
   }
@@ -205,6 +213,7 @@ function Home({
   onCreate,
   onSolo,
   onJoin,
+  onPreview,
 }: {
   presetCode: string;
   error: string | null;
@@ -218,6 +227,7 @@ function Home({
     difficulty: "easy" | "medium" | "hard" | "expert",
   ) => void;
   onJoin: (name: string, code: string) => void;
+  onPreview: (() => void) | null;
 }) {
   const [name, setName] = useState("");
   const [playerCount, setPlayerCount] = useState(2);
@@ -337,6 +347,11 @@ function Home({
           Sit down
         </button>
       </form>
+      {onPreview ? (
+        <button type="button" className="uhoh-test" data-demo="uhoh" onClick={onPreview}>
+          Preview UH-OH
+        </button>
+      ) : null}
     </main>
   );
 }
@@ -410,14 +425,18 @@ function Game({
   const you = around.find((seat) => seat.edge === "bottom") ?? null;
   const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby" && view.phase !== "between";
   const [muted, setMute] = useState(isMuted);
+  const [replayToken, setReplayToken] = useState(0);
   useEffect(() => {
     const unlock = () => unlockSound();
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
   useEffect(() => {
+    if (demoRequested()) setReplayToken(1);
+  }, []);
+  useEffect(() => {
     const play = view.lastPlay;
-    if (!play) return;
+    if (!play || bigMomentLevel(play.awarded)) return;
     playTile();
     if (play.awarded > 0) playScore();
   }, [view.lastPlay?.seq]);
@@ -505,6 +524,7 @@ function Game({
                 aimEndId={drag?.aimEndId ?? null}
                 onPlay={play}
                 onSelect={onSelect}
+                replayToken={replayToken}
               />
               {right ? (
                 <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} view={view} />
@@ -530,6 +550,11 @@ function Game({
                 {yourTurn ? <p className="your-turn">Your turn</p> : null}
                 {yourTurn ? <TurnBar view={view} /> : null}
                 <StatusLine view={view} />
+                {scoreMathOn() ? (
+                  <button type="button" className="uhoh-test" data-demo="uhoh" onClick={() => setReplayToken((value) => value + 1)}>
+                    UH-OH
+                  </button>
+                ) : null}
               </div>
             </div>
             <div className="tray-row">
@@ -691,7 +716,7 @@ function SeatRail({
 function SeatChip({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
   const initial = player.name.trim().charAt(0).toUpperCase() || "?";
   const clock = useServerNow(view.serverNow);
-  const left = player.isTurn && view.turnDeadline ? Math.max(0, view.turnDeadline - clock) : 0;
+  const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div
@@ -849,6 +874,12 @@ function scoreMathOn(): boolean {
   return window.__UHOH__?.showScoreMath !== false;
 }
 
+/** Extra time for a big score holds the clock at a full turn, then it counts down. */
+function shownLeft(deadline: number, now: number, budget: number): number {
+  const left = Math.max(0, deadline - now);
+  return budget > 0 ? Math.min(left, budget) : left;
+}
+
 function labelDifficulty(level: string | null): string {
   if (level === "easy") return "Easy";
   if (level === "hard") return "Hard";
@@ -870,7 +901,7 @@ function useServerNow(serverNow: number): number {
 function TurnBar({ view }: { view: PlayerView }) {
   const now = useServerNow(view.serverNow);
   if (!view.turnDeadline) return null;
-  const left = Math.max(0, view.turnDeadline - now);
+  const left = shownLeft(view.turnDeadline, now, view.turnBudgetMs);
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div className="turn-bar" data-turn-timer="true" aria-label={`${Math.ceil(left / 1000)} seconds`}>
