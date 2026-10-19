@@ -8,6 +8,7 @@ import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
+import { AccountChip, AccountLayer, useAccount } from "./account";
 
 interface ChatLine {
   id: number;
@@ -39,6 +40,7 @@ export function App() {
   const [dismissedHand, setDismissedHand] = useState<string | null>(null);
   const [leaveArmed, setLeaveArmed] = useState(false);
   const [preview, setPreview] = useState(demoRequested);
+  const account = useAccount();
   const socketRef = useRef<WebSocket | null>(null);
   const leaveRef = useRef(false);
   const connectRef = useRef<(first?: object) => void>(() => undefined);
@@ -136,6 +138,12 @@ export function App() {
     connectRef.current(first);
   };
 
+  const begin = async (first: { type: string; name: string; [key: string]: unknown }) => {
+    const guest = await account.ensureGuest(first.name);
+    if (!guest) return;
+    openSocket({ ...first, name: guest.displayName });
+  };
+
   const leave = () => {
     leaveRef.current = true;
     localStorage.removeItem(TOKEN_KEY);
@@ -148,44 +156,61 @@ export function App() {
   };
 
   if (!view && preview) {
-    return <UhOhPreview award={demoAward()} onClose={() => setPreview(false)} />;
+    return (
+      <>
+        <UhOhPreview award={demoAward()} onClose={() => setPreview(false)} />
+        <AccountLayer account={account} />
+      </>
+    );
   }
 
   if (!view) {
     return (
-      <Home
-        presetCode={roomFromLocation() ?? ""}
-        error={error}
-        connecting={status === "connecting"}
-        onCreate={(name, playerCount, boneyardMode, seriesLength) =>
-          openSocket({ type: "create", name, playerCount, boneyardMode, seriesLength })
-        }
-        onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) =>
-          openSocket({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
-        }
-        onJoin={(name, code) => openSocket({ type: "join", name, code })}
-        onPreview={scoreMathOn() ? () => setPreview(true) : null}
-      />
+      <>
+        <Home
+          presetCode={roomFromLocation() ?? ""}
+          error={error ?? account.error}
+          connecting={status === "connecting"}
+          initialName={account.user?.displayName ?? ""}
+          user={account.user}
+          onCreate={(name, playerCount, boneyardMode, seriesLength) =>
+            void begin({ type: "create", name, playerCount, boneyardMode, seriesLength })
+          }
+          onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) =>
+            void begin({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
+          }
+          onJoin={(name, code) => void begin({ type: "join", name, code })}
+          onGuest={(name) => void account.ensureGuest(name)}
+          onAccount={account.openSheet}
+          onPreview={scoreMathOn() ? () => setPreview(true) : null}
+        />
+        <AccountLayer account={account} />
+      </>
     );
   }
 
   return (
-    <Game
-      view={view}
-      chat={chat}
-      error={error}
-      status={status}
-      selectedTile={selectedTile}
-      chatOpen={chatOpen}
-      dismissedHand={dismissedHand}
-      leaveArmed={leaveArmed}
-      onSelect={setSelectedTile}
-      onToggleChat={() => setChatOpen((open) => !open)}
-      onDismiss={() => setDismissedHand(handKey(view))}
-      onLeaveArm={() => setLeaveArmed(true)}
-      onLeave={leave}
-      onSend={(message) => send(message)}
-    />
+    <>
+      <Game
+        view={view}
+        chat={chat}
+        error={error}
+        status={status}
+        selectedTile={selectedTile}
+        chatOpen={chatOpen}
+        dismissedHand={dismissedHand}
+        leaveArmed={leaveArmed}
+        onSelect={setSelectedTile}
+        onToggleChat={() => setChatOpen((open) => !open)}
+        onDismiss={() => setDismissedHand(handKey(view))}
+        onLeaveArm={() => setLeaveArmed(true)}
+        onLeave={leave}
+        onSend={(message) => send(message)}
+        accountUser={account.user}
+        onAccount={account.openSheet}
+      />
+      <AccountLayer account={account} />
+    </>
   );
 }
 
@@ -219,14 +244,20 @@ function Home({
   presetCode,
   error,
   connecting,
+  initialName,
+  user,
   onCreate,
   onSolo,
   onJoin,
+  onGuest,
+  onAccount,
   onPreview,
 }: {
   presetCode: string;
   error: string | null;
   connecting: boolean;
+  initialName: string;
+  user: { id: string; displayName: string; avatarId: string | null; guest: boolean; providers: string[] } | null;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
   onSolo: (
     name: string,
@@ -236,9 +267,14 @@ function Home({
     difficulty: "easy" | "medium" | "hard" | "expert",
   ) => void;
   onJoin: (name: string, code: string) => void;
+  onGuest: (name: string) => void;
+  onAccount: () => void;
   onPreview: (() => void) | null;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
+  useEffect(() => {
+    if (initialName) setName((current) => current || initialName);
+  }, [initialName]);
   const [playerCount, setPlayerCount] = useState(2);
   const [boneyardMode, setBoneyardMode] = useState<BoneyardMode>("draw_until");
   const [seriesLength, setSeriesLength] = useState<SeriesLength>(3);
@@ -248,7 +284,10 @@ function Home({
   return (
     <main className="home" data-skin="ivory">
       <header className="brand">
-        <Logo />
+        <div className="brand-top">
+          <Logo />
+          {user ? <AccountChip user={user} onOpen={onAccount} /> : null}
+        </div>
         <p className="lede">A private table for friends. The server deals, checks every tile, and keeps score.</p>
       </header>
       {error ? <p className="banner error">{error}</p> : null}
@@ -257,6 +296,14 @@ function Home({
         Your name
         <input value={name} maxLength={16} autoComplete="nickname" onChange={(event) => setName(event.target.value)} />
       </label>
+      <div className="account-row">
+        <button type="button" className="secondary" disabled={connecting || !name.trim()} onClick={() => onGuest(name)}>
+          Continue as guest
+        </button>
+        <button type="button" className="secondary" onClick={onAccount}>
+          Sign in
+        </button>
+      </div>
       <form
         className="card"
         onSubmit={(event) => {
@@ -405,6 +452,8 @@ function Game({
   onLeaveArm,
   onLeave,
   onSend,
+  accountUser,
+  onAccount,
 }: {
   view: PlayerView;
   chat: ChatLine[];
@@ -420,6 +469,8 @@ function Game({
   onLeaveArm: () => void;
   onLeave: () => void;
   onSend: (message: object) => void;
+  accountUser: { id: string; displayName: string; avatarId: string | null; guest: boolean; providers: string[] } | null;
+  onAccount: () => void;
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   void dismissedHand;
@@ -464,6 +515,13 @@ function Game({
             ? `Bo${view.settings.seriesLength} · G${view.gameNumber} · H${view.handNumber} · to ${view.settings.targetScore}`
             : "Lobby"}
         </p>
+        {accountUser ? (
+          <AccountChip compact user={accountUser} onOpen={onAccount} />
+        ) : (
+          <button type="button" className="text-button play-signin" onClick={onAccount}>
+            Sign in
+          </button>
+        )}
         <button
           type="button"
           className="icon-button mobile-only"

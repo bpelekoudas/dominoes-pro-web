@@ -83,6 +83,8 @@ interface LiveSeat {
   leaveTimer: ReturnType<typeof setTimeout> | null;
   chatTimes: number[];
   missedTurn: boolean;
+  /** Account that sat down, when the phone had one. Computers stay null. */
+  userId: string | null;
 }
 
 interface LiveRoom {
@@ -179,13 +181,18 @@ export class Hub {
     this.restore();
   }
 
-  connect(message: ClientMessage, send: (message: ServerMessage) => void, close: () => void):
+  connect(
+    message: ClientMessage,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+    accountUserId: string | null = null,
+  ):
     | { ok: true; session: BoundSession }
     | { ok: false; error: string } {
-    if (message.type === "create") return this.create(message, send, close);
-    if (message.type === "join") return this.join(message, send, close);
-    if (message.type === "reconnect") return this.reconnect(message.token, send, close);
-    if (message.type === "solo") return this.solo(message, send, close);
+    if (message.type === "create") return this.create(message, send, close, accountUserId);
+    if (message.type === "join") return this.join(message, send, close, accountUserId);
+    if (message.type === "reconnect") return this.reconnect(message.token, send, close, accountUserId);
+    if (message.type === "solo") return this.solo(message, send, close, accountUserId);
     return { ok: false, error: "Join a table first." };
   }
 
@@ -221,6 +228,7 @@ export class Hub {
     message: Extract<ClientMessage, { type: "create" }>,
     send: (message: ServerMessage) => void,
     close: () => void,
+    accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const name = cleanName(message.name);
     if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
@@ -254,7 +262,7 @@ export class Hub {
       continueDeadline: null,
       ended: null,
     };
-    const seat = this.makeSeat(room.hostId, name);
+    const seat = this.makeSeat(room.hostId, name, undefined, false, false, null, accountUserId);
     room.seats.push(seat);
     this.store.insertRoom({
       id: room.id,
@@ -277,6 +285,7 @@ export class Hub {
       created_at: created,
       bot: 0,
       difficulty: null,
+      user_id: accountUserId,
     });
     this.remember(room);
     const generation = this.bind(seat, send, close);
@@ -288,6 +297,7 @@ export class Hub {
     message: Extract<ClientMessage, { type: "join" }>,
     send: (message: ServerMessage) => void,
     close: () => void,
+    accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const name = cleanName(message.name);
     if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
@@ -296,7 +306,7 @@ export class Hub {
     if (!room) return { ok: false, error: "No table with that code." };
     if (room.status !== "lobby") return { ok: false, error: "That game has already started." };
     if (room.seats.length >= room.settings.playerCount) return { ok: false, error: "That table is full." };
-    const seat = this.makeSeat(makeId("p"), name);
+    const seat = this.makeSeat(makeId("p"), name, undefined, false, false, null, accountUserId);
     room.seats.push(seat);
     this.byPlayer.set(seat.id, room.id);
     this.store.insertPlayer({
@@ -308,6 +318,7 @@ export class Hub {
       created_at: nowIso(),
       bot: 0,
       difficulty: null,
+      user_id: accountUserId,
     });
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
@@ -319,6 +330,7 @@ export class Hub {
     token: string,
     send: (message: ServerMessage) => void,
     close: () => void,
+    accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     if (typeof token !== "string" || token.length < 20) {
       return { ok: false, error: "This device isn't at a table. Join with a code." };
@@ -328,6 +340,12 @@ export class Hub {
     const room = this.rooms.get(row.room_id);
     const seat = room?.seats.find((candidate) => candidate.id === row.id);
     if (!room || !seat) return { ok: false, error: "This device isn't at a table. Join with a code." };
+    if (!seat.userId && row.user_id) seat.userId = row.user_id;
+    // A seat keeps the account it sat down with. Fill it in only while it is still blank.
+    if (accountUserId && !seat.userId && !seat.bot) {
+      this.store.setPlayerUser(seat.id, accountUserId);
+      seat.userId = accountUserId;
+    }
     const generation = this.bind(seat, send, close);
     seat.missedTurn = false;
     this.welcome(room, seat);
@@ -568,6 +586,7 @@ export class Hub {
     message: Extract<ClientMessage, { type: "solo" }>,
     send: (message: ServerMessage) => void,
     close: () => void,
+    accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const boneyardMode = message.boneyardMode ?? "draw_until";
     const seriesLength = message.seriesLength ?? 3;
@@ -582,6 +601,7 @@ export class Hub {
       },
       send,
       close,
+      accountUserId,
     );
     if (!opened.ok) return opened;
     const room = this.roomFor(opened.session.playerId);
@@ -776,6 +796,7 @@ export class Hub {
           player.bot === 1,
           player.bot === 1,
           asDifficulty(player.difficulty),
+          player.user_id ?? null,
         ),
       ),
       match: null,
@@ -826,15 +847,16 @@ export class Hub {
   private makeSeat(
     id: string,
     name: string,
-    token = randomBytes(32).toString("hex"),
+    token?: string,
     connected = false,
     bot = false,
     difficulty: BotDifficulty | null = null,
+    userId: string | null = null,
   ): LiveSeat {
     return {
       id,
       name,
-      token,
+      token: token ?? randomBytes(32).toString("hex"),
       connected,
       bot,
       difficulty: bot ? (difficulty ?? "medium") : null,
@@ -844,6 +866,7 @@ export class Hub {
       close: null,
       leaveTimer: null,
       chatTimes: [],
+      userId: bot ? null : userId,
     };
   }
 

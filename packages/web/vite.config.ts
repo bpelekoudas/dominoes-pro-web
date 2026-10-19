@@ -8,6 +8,7 @@ export default defineConfig({
       "/ws": { target: "ws://127.0.0.1:8787", ws: true },
       "/health": "http://127.0.0.1:8787",
       "/config.js": "http://127.0.0.1:8787",
+      "/api": { target: "http://127.0.0.1:8787", xfwd: true },
     },
   },
 });

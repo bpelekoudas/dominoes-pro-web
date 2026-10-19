@@ -25,6 +25,45 @@ export interface PlayerRow {
   /** 1 when the seat is a computer. Older databases gain this column on open. */
   bot: number;
   difficulty: string | null;
+  /** Account that sat down, when this phone had one. Null on older rows and on computers. */
+  user_id?: string | null;
+}
+
+export interface UserRow {
+  id: string;
+  display_name: string;
+  avatar_id: string | null;
+  created_at: string;
+  updated_at: string;
+  is_guest: number;
+}
+
+export interface IdentityRow {
+  id: string;
+  user_id: string;
+  provider: string;
+  provider_subject: string;
+  email: string | null;
+  created_at: string;
+}
+
+export interface SessionRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  created_at: string;
+  last_seen_at: string;
+}
+
+export interface MagicLinkRow {
+  id: string;
+  email: string;
+  token_hash: string;
+  user_id: string | null;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
 }
 
 export interface HandRow {
@@ -134,6 +173,50 @@ export class Store {
     if (!roomNames.has("rules_version")) {
       this.db.exec(`ALTER TABLE rooms ADD COLUMN rules_version INTEGER`);
     }
+    const playerColumns = this.db.prepare(`PRAGMA table_info(players)`).all() as Array<{ name: string }>;
+    if (!playerColumns.some((column) => column.name === "user_id")) {
+      this.db.exec(`ALTER TABLE players ADD COLUMN user_id TEXT`);
+    }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        avatar_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        is_guest INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS identities (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        provider_subject TEXT NOT NULL,
+        email TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (provider, provider_subject)
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS magic_links (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        user_id TEXT,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS identities_user ON identities (user_id);
+      CREATE INDEX IF NOT EXISTS identities_email ON identities (email);
+      CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+      CREATE INDEX IF NOT EXISTS players_user ON players (user_id);
+    `);
   }
 
   insertRoom(room: RoomRow): void {
@@ -196,7 +279,7 @@ export class Store {
   insertPlayer(player: PlayerRow): void {
     this.db
       .prepare(
-        `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO players (id, room_id, name, token, seat, created_at, bot, difficulty, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         player.id,
@@ -207,7 +290,13 @@ export class Store {
         player.created_at,
         player.bot,
         player.difficulty,
+        player.user_id ?? null,
       );
+  }
+
+  /** Stamp a seat with an account the first time we know who is holding the phone. */
+  setPlayerUser(id: string, userId: string): void {
+    this.db.prepare(`UPDATE players SET user_id = ? WHERE id = ? AND user_id IS NULL`).run(userId, id);
   }
 
   deletePlayer(id: string): void {
@@ -289,5 +378,94 @@ export class Store {
       .prepare(`SELECT * FROM chat WHERE room_id = ? ORDER BY id DESC LIMIT ?`)
       .all(roomId, limit) as unknown as ChatRow[];
     return rows.reverse();
+  }
+
+  insertUser(user: UserRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO users (id, display_name, avatar_id, created_at, updated_at, is_guest) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(user.id, user.display_name, user.avatar_id, user.created_at, user.updated_at, user.is_guest);
+  }
+
+  user(id: string): UserRow | null {
+    return (this.db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow | undefined) ?? null;
+  }
+
+  updateUser(id: string, patch: { display_name?: string; avatar_id?: string | null; is_guest?: number; updated_at: string }): void {
+    const current = this.user(id);
+    if (!current) return;
+    this.db
+      .prepare(`UPDATE users SET display_name = ?, avatar_id = ?, is_guest = ?, updated_at = ? WHERE id = ?`)
+      .run(
+        patch.display_name ?? current.display_name,
+        patch.avatar_id === undefined ? current.avatar_id : patch.avatar_id,
+        patch.is_guest ?? current.is_guest,
+        patch.updated_at,
+        id,
+      );
+  }
+
+  insertIdentity(row: IdentityRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO identities (id, user_id, provider, provider_subject, email, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.user_id, row.provider, row.provider_subject, row.email, row.created_at);
+  }
+
+  identity(provider: string, subject: string): IdentityRow | null {
+    return (
+      (this.db
+        .prepare(`SELECT * FROM identities WHERE provider = ? AND provider_subject = ?`)
+        .get(provider, subject) as IdentityRow | undefined) ?? null
+    );
+  }
+
+  identitiesForUser(userId: string): IdentityRow[] {
+    return this.db.prepare(`SELECT * FROM identities WHERE user_id = ? ORDER BY created_at`).all(userId) as unknown as IdentityRow[];
+  }
+
+  userByEmail(email: string): UserRow | null {
+    const identity = this.db
+      .prepare(`SELECT user_id FROM identities WHERE email = ? ORDER BY created_at LIMIT 1`)
+      .get(email) as { user_id: string } | undefined;
+    return identity ? this.user(identity.user_id) : null;
+  }
+
+  insertSession(row: SessionRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.user_id, row.token_hash, row.expires_at, row.created_at, row.last_seen_at);
+  }
+
+  sessionByHash(tokenHash: string): SessionRow | null {
+    return (this.db.prepare(`SELECT * FROM sessions WHERE token_hash = ?`).get(tokenHash) as SessionRow | undefined) ?? null;
+  }
+
+  touchSession(id: string, lastSeenAt: string): void {
+    this.db.prepare(`UPDATE sessions SET last_seen_at = ? WHERE id = ?`).run(lastSeenAt, id);
+  }
+
+  deleteSessionByHash(tokenHash: string): void {
+    this.db.prepare(`DELETE FROM sessions WHERE token_hash = ?`).run(tokenHash);
+  }
+
+  insertMagicLink(row: MagicLinkRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO magic_links (id, email, token_hash, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.email, row.token_hash, row.user_id, row.expires_at, row.used_at, row.created_at);
+  }
+
+  magicLinkByHash(tokenHash: string): MagicLinkRow | null {
+    return (this.db.prepare(`SELECT * FROM magic_links WHERE token_hash = ?`).get(tokenHash) as MagicLinkRow | undefined) ?? null;
+  }
+
+  markMagicLinkUsed(id: string, usedAt: string): void {
+    this.db.prepare(`UPDATE magic_links SET used_at = ? WHERE id = ? AND used_at IS NULL`).run(usedAt, id);
   }
 }

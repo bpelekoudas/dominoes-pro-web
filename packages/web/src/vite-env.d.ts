@@ -3,6 +3,8 @@
 interface UhOhConfig {
   showScoreMath?: boolean;
   publicUrl?: string;
+  googleClientId?: string | null;
+  appleClientId?: string | null;
 }
 
 interface Window {

@@ -50,6 +50,13 @@ h1, h2, .big-code, .result-kicker {
 .logo { display: block; width: min(100%, 320px); height: auto; }
 .logo-compact { width: 156px; }
 .brand .logo { width: min(100%, 240px); margin: 0 0 8px; }
+.brand-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brand-top .logo { width: min(62%, 200px); margin: 0; flex: 1 1 auto; }
 
 .home, .felt-app {
   min-height: 100dvh;
@@ -188,6 +195,7 @@ input {
 .play-mark line { stroke: white; stroke-width: 1.4; }
 .play-mark circle { fill: white; }
 .play-code { min-height: 44px; margin: 0; padding: 0 8px; font-size: 0.78rem; }
+.play-signin { flex: none; padding: 0 10px; }
 .series-line {
   flex: 1;
   min-width: 0;
@@ -647,6 +655,85 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .domino-split { background: var(--red); }
 .domino.vertical .domino-split, .domino:not(.horizontal) .domino-split { height: 2px; }
 .domino.horizontal .domino-split { width: 2px; }
+.account-row { display: flex; gap: 8px; margin-top: 10px; }
+.account-row .secondary, .account-row .primary { flex: 1; width: auto; }
+.secondary {
+  min-height: 44px;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--gold);
+  background: transparent;
+  color: var(--paper);
+  font-weight: 600;
+}
+.profile-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  max-width: 46%;
+  padding: 0 12px 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+.profile-chip.compact { max-width: 34%; padding-right: 8px; gap: 4px; }
+.profile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.avatar {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  background: var(--charcoal);
+  color: var(--gold);
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+.account-scrim { z-index: 70; }
+.account-sheet {
+  position: fixed;
+  z-index: 71;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: min(88dvh, 720px);
+  overflow: auto;
+  background: var(--charcoal);
+  color: var(--paper);
+  border-radius: 18px 18px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
+}
+.account-sheet header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.account-sheet h2 { margin: 0; color: var(--paper); font-size: 2rem; }
+.account-sheet .hint { margin: 8px 0 12px; }
+.account-sheet .banner { display: block; }
+.account-sheet .account-row { margin: 10px 0 0; }
+.provider-list { display: grid; gap: 8px; margin-top: 12px; }
+.provider-button {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--paper);
+  background: #111;
+  color: var(--paper);
+  font-weight: 600;
+}
+.provider-button.apple { background: var(--paper); color: #111; }
+.google-host { min-height: 44px; display: flex; justify-content: center; }
+.google-host > div { width: 100%; }
+.dev-link { margin: 8px 0; }
+.dev-link a { color: var(--gold); }
+.sign-out { margin-top: 16px; color: var(--gold); }
 .chat-scrim {
   position: fixed;
   inset: 0;
@@ -727,6 +814,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   }
   .felt-column { grid-column: 1; grid-row: 1; }
   .chat-scrim { display: none; }
+  .account-scrim { display: block; }
   .chat-panel, .chat-panel.open {
     display: flex;
     flex-direction: column;
