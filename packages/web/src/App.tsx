@@ -10,6 +10,7 @@ import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
+import { StorePreview, storeDemoRequested } from "./store";
 import { AvatarFace } from "./avatars";
 
 interface ChatLine {
@@ -184,6 +185,10 @@ export function App() {
     sessionStorage.setItem("uhoh.splash", "1");
     setSplash(false);
   };
+
+  if (storeDemoRequested() && !view) {
+    return <StorePreview shot={new URLSearchParams(location.search).get("shot")} />;
+  }
 
   if (menuDemoRequested() && !view) {
     return <MenuDemo />;

@@ -4,6 +4,7 @@ import { AccountChip, type AccountUser } from "./account";
 import { AvatarFace, AvatarPicker, Portrait } from "./avatars";
 import { RankLine } from "./rank";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
+import { PREVIEW_COINS, StorePreview } from "./store";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -143,6 +144,13 @@ export function ArcadeHome({
             <span className="profile-name">Sign in</span>
           </button>
         )}
+        <button type="button" className="coin-chip" aria-label={`${PREVIEW_COINS.toLocaleString()} coins`} onClick={press(() => setSheet("store"))}>
+          <svg className="coin-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span>{PREVIEW_COINS.toLocaleString()}</span>
+        </button>
         <div className="arcade-tools">
           <button type="button" className="icon-button" aria-label="Settings" onClick={press(() => setSheet("settings"))}>
             <GearIcon />
@@ -365,18 +373,7 @@ export function ArcadeHome({
         </section>
       ) : null}
 
-      {sheet === "store" ? (
-        <section className="arcade-modal" role="dialog" aria-label="Store" data-screen="store">
-          <h2>Store</h2>
-          <p>The store opens later. Every character is free for now.</p>
-          <button type="button" className="capsule" onClick={press(() => { setSheet(null); onLook(); })}>
-            Change look
-          </button>
-          <button type="button" className="capsule capsule-back" onClick={press(() => setSheet(null))}>
-            Back
-          </button>
-        </section>
-      ) : null}
+      {sheet === "store" ? <StorePreview onClose={() => setSheet(null)} /> : null}
 
       {sheet === "settings" ? (
         <section className="arcade-modal" role="dialog" aria-label="Settings" data-screen="settings">
