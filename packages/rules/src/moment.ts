@@ -7,8 +7,9 @@ export const BIG_MOMENT_SCORE = 20;
 /**
  * How long the moment runs. The next human's turn clock gets this
  * added so the animation does not eat their 30 seconds.
+ * Long enough for the glass to clear and the words to be read.
  */
-export const BIG_MOMENT_MS = 1800;
+export const BIG_MOMENT_MS = 2000;
 
 export type BigMomentLevel = "small" | "medium" | "big";
 

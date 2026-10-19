@@ -862,47 +862,50 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .uhoh-title {
   position: fixed;
   left: 50%;
-  top: 42%;
+  top: 40%;
   z-index: 80;
   margin: 0;
   pointer-events: none;
   text-align: center;
   opacity: 0;
-  animation: uhoh-title 1400ms ease-out 220ms forwards;
+  animation: uhoh-title 1600ms linear 400ms forwards;
 }
 .uhoh-word {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 0.04em;
   font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
-  font-size: min(22vw, 112px);
-  line-height: 0.85;
-  letter-spacing: 0.02em;
+  font-size: min(41.5vw, 250px);
+  line-height: 0.78;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
   color: #e31e26;
-  -webkit-text-stroke: 2px #d5a336;
+  -webkit-text-stroke: 0.02em #d5a336;
   paint-order: stroke fill;
   text-shadow:
     0 0 1px #efefef,
-    0 0 10px rgba(213, 163, 54, 0.95),
-    0 0 22px rgba(213, 163, 54, 0.75),
-    0 2px 0 rgba(239, 239, 239, 0.35);
+    0 0 12px rgba(213, 163, 54, 0.95),
+    0 0 26px rgba(213, 163, 54, 0.7),
+    0 2px 0 rgba(239, 239, 239, 0.4);
 }
-.uhoh-hyphen { width: min(8vw, 36px); height: auto; flex: none; filter: drop-shadow(0 0 8px rgba(213, 163, 54, 0.8)); }
+.uhoh-hyphen { width: 0.38em; height: auto; flex: none; filter: drop-shadow(0 0 8px rgba(213, 163, 54, 0.8)); }
 .uhoh-points {
-  margin: 2px 0 0;
+  margin: 0;
   font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
-  font-size: min(12vw, 56px);
-  line-height: 1;
+  font-size: min(24vw, 112px);
+  line-height: 0.9;
   color: #d5a336;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 12px rgba(213, 163, 54, 0.7);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 16px rgba(213, 163, 54, 0.75);
 }
 @keyframes uhoh-title {
-  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.55); }
-  16% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.12); }
-  30% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
-  70% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
-  100% { opacity: 0; transform: translate3d(-50%, -46%, 0) scale(1.03); }
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.52); }
+  10% { opacity: 0; transform: translate3d(-50%, -50%, 0) scale(0.52); }
+  18% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1.05); }
+  24% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(0.975); }
+  28% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
+  92% { opacity: 1; transform: translate3d(-50%, -50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(-50%, -48%, 0) scale(1.02); }
 }
 @keyframes uhoh-flash {
   0% { opacity: 0; transform: translate3d(-50%, -50%, 0); }
