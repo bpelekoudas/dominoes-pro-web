@@ -4,7 +4,7 @@ import { AccountChip, type AccountUser } from "./account";
 import { AvatarFace, AvatarPicker, Portrait } from "./avatars";
 import { RankLine } from "./rank";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
-import { PREVIEW_COINS, StorePreview } from "./store";
+import { BoneMark, PREVIEW_COINS, PREVIEW_GEMS, StorePreview } from "./store";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -144,13 +144,16 @@ export function ArcadeHome({
             <span className="profile-name">Sign in</span>
           </button>
         )}
-        <button type="button" className="coin-chip" aria-label={`${PREVIEW_COINS.toLocaleString()} coins`} onClick={press(() => setSheet("store"))}>
-          <svg className="coin-mark" viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span>{PREVIEW_COINS.toLocaleString()}</span>
-        </button>
+        <div className="wallet">
+          <button type="button" className="coin-chip" aria-label={`${PREVIEW_COINS.toLocaleString()} Bones`} onClick={press(() => setSheet("store"))}>
+            <BoneMark />
+            <span>{PREVIEW_COINS.toLocaleString()}</span>
+          </button>
+          <button type="button" className="gold-chip" aria-label={`${PREVIEW_GEMS.toLocaleString()} Gold Bones`} onClick={press(() => setSheet("store"))}>
+            <BoneMark gold />
+            <span>{PREVIEW_GEMS.toLocaleString()}</span>
+          </button>
+        </div>
         <div className="arcade-tools">
           <button type="button" className="icon-button" aria-label="Settings" onClick={press(() => setSheet("settings"))}>
             <GearIcon />

@@ -5,11 +5,13 @@ import { AvatarFace, Portrait } from "./avatars";
 import { RankBadge } from "./rank";
 import { playUiClick, unlockSound } from "./sound";
 
-export const PREVIEW_COINS = 2450;
+export const PREVIEW_COINS = 1840;
+export const PREVIEW_GEMS = 180;
 
 type Tab = "characters" | "tiles" | "tables" | "frames" | "effects";
-type Obtain = "free" | "coins" | "season";
-type Stage = "browse" | "detail" | "confirm" | "congrats" | "loadout" | "packs";
+type Obtain = "coins" | "gems" | "earned";
+type Rarity = "common" | "rare" | "epic" | "legendary";
+type Stage = "browse" | "detail" | "confirm" | "congrats" | "loadout" | "packs" | "pass";
 type Filter = "sale" | "owned";
 
 interface Item {
@@ -18,10 +20,12 @@ interface Item {
   name: string;
   blurb: string;
   glow: string;
+  rarity: Rarity;
   obtain: Obtain;
   price?: number;
+  limited?: boolean;
   tierId?: string;
-  tierName?: string;
+  earnNote?: string;
   avatarId?: string;
 }
 
@@ -42,22 +46,22 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 const CHARACTER_OFFER: Record<string, Partial<Item>> = {
-  homescreen: { obtain: "free", glow: "#e31e26", blurb: "The house character. Free, and already yours." },
-  barista: { obtain: "free", glow: "#c47a4a", blurb: "Free. An apron and a calm hand." },
-  golfer: { obtain: "free", glow: "#3d8f4a", blurb: "Free. A visor and an easy stance." },
-  fisherman: { obtain: "coins", price: 500, glow: "#2a8fad", blurb: "A dock, a cap, and a long wait." },
-  floridaman: { obtain: "coins", price: 800, glow: "#e07a3d", blurb: "Sunburn and a story." },
-  fratbro: { obtain: "coins", price: 400, glow: "#e31e26", blurb: "A loud shirt and a louder line." },
-  gaperilla: { obtain: "season", tierId: "shark", tierName: "Shark", glow: "#d5a336", blurb: "The pirate. A Shark season reward. Not for sale." },
-  grungerocker: { obtain: "coins", price: 700, glow: "#9b4dff", blurb: "A dim room and a loud amp." },
-  hipster: { obtain: "coins", price: 600, glow: "#c47a4a", blurb: "Glasses, a beard, and a strong opinion." },
-  lumberjack: { obtain: "coins", price: 900, glow: "#8a5a32", blurb: "Flannel and a heavy tile." },
-  mexicancowboy: { obtain: "coins", price: 1200, glow: "#c45a28", blurb: "A hat with a wide brim." },
-  nascar: { obtain: "coins", price: 1500, glow: "#e31e26", blurb: "A suit of sponsor patches." },
-  retiredman: { obtain: "coins", price: 450, glow: "#d5a336", blurb: "A polo and all the time in the world." },
-  scarface: { obtain: "season", tierId: "legend", tierName: "UH-OH Legend", glow: "#efefef", blurb: "A Legend season reward. Not for sale." },
-  techmogul: { obtain: "coins", price: 2400, glow: "#7ec8ff", blurb: "A dark coat and a bright watch." },
-  "2hot4tv": { obtain: "coins", price: 1800, glow: "#ff4d8d", blurb: "Lights, a smile, and a camera somewhere." },
+  homescreen: { rarity: "common", obtain: "earned", earnNote: "Included", glow: "#e31e26", blurb: "The house character. Included with the game. Not sold." },
+  barista: { rarity: "common", obtain: "earned", earnNote: "Included", glow: "#c47a4a", blurb: "Included. An apron and a calm hand." },
+  golfer: { rarity: "common", obtain: "earned", earnNote: "Included", glow: "#3d8f4a", blurb: "Included. A visor and an easy stance." },
+  fisherman: { rarity: "common", obtain: "coins", price: 500, glow: "#2a8fad", blurb: "Common. A dock, a cap, and a long wait. About two days of play." },
+  floridaman: { rarity: "rare", obtain: "coins", price: 2500, glow: "#e07a3d", blurb: "Rare. Sunburn and a story. About a week or two of play." },
+  fratbro: { rarity: "common", obtain: "coins", price: 500, glow: "#e31e26", blurb: "Common. A loud shirt and a louder line." },
+  gaperilla: { rarity: "epic", obtain: "earned", tierId: "shark", earnNote: "Shark", glow: "#d5a336", blurb: "Epic. The pirate. Earned at Shark. Never sold." },
+  grungerocker: { rarity: "rare", obtain: "coins", price: 2500, glow: "#9b4dff", blurb: "Rare. A dim room and a loud amp." },
+  hipster: { rarity: "common", obtain: "coins", price: 500, glow: "#c47a4a", blurb: "Common. Glasses, a beard, and a strong opinion." },
+  lumberjack: { rarity: "rare", obtain: "coins", price: 2500, glow: "#8a5a32", blurb: "Rare. Flannel and a heavy tile." },
+  mexicancowboy: { rarity: "epic", obtain: "coins", price: 10000, glow: "#c45a28", blurb: "Epic. A hat with a wide brim. About a month of play." },
+  nascar: { rarity: "legendary", obtain: "coins", price: 35000, glow: "#e31e26", blurb: "Legendary. A suit of sponsor patches. A few months of steady play." },
+  retiredman: { rarity: "common", obtain: "coins", price: 500, glow: "#d5a336", blurb: "Common. A polo and all the time in the world." },
+  scarface: { rarity: "legendary", obtain: "earned", tierId: "legend", earnNote: "UH-OH Legend", glow: "#efefef", blurb: "Legendary. Earned at UH-OH Legend. Never sold." },
+  techmogul: { rarity: "legendary", obtain: "gems", price: 1500, limited: true, glow: "#7ec8ff", blurb: "Legendary. A dark coat and a bright watch. Premium, limited, cosmetic only." },
+  "2hot4tv": { rarity: "epic", obtain: "gems", price: 800, limited: true, glow: "#ff4d8d", blurb: "Epic. Lights and a smile. Premium, limited, cosmetic only." },
 };
 
 const CATALOG: Item[] = [
@@ -69,36 +73,40 @@ const CATALOG: Item[] = [
       name: avatar.name,
       blurb: special?.blurb ?? `${avatar.name} sits down at your table.`,
       glow: special?.glow ?? "#d5a336",
+      rarity: special?.rarity ?? "common",
       obtain: special?.obtain ?? "coins",
       price: special?.price,
+      limited: special?.limited,
       tierId: special?.tierId,
-      tierName: special?.tierName,
+      earnNote: special?.earnNote,
       avatarId: avatar.id,
     };
   }),
-  { id: "ivory", tab: "tiles", name: "Ivory", blurb: "Soft white tiles, black pips, a red bar. The house set.", glow: "#efefef", obtain: "free" },
-  { id: "gold", tab: "tiles", name: "Gold", blurb: "A warm gold face with dark pips. The spinner still wears a ring.", glow: "#d5a336", obtain: "coins", price: 800 },
-  { id: "neon", tab: "tiles", name: "Neon", blurb: "Black tiles, a green pip glow, and a pink bar.", glow: "#39ffb0", obtain: "coins", price: 900 },
-  { id: "marble", tab: "tiles", name: "Marble", blurb: "Pale stone with gray veins and a brass bar.", glow: "#d9d3c8", obtain: "coins", price: 1200 },
-  { id: "wood", tab: "tiles", name: "Wood", blurb: "Warm grain, dark pips, a stained bar.", glow: "#8a5a32", obtain: "coins", price: 700 },
-  { id: "smoked", tab: "tiles", name: "Smoked", blurb: "Charcoal tiles with a smoked face, white pips, and a thin gold edge.", glow: "#e31e26", obtain: "coins", price: 1600 },
-  { id: "green", tab: "tables", name: "Classic green", blurb: "The old felt. Quiet, and easy on the tiles.", glow: "#1e6b3a", obtain: "free" },
-  { id: "redfelt", tab: "tables", name: "Brand red", blurb: "A deep red felt in the house color.", glow: "#e31e26", obtain: "free" },
-  { id: "city", tab: "tables", name: "City night", blurb: "A skyline after dark, with a few windows still on.", glow: "#3d6ea8", obtain: "coins", price: 1400 },
-  { id: "desert", tab: "tables", name: "Desert", blurb: "Dunes, a low sun, and a warm table.", glow: "#e07a3d", obtain: "coins", price: 1400 },
-  { id: "beach", tab: "tables", name: "Florida beach", blurb: "Sand, a strip of water, and a bright sky.", glow: "#2a8fad", obtain: "coins", price: 1600 },
-  { id: "tailgate", tab: "tables", name: "Tailgate", blurb: "Parking-lot stripes and a gold light. A Hustler season reward.", glow: "#d5a336", obtain: "season", tierId: "hustler", tierName: "Hustler" },
-  { id: "plain", tab: "frames", name: "Plain", blurb: "No frame. Just the portrait.", glow: "#efefef", obtain: "free" },
-  { id: "goldring", tab: "frames", name: "Gold ring", blurb: "A gold circle around the portrait.", glow: "#d5a336", obtain: "coins", price: 500 },
-  { id: "redframe", tab: "frames", name: "Red enamel", blurb: "A red ring with a gold hairline.", glow: "#e31e26", obtain: "coins", price: 700 },
-  { id: "rookie", tab: "frames", name: "Rookie frame", blurb: "The frame for a Rookie season.", glow: "#efefef", obtain: "season", tierId: "rookie", tierName: "Rookie" },
-  { id: "hustler", tab: "frames", name: "Hustler frame", blurb: "The frame for a Hustler season.", glow: "#d5a336", obtain: "season", tierId: "hustler", tierName: "Hustler" },
-  { id: "shark", tab: "frames", name: "Shark frame", blurb: "The frame for a Shark season.", glow: "#e31e26", obtain: "season", tierId: "shark", tierName: "Shark" },
-  { id: "legend", tab: "frames", name: "Legend frame", blurb: "The frame for an UH-OH Legend season.", glow: "#d5a336", obtain: "season", tierId: "legend", tierName: "UH-OH Legend" },
-  { id: "glass", tab: "effects", name: "Glass", blurb: "The house shatter. Cracks, then the pieces fall away.", glow: "#efefef", obtain: "free" },
-  { id: "fire", tab: "effects", name: "Fire", blurb: "The same UH-OH, with a burst of flame instead of glass.", glow: "#ff6a1a", obtain: "coins", price: 1000 },
-  { id: "money", tab: "effects", name: "Money blast", blurb: "Coins and bills kick out from the scoring tile.", glow: "#3ddc78", obtain: "coins", price: 2000 },
-  { id: "lightning", tab: "effects", name: "Lightning", blurb: "A bolt hits the tile. A Shark season reward.", glow: "#7ec8ff", obtain: "season", tierId: "shark", tierName: "Shark" },
+  { id: "ivory", tab: "tiles", name: "Ivory", blurb: "Common. Soft white tiles, black pips, a red bar. Included.", glow: "#efefef", rarity: "common", obtain: "earned", earnNote: "Included" },
+  { id: "gold", tab: "tiles", name: "Gold", blurb: "Rare. A warm gold face with dark pips. The spinner still wears a ring.", glow: "#d5a336", rarity: "rare", obtain: "coins", price: 2500 },
+  { id: "neon", tab: "tiles", name: "Neon", blurb: "Common. Black tiles, a green pip glow, and a pink bar. About two days of play.", glow: "#39ffb0", rarity: "common", obtain: "coins", price: 500 },
+  { id: "marble", tab: "tiles", name: "Marble", blurb: "Rare. Pale stone with gray veins and a brass bar.", glow: "#d9d3c8", rarity: "rare", obtain: "coins", price: 2500 },
+  { id: "wood", tab: "tiles", name: "Wood", blurb: "Common. Warm grain, dark pips, a stained bar.", glow: "#8a5a32", rarity: "common", obtain: "coins", price: 500 },
+  { id: "smoked", tab: "tiles", name: "Smoked", blurb: "Epic. Charcoal tiles, a smoked face, white pips, and a thin gold edge. About a month of play.", glow: "#e31e26", rarity: "epic", obtain: "coins", price: 10000 },
+  { id: "green", tab: "tables", name: "Classic green", blurb: "Common. The old felt. Included.", glow: "#1e6b3a", rarity: "common", obtain: "earned", earnNote: "Included" },
+  { id: "redfelt", tab: "tables", name: "Brand red", blurb: "Common. A deep red felt in the house color. Included.", glow: "#e31e26", rarity: "common", obtain: "earned", earnNote: "Included" },
+  { id: "city", tab: "tables", name: "City night", blurb: "Epic. A skyline after dark, with a few windows still on.", glow: "#3d6ea8", rarity: "epic", obtain: "coins", price: 10000 },
+  { id: "desert", tab: "tables", name: "Desert", blurb: "Rare. Dunes, a low sun, and a warm table.", glow: "#e07a3d", rarity: "rare", obtain: "coins", price: 2500 },
+  { id: "beach", tab: "tables", name: "Florida beach", blurb: "Epic. Sand, a strip of water, and a bright sky. Premium and limited.", glow: "#2a8fad", rarity: "epic", obtain: "gems", price: 500, limited: true },
+  { id: "tailgate", tab: "tables", name: "Tailgate", blurb: "Rare. Parking-lot stripes and a gold light. Earned at Hustler. Never sold.", glow: "#d5a336", rarity: "rare", obtain: "earned", tierId: "hustler", earnNote: "Hustler" },
+  { id: "plain", tab: "frames", name: "Plain", blurb: "Common. No frame. Just the portrait. Included.", glow: "#efefef", rarity: "common", obtain: "earned", earnNote: "Included" },
+  { id: "goldring", tab: "frames", name: "Gold ring", blurb: "Common. A gold circle around the portrait.", glow: "#d5a336", rarity: "common", obtain: "coins", price: 500 },
+  { id: "redframe", tab: "frames", name: "Red enamel", blurb: "Rare. A red ring with a gold hairline. Premium and limited.", glow: "#e31e26", rarity: "rare", obtain: "gems", price: 300, limited: true },
+  { id: "rookie", tab: "frames", name: "Rookie frame", blurb: "Common. Earned when a season starts at Rookie. Never sold.", glow: "#efefef", rarity: "common", obtain: "earned", tierId: "rookie", earnNote: "Rookie" },
+  { id: "hustler", tab: "frames", name: "Hustler frame", blurb: "Rare. Earned at Hustler. Never sold.", glow: "#d5a336", rarity: "rare", obtain: "earned", tierId: "hustler", earnNote: "Hustler" },
+  { id: "shark", tab: "frames", name: "Shark frame", blurb: "Epic. Earned at Shark. Never sold.", glow: "#e31e26", rarity: "epic", obtain: "earned", tierId: "shark", earnNote: "Shark" },
+  { id: "legend", tab: "frames", name: "Legend frame", blurb: "Legendary. Earned at UH-OH Legend. Never sold.", glow: "#d5a336", rarity: "legendary", obtain: "earned", tierId: "legend", earnNote: "UH-OH Legend" },
+  { id: "century", tab: "frames", name: "Century", blurb: "Epic. Earned at 100 UH-OHs. Never sold.", glow: "#b06bff", rarity: "epic", obtain: "earned", earnNote: "100 UH-OHs" },
+  { id: "series", tab: "frames", name: "World Series", blurb: "Legendary. The World Series trophy. Earned by winning it. Never sold.", glow: "#d5a336", rarity: "legendary", obtain: "earned", earnNote: "World Series" },
+  { id: "glass", tab: "effects", name: "Glass", blurb: "Common. The house shatter. Included.", glow: "#efefef", rarity: "common", obtain: "earned", earnNote: "Included" },
+  { id: "fire", tab: "effects", name: "Fire", blurb: "Rare. The same UH-OH, with a burst of flame instead of glass.", glow: "#ff6a1a", rarity: "rare", obtain: "coins", price: 2500 },
+  { id: "money", tab: "effects", name: "Money blast", blurb: "Epic. Bills kick out from the scoring tile. Premium and limited.", glow: "#3ddc78", rarity: "epic", obtain: "gems", price: 1200, limited: true },
+  { id: "lightning", tab: "effects", name: "Lightning", blurb: "Epic. A bolt hits the tile. Earned at Shark. Never sold.", glow: "#7ec8ff", rarity: "epic", obtain: "earned", tierId: "shark", earnNote: "Shark" },
 ];
 
 const STARTER_OWNED = [
@@ -117,11 +125,18 @@ const STARTER_LOADOUT: Loadout = {
   effects: "glass",
 };
 
-const PACKS = [
-  { name: "Handful", coins: "500", price: "$0.99" },
-  { name: "Stack", coins: "1,200", price: "$1.99" },
-  { name: "Vault", coins: "3,000", price: "$3.99" },
+const GEM_PACKS = [
+  { name: "Chip", gems: "100", price: "$0.99" },
+  { name: "Stack", gems: "550", price: "$4.99" },
+  { name: "Vault", gems: "2,500", price: "$19.99" },
 ];
+
+const RARITY_NAME: Record<Rarity, string> = {
+  common: "Common",
+  rare: "Rare",
+  epic: "Epic",
+  legendary: "Legendary",
+};
 
 export function storeDemoRequested(): boolean {
   return new URLSearchParams(location.search).get("demo") === "store";
@@ -130,13 +145,15 @@ export function storeDemoRequested(): boolean {
 function arrange(items: Item[], equippedId: string): Item[] {
   const wearing = items.filter((item) => item.id === equippedId);
   const rest = items.filter((item) => item.id !== equippedId);
-  const priced = rest.filter((item) => item.obtain !== "season").sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
-  const seasons = rest.filter((item) => item.obtain === "season");
+  const coins = rest.filter((item) => item.obtain === "coins").sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  const gems = rest.filter((item) => item.obtain === "gems").sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  const earned = rest.filter((item) => item.obtain === "earned");
   const mixed: Item[] = [];
-  const count = Math.max(priced.length, seasons.length);
+  const count = Math.max(coins.length, gems.length, earned.length);
   for (let index = 0; index < count; index += 1) {
-    if (priced[index]) mixed.push(priced[index]);
-    if (seasons[index]) mixed.push(seasons[index]);
+    if (coins[index]) mixed.push(coins[index]);
+    if (earned[index]) mixed.push(earned[index]);
+    if (gems[index]) mixed.push(gems[index]);
   }
   return [...wearing, ...mixed];
 }
@@ -161,6 +178,7 @@ interface Script {
   owned: string[];
   loadout: Loadout;
   coins: number;
+  gems: number;
 }
 
 function scriptFor(shot: string | null): Script {
@@ -172,19 +190,21 @@ function scriptFor(shot: string | null): Script {
     owned: STARTER_OWNED,
     loadout: STARTER_LOADOUT,
     coins: PREVIEW_COINS,
+    gems: PREVIEW_GEMS,
   };
   if (shot === "tiles") return { ...base, tab: "tiles", selected: "neon" };
   if (shot === "tables") return { ...base, tab: "tables", selected: "desert" };
   if (shot === "frames") return { ...base, tab: "frames", selected: "shark" };
   if (shot === "effects") return { ...base, tab: "effects", selected: "fire" };
   if (shot === "owned") return { ...base, filter: "owned", selected: "golfer" };
-  if (shot === "detail") return { ...base, tab: "tiles", stage: "detail", selected: "neon" };
+  if (shot === "detail") return { ...base, tab: "tiles", stage: "detail", selected: "smoked" };
   if (shot === "confirm") return { ...base, tab: "tiles", stage: "confirm", selected: "neon" };
   if (shot === "congrats") {
-    return { ...base, tab: "tiles", stage: "congrats", selected: "neon", owned: [...STARTER_OWNED, "neon"], coins: PREVIEW_COINS - 900 };
+    return { ...base, tab: "tiles", stage: "congrats", selected: "neon", owned: [...STARTER_OWNED, "neon"], coins: PREVIEW_COINS - 500 };
   }
   if (shot === "loadout") return { ...base, stage: "loadout" };
   if (shot === "packs") return { ...base, stage: "packs" };
+  if (shot === "pass") return { ...base, stage: "pass" };
   return base;
 }
 
@@ -202,6 +222,7 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
   const [owned, setOwned] = useState<string[]>(script.owned);
   const [loadout, setLoadout] = useState<Loadout>(script.loadout);
   const [coins, setCoins] = useState(script.coins);
+  const [gems, setGems] = useState(script.gems);
   const selected = itemById(selectedId);
   const visible = arrange(CATALOG.filter((item) => item.tab === tab).filter((item) =>
     filter === "owned" ? owned.includes(item.id) : !owned.includes(item.id),
@@ -223,12 +244,20 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
   };
 
   const buy = () => {
-    if (selected.obtain !== "coins" || selected.price == null) return;
-    if (coins < selected.price) {
-      setStage("packs");
-      return;
+    if (selected.obtain === "earned" || selected.price == null) return;
+    if (selected.obtain === "gems") {
+      if (gems < selected.price) {
+        setStage("packs");
+        return;
+      }
+      setGems((value) => value - selected.price!);
+    } else {
+      if (coins < selected.price) {
+        setStage("packs");
+        return;
+      }
+      setCoins((value) => value - selected.price!);
     }
-    setCoins((value) => value - selected.price!);
     setOwned((list) => (list.includes(selected.id) ? list : [...list, selected.id]));
     setStage("congrats");
   };
@@ -239,6 +268,8 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
         <Congrats item={selected} onEquip={() => equip(selected)} onClose={() => setStage("browse")} />
       ) : stage === "loadout" ? (
         <LoadoutView loadout={loadout} onBack={() => setStage("browse")} />
+      ) : stage === "pass" ? (
+        <SeasonPass onBack={() => setStage(shot === "pass" ? "browse" : "packs")} />
       ) : (
         <>
           <header className="store-bar">
@@ -246,11 +277,17 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
               <p className="eyebrow">Preview</p>
               <h2>Store</h2>
             </div>
-            <button type="button" className="coin-chip" onClick={tap(() => setStage("packs"))} aria-label={`${coins.toLocaleString()} coins`}>
-              <CoinMark />
-              <span>{coins.toLocaleString()}</span>
-              <span className="coin-plus" aria-hidden="true">+</span>
-            </button>
+            <div className="wallet">
+              <button type="button" className="coin-chip" onClick={tap(() => setStage("packs"))} aria-label={`${coins.toLocaleString()} Bones`}>
+                <BoneMark />
+                <span>{coins.toLocaleString()}</span>
+              </button>
+              <button type="button" className="gold-chip" onClick={tap(() => setStage("packs"))} aria-label={`${gems.toLocaleString()} Gold Bones`}>
+                <BoneMark gold />
+                <span>{gems.toLocaleString()}</span>
+                <span className="coin-plus" aria-hidden="true">+</span>
+              </button>
+            </div>
           </header>
 
           {stage === "detail" || stage === "confirm" ? (
@@ -259,6 +296,7 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
               owned={owned.includes(selected.id)}
               equipped={loadout[selected.tab] === selected.id}
               coins={coins}
+              gems={gems}
               onBack={() => setStage("browse")}
               onEquip={() => equip(selected)}
               onBuy={() => setStage("confirm")}
@@ -286,11 +324,14 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
               <div className="store-rail" data-store-rail="true">
                 {visible.length === 0 ? <p className="hint">Nothing in this case.</p> : null}
                 {visible.map((item) => (
-                  <article key={item.id} className="store-card" style={{ "--glow": item.glow } as CSSProperties} data-item={item.id}>
+                  <article key={item.id} className={`store-card rarity-${item.rarity}`} style={{ "--glow": item.glow } as CSSProperties} data-item={item.id} data-rarity={item.rarity}>
                     <button type="button" className="store-card-open" onClick={tap(() => open(item))}>
+                      <span className={`rarity-pill rarity-${item.rarity}`}>{RARITY_NAME[item.rarity]}</span>
                       <span className="store-glow" />
                       <span className="store-art"><ItemArt item={item} /></span>
                       <span className="store-name">{item.name}</span>
+                      {item.obtain === "earned" && item.earnNote !== "Included" ? <span className="earned-badge">Earned only</span> : null}
+                      {item.limited ? <span className="limited-pill">Limited</span> : null}
                     </button>
                     <CardTag item={item} owned={owned.includes(item.id)} equipped={loadout[item.tab] === item.id} />
                   </article>
@@ -305,29 +346,33 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
             </>
           )}
           {stage === "confirm" ? (
-            <Confirm item={selected} coins={coins} onYes={tap(buy)} onNo={tap(() => setStage("detail"))} />
+            <Confirm item={selected} coins={coins} gems={gems} onYes={tap(buy)} onNo={tap(() => setStage("detail"))} />
           ) : null}
-          {stage === "packs" ? <Packs onClose={tap(() => setStage("browse"))} /> : null}
+          {stage === "packs" ? <Packs onClose={tap(() => setStage("browse"))} onPass={tap(() => setStage("pass"))} /> : null}
         </>
       )}
     </main>
   );
 }
 
+function payName(item: Item): string {
+  return item.obtain === "gems" ? "Gold Bones" : "Bones";
+}
+
 function CardTag({ item, owned, equipped }: { item: Item; owned: boolean; equipped: boolean }) {
   if (equipped) return <span className="store-tag tag-wear">Wearing</span>;
   if (owned) return <span className="store-tag tag-own">Apply</span>;
-  if (item.obtain === "season") {
+  if (item.obtain === "earned") {
     return (
-      <span className="store-tag tag-season">
-        <RankBadge tier={item.tierId ?? "rookie"} />
-        {item.tierName}
+      <span className="store-tag tag-earned">
+        {item.tierId ? <RankBadge tier={item.tierId} /> : null}
+        {item.earnNote}
       </span>
     );
   }
   return (
-    <span className="store-tag tag-price">
-      <CoinMark />
+    <span className={`store-tag tag-price${item.obtain === "gems" ? " tag-gold" : ""}`}>
+      <BoneMark gold={item.obtain === "gems"} />
       {item.price?.toLocaleString()}
     </span>
   );
@@ -338,6 +383,7 @@ function Detail({
   owned,
   equipped,
   coins,
+  gems,
   onBack,
   onEquip,
   onBuy,
@@ -347,26 +393,33 @@ function Detail({
   owned: boolean;
   equipped: boolean;
   coins: number;
+  gems: number;
   onBack: () => void;
   onEquip: () => void;
   onBuy: () => void;
   onPacks: () => void;
 }) {
   const price = item.price ?? 0;
-  const short = item.obtain === "coins" && !owned && coins < price;
+  const wallet = item.obtain === "gems" ? gems : coins;
+  const short = item.obtain !== "earned" && !owned && wallet < price;
   return (
-    <section className="store-detail" data-screen="store-detail">
+    <section className="store-detail" data-screen="store-detail" data-rarity={item.rarity}>
       <button type="button" className="text-button" onClick={tap(onBack)}>Back</button>
-      <div className="detail-art" style={{ "--glow": item.glow } as CSSProperties}>
+      <div className={`detail-art rarity-${item.rarity}`} style={{ "--glow": item.glow } as CSSProperties}>
         <span className="store-glow" />
         <ItemArt item={item} large />
       </div>
+      <p className="rarity-line">
+        <span className={`rarity-pill rarity-${item.rarity}`}>{RARITY_NAME[item.rarity]}</span>
+        {item.obtain === "earned" ? <span className="earned-badge">Earned only</span> : null}
+        {item.limited ? <span className="limited-pill">Limited</span> : null}
+      </p>
       <h2>{item.name}</h2>
       <p>{item.blurb}</p>
-      {item.obtain === "season" && !owned ? (
-        <p className="store-tag tag-season">
-          <RankBadge tier={item.tierId ?? "rookie"} />
-          Unlocks at {item.tierName}
+      {item.obtain === "earned" && !owned ? (
+        <p className="store-tag tag-earned">
+          {item.tierId ? <RankBadge tier={item.tierId} /> : null}
+          {item.earnNote}
         </p>
       ) : null}
       <div className="store-foot">
@@ -374,13 +427,15 @@ function Detail({
           <button type="button" className="capsule" disabled>Wearing</button>
         ) : owned ? (
           <button type="button" className="capsule" data-action="apply" onClick={tap(onEquip)}>Apply</button>
-        ) : item.obtain === "season" ? (
-          <button type="button" className="capsule" disabled>Season reward</button>
+        ) : item.obtain === "earned" ? (
+          <button type="button" className="capsule" disabled>Earned only</button>
         ) : short ? (
-          <button type="button" className="capsule capsule-red" onClick={tap(onPacks)}>Need {price.toLocaleString()} coins</button>
+          <button type="button" className="capsule capsule-red" onClick={tap(onPacks)}>
+            Need {price.toLocaleString()} {payName(item)}
+          </button>
         ) : (
           <button type="button" className="capsule" data-action="buy" onClick={tap(onBuy)}>
-            Buy for {price.toLocaleString()}
+            Buy for {price.toLocaleString()} {payName(item)}
           </button>
         )}
       </div>
@@ -388,8 +443,21 @@ function Detail({
   );
 }
 
-function Confirm({ item, coins, onYes, onNo }: { item: Item; coins: number; onYes: () => void; onNo: () => void }) {
+function Confirm({
+  item,
+  coins,
+  gems,
+  onYes,
+  onNo,
+}: {
+  item: Item;
+  coins: number;
+  gems: number;
+  onYes: () => void;
+  onNo: () => void;
+}) {
   const price = item.price ?? 0;
+  const have = item.obtain === "gems" ? gems : coins;
   return (
     <div className="store-scrim" data-screen="store-confirm">
       <section className="store-dialog" role="dialog" aria-label="Confirm purchase">
@@ -397,7 +465,7 @@ function Confirm({ item, coins, onYes, onNo }: { item: Item; coins: number; onYe
         <h2>Buy {item.name}?</h2>
         <div className="confirm-art"><ItemArt item={item} /></div>
         <p>
-          {price.toLocaleString()} coins. You have {coins.toLocaleString()}. After this, {(coins - price).toLocaleString()}.
+          {price.toLocaleString()} {payName(item)}. You have {have.toLocaleString()}. After this, {(have - price).toLocaleString()}.
         </p>
         <button type="button" className="capsule" data-action="confirm-buy" onClick={onYes}>Confirm</button>
         <button type="button" className="capsule capsule-back" onClick={onNo}>Not now</button>
@@ -454,26 +522,47 @@ function LoadoutView({ loadout, onBack }: { loadout: Loadout; onBack: () => void
   );
 }
 
-function Packs({ onClose }: { onClose: () => void }) {
+function Packs({ onClose, onPass }: { onClose: () => void; onPass: () => void }) {
   return (
     <div className="store-scrim" data-screen="store-packs">
-      <section className="store-dialog" role="dialog" aria-label="Coin packs">
+      <section className="store-dialog" role="dialog" aria-label="Gold Bones packs">
         <p className="eyebrow">Drawing only</p>
-        <h2>Coin packs</h2>
-        <p>Real money is not connected. Nothing on this phone can be charged.</p>
+        <h2>Gold Bones packs</h2>
+        <p>Real money, on paper only. Nothing on this phone can be charged.</p>
         <ul className="pack-list">
-          {PACKS.map((pack) => (
+          {GEM_PACKS.map((pack) => (
             <li key={pack.name}>
               <span>{pack.name}</span>
-              <span>{pack.coins} coins</span>
-              <span className="pack-price">{pack.price}</span>
+              <span className="pack-gems"><BoneMark gold /> {pack.gems}</span>
+              <span>{pack.price}</span>
             </li>
           ))}
         </ul>
+        <p>100 Gold Bones become 500 Bones, one way. Neither pays out as cash.</p>
+        <button type="button" className="capsule" data-action="season-pass" onClick={onPass}>Season pass · $4.99</button>
         <button type="button" className="capsule" disabled>Not for sale</button>
         <button type="button" className="capsule capsule-back" onClick={onClose}>Close</button>
       </section>
     </div>
+  );
+}
+
+function SeasonPass({ onBack }: { onBack: () => void }) {
+  return (
+    <section className="store-loadout store-pass" data-screen="store-pass">
+      <p className="eyebrow">Idea · not for sale</p>
+      <h2>Season pass</h2>
+      <p className="pass-price">$4.99 for the season</p>
+      <p>Every reward is listed here. No loot box and no random draw.</p>
+      <ul className="pass-list">
+        <li>1,500 Bones, the day you start</li>
+        <li>Fire, the UH-OH effect</li>
+        <li>Desert table</li>
+      </ul>
+      <p>The free path stays earned: season tiers, the World Series, and achievements such as 100 UH-OHs. Those are not on this pass, and they are not for sale.</p>
+      <button type="button" className="capsule" disabled>Not for sale</button>
+      <button type="button" className="capsule capsule-back" onClick={tap(onBack)}>Back</button>
+    </section>
   );
 }
 
@@ -565,11 +654,14 @@ function EffectStill({ id }: { id: string }) {
   );
 }
 
-function CoinMark() {
+export function BoneMark({ gold = false }: { gold?: boolean }) {
   return (
-    <svg className="coin-mark" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <circle cx="12" cy="12" r="3" />
+    <svg className={gold ? "bone-mark bone-gold" : "bone-mark"} viewBox="0 0 16 28" aria-hidden="true">
+      <rect x="1" y="1" width="14" height="26" rx="3" />
+      <line x1="2.5" y1="14" x2="13.5" y2="14" />
+      <circle cx="8" cy="7.2" r="1.6" />
+      <circle cx="6.1" cy="20.6" r="1.45" />
+      <circle cx="9.9" cy="20.6" r="1.45" />
     </svg>
   );
 }

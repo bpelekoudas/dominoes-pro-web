@@ -1331,15 +1331,35 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   gap: 6px;
   padding: 0 10px;
   border-radius: 999px;
+  border: 1px solid rgba(239, 239, 239, 0.72);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--paper);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wallet { display: flex; align-items: center; gap: 6px; }
+.bone-mark { width: 14px; height: 24px; flex: none; }
+.bone-mark rect { fill: #efefef; stroke: #1a1a1a; stroke-width: 1; }
+.bone-mark line { stroke: #e31e26; stroke-width: 1.5; }
+.bone-mark circle { fill: #141414; }
+.bone-gold rect { fill: #d5a336; stroke: #6e4e12; }
+.bone-gold circle { fill: #1a1204; }
+.bone-gold line { stroke: #6e0c12; }
+.gold-chip {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 999px;
   border: 1px solid var(--gold);
   background: rgba(0, 0, 0, 0.45);
   color: var(--gold);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.coin-mark { width: 18px; height: 18px; flex: none; }
-.coin-mark circle:first-child { fill: var(--gold); }
-.coin-mark circle:last-child { fill: #1a1204; }
+.arcade-bar .coin-chip, .arcade-bar .gold-chip { padding: 0 8px; font-size: 0.82rem; }
+.store-bar .coin-chip, .store-bar .gold-chip { padding: 0 8px; font-size: 0.85rem; }
 .coin-plus {
   width: 22px;
   height: 22px;
@@ -1351,8 +1371,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   font-family: "Bebas Neue", Impact, sans-serif;
   line-height: 1;
 }
-.arcade-bar .profile-chip { max-width: 38%; }
-.arcade-bar .coin-chip { padding-right: 8px; }
+.arcade-bar .profile-chip { max-width: 34%; }
 
 .store-app {
   position: fixed;
@@ -1410,10 +1429,58 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   display: flex;
   flex-direction: column;
   border-radius: 22px;
-  border: 1px solid var(--line);
+  border: 2px solid var(--line);
   background: #121212;
   overflow: hidden;
   min-height: 280px;
+}
+.store-card.rarity-common, .detail-art.rarity-common { border-color: rgba(239, 239, 239, 0.55); }
+.store-card.rarity-rare, .detail-art.rarity-rare { border-color: #4aa3ff; }
+.store-card.rarity-epic, .detail-art.rarity-epic { border-color: #b06bff; }
+.store-card.rarity-legendary, .detail-art.rarity-legendary { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(213, 163, 54, 0.45); }
+.rarity-pill {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rarity-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0; }
+.rarity-line .rarity-pill, .rarity-line .limited-pill { position: static; }
+.rarity-pill.rarity-common { background: #2a2a2a; color: var(--paper); }
+.rarity-pill.rarity-rare { background: #4aa3ff; color: #041018; }
+.rarity-pill.rarity-epic { background: #7a3ff0; color: white; }
+.rarity-pill.rarity-legendary { background: var(--gold); color: #1a1204; }
+.earned-badge {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.limited-pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--red);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .store-card-open {
   flex: 1;
@@ -1468,7 +1535,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .tag-wear { color: var(--gold); }
 .tag-own { color: var(--paper); }
-.tag-price { color: var(--gold); }
+.tag-price { color: var(--paper); }
+.tag-gold { color: var(--gold); }
 .tag-season { color: var(--paper); }
 .store-tag .rank-badge { width: 16px; height: 16px; }
 .store-foot { display: grid; gap: 8px; }
@@ -1504,6 +1572,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .store-dialog {
   width: 100%;
+  max-height: 92%;
+  overflow: auto;
   background: #1a1a1a;
   border-radius: 24px 24px 0 0;
   padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
@@ -1547,7 +1617,10 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .store-loadout small { display: block; color: var(--muted); }
 .store-loadout strong { font-size: 1.05rem; }
 .store-loadout em { margin-left: auto; color: var(--gold); font-style: normal; font-weight: 700; }
-.pack-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+[data-screen="store-packs"] .store-dialog { gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+[data-screen="store-packs"] .store-dialog h2 { font-size: 1.9rem; }
+[data-screen="store-packs"] .capsule { min-height: 48px; font-size: 1.55rem; box-shadow: 0 4px 0 #8a6818; }
+.pack-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .pack-list li {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -1555,7 +1628,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   align-items: center;
   min-height: 44px;
 }
-.pack-price { color: var(--muted); text-decoration: line-through; }
+.pack-gems { display: inline-flex; align-items: center; gap: 4px; color: var(--gold); font-weight: 700; }
+.pass-price { margin: 0; color: var(--gold); font-weight: 700; font-size: 1.2rem; }
+.pass-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 
 .mini-board { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .mini-board .domino.vertical { width: 36px; height: 72px; }
@@ -1609,6 +1684,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .frame-hustler { box-shadow: 0 0 0 3px var(--gold), 0 0 12px rgba(213, 163, 54, 0.7); border-radius: 50%; }
 .frame-shark { box-shadow: 0 0 0 3px var(--red), 0 0 12px rgba(227, 30, 38, 0.7); border-radius: 50%; }
 .frame-legend { box-shadow: 0 0 0 3px var(--gold), 0 0 0 6px #1a1204, 0 0 0 8px var(--gold); border-radius: 50%; }
+.frame-century { box-shadow: 0 0 0 3px #b06bff, 0 0 10px rgba(176, 107, 255, 0.55); border-radius: 50%; }
+.frame-series { box-shadow: 0 0 0 3px var(--gold), 0 0 0 6px #7a3ff0; border-radius: 50%; }
 .effect-still { width: 88px; height: 88px; display: grid; place-items: center; position: relative; }
 .effect-glass svg { width: 84px; height: 84px; }
 .effect-glass path { fill: none; stroke: #fff; stroke-width: 2; }
