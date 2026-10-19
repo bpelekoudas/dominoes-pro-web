@@ -5,7 +5,8 @@ import { Logo } from "./logo.js";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
 import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
-import { isMuted, playBuzz, playScore, playTile, setMuted, unlockSound } from "./sound";
+import { cuesForPlay, cuesForTurn } from "./cues";
+import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
 
 interface ChatLine {
@@ -122,7 +123,15 @@ export function App() {
     setSelectedTile(null);
   }, [view?.turnPlayerId, view?.handNumber, view?.gameNumber, view?.you.hand.length]);
 
+  useEffect(() => {
+    preloadSounds();
+    const unlock = () => unlockSound();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, []);
+
   const openSocket = (first: object) => {
+    unlockSound();
     setError(null);
     connectRef.current(first);
   };
@@ -427,21 +436,16 @@ function Game({
   const [muted, setMute] = useState(isMuted);
   const [replayToken, setReplayToken] = useState(0);
   useEffect(() => {
-    const unlock = () => unlockSound();
-    window.addEventListener("pointerdown", unlock, { once: true });
-    return () => window.removeEventListener("pointerdown", unlock);
-  }, []);
-  useEffect(() => {
     if (demoRequested()) setReplayToken(1);
   }, []);
   useEffect(() => {
     const play = view.lastPlay;
+    // 20+ is the UH-OH moment, which plays the slam, the glass, and the cha-ching together.
     if (!play || bigMomentLevel(play.awarded)) return;
-    playTile();
-    if (play.awarded > 0) playScore();
+    playCues(cuesForPlay(play.awarded, play.tileId));
   }, [view.lastPlay?.seq]);
   useEffect(() => {
-    if (yourTurn) playBuzz();
+    if (yourTurn) playCues(cuesForTurn());
   }, [yourTurn, view.turnPlayerId, view.handNumber]);
 
   const playing = view.status !== "lobby";
