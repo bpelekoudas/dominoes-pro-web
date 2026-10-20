@@ -4,6 +4,8 @@ import { Domino } from "./table";
 import { AvatarFace, Portrait } from "./avatars";
 import { RankBadge } from "./rank";
 import { playUiClick, unlockSound } from "./sound";
+import { normalizeFx, readEquippedFx, writeEquippedFx, type FxId } from "./fx.js";
+import { FxBoard } from "./moment.js";
 
 export const PREVIEW_COINS = 1840;
 export const PREVIEW_GEMS = 180;
@@ -11,7 +13,7 @@ export const PREVIEW_GEMS = 180;
 type Tab = "characters" | "tiles" | "tables" | "frames" | "effects";
 type Obtain = "coins" | "gems" | "earned";
 type Rarity = "common" | "rare" | "epic" | "legendary";
-type Stage = "browse" | "detail" | "confirm" | "congrats" | "loadout" | "packs" | "pass";
+type Stage = "browse" | "detail" | "confirm" | "congrats" | "loadout" | "packs" | "pass" | "play";
 type Filter = "sale" | "owned";
 
 interface Item {
@@ -27,6 +29,7 @@ interface Item {
   tierId?: string;
   earnNote?: string;
   avatarId?: string;
+  fx?: FxId;
 }
 
 export interface Loadout {
@@ -103,10 +106,16 @@ const CATALOG: Item[] = [
   { id: "legend", tab: "frames", name: "Legend frame", blurb: "Legendary. Earned at UH-OH Legend. Never sold.", glow: "#d5a336", rarity: "legendary", obtain: "earned", tierId: "legend", earnNote: "UH-OH Legend" },
   { id: "century", tab: "frames", name: "Century", blurb: "Epic. Earned at 100 UH-OHs. Never sold.", glow: "#b06bff", rarity: "epic", obtain: "earned", earnNote: "100 UH-OHs" },
   { id: "series", tab: "frames", name: "World Series", blurb: "Legendary. The World Series trophy. Earned by winning it. Never sold.", glow: "#d5a336", rarity: "legendary", obtain: "earned", earnNote: "World Series" },
-  { id: "glass", tab: "effects", name: "Glass", blurb: "Common. The house shatter. Included.", glow: "#efefef", rarity: "common", obtain: "earned", earnNote: "Included" },
-  { id: "fire", tab: "effects", name: "Fire", blurb: "Rare. The same UH-OH, with a burst of flame instead of glass.", glow: "#ff6a1a", rarity: "rare", obtain: "coins", price: 2500 },
-  { id: "money", tab: "effects", name: "Money blast", blurb: "Epic. Bills kick out from the scoring tile. Premium and limited.", glow: "#3ddc78", rarity: "epic", obtain: "gems", price: 1200, limited: true },
-  { id: "lightning", tab: "effects", name: "Lightning", blurb: "Epic. A bolt hits the tile. Earned at Shark. Never sold.", glow: "#7ec8ff", rarity: "epic", obtain: "earned", tierId: "shark", earnNote: "Shark" },
+  { id: "glass", tab: "effects", name: "Glass shatter", blurb: "Common. The house shatter. Included.", glow: "#efefef", rarity: "common", obtain: "earned", earnNote: "Included", fx: "glass" },
+  { id: "fire", tab: "effects", name: "Fire", blurb: "Rare. Tiles burst into flames around the same UH-OH.", glow: "#ff6a1a", rarity: "rare", obtain: "coins", price: 2500, fx: "fire" },
+  { id: "lightning", tab: "effects", name: "Lightning", blurb: "Epic. Blue-white bolts crackle around the winning tiles. Earned at Shark. Never sold.", glow: "#7ec8ff", rarity: "epic", obtain: "earned", tierId: "shark", earnNote: "Shark", fx: "lightning" },
+  { id: "money", tab: "effects", name: "Money blast", blurb: "Epic. A cannon of bone bills and gold coins. Cosmetic only. Premium and limited.", glow: "#d5a336", rarity: "epic", obtain: "gems", price: 1200, limited: true, fx: "money" },
+  { id: "confetti", tab: "effects", name: "Confetti pop", blurb: "Common. A confetti cannon around the same UH-OH. About two days of play.", glow: "#e31e26", rarity: "common", obtain: "coins", price: 500, fx: "confetti" },
+  { id: "tumble", tab: "effects", name: "Domino tumble", blurb: "Rare. A short wall of tiles tips across the scoring play.", glow: "#efefef", rarity: "rare", obtain: "coins", price: 2500, fx: "tumble" },
+  { id: "quake", tab: "effects", name: "Earthquake", blurb: "Epic. Glowing cracks and a shockwave toss nearby tiles. About a month of play.", glow: "#d5a336", rarity: "epic", obtain: "coins", price: 10000, fx: "quake" },
+  { id: "trophy", tab: "effects", name: "Trophy rain", blurb: "Epic. Mini trophies fall around the UH-OH. Premium and limited.", glow: "#d5a336", rarity: "epic", obtain: "gems", price: 800, limited: true, fx: "trophy" },
+  { id: "fireworks", tab: "effects", name: "Fireworks finale", blurb: "Epic. A short red, white, and blue finale. Premium and limited.", glow: "#e31e26", rarity: "epic", obtain: "gems", price: 1500, limited: true, fx: "fireworks" },
+  { id: "goldburst", tab: "effects", name: "Legend gold burst", blurb: "Legendary. A gold shockwave and the UH-OH Legend crest. A few months of steady play.", glow: "#d5a336", rarity: "legendary", obtain: "coins", price: 35000, fx: "legend" },
 ];
 
 const STARTER_OWNED = [
@@ -160,6 +169,10 @@ function arrange(items: Item[], equippedId: string): Item[] {
 
 function itemById(id: string): Item {
   return CATALOG.find((item) => item.id === id) ?? CATALOG[0]!;
+}
+
+function fxOf(item: Item): FxId {
+  return normalizeFx(item.fx ?? item.id);
 }
 
 function tap(action: () => void): () => void {
@@ -223,6 +236,7 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
   const [loadout, setLoadout] = useState<Loadout>(script.loadout);
   const [coins, setCoins] = useState(script.coins);
   const [gems, setGems] = useState(script.gems);
+  const [wornFx, setWornFx] = useState<FxId>(readEquippedFx());
   const selected = itemById(selectedId);
   const visible = arrange(CATALOG.filter((item) => item.tab === tab).filter((item) =>
     filter === "owned" ? owned.includes(item.id) : !owned.includes(item.id),
@@ -233,14 +247,28 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
 
   const open = (item: Item) => {
     setSelectedId(item.id);
-    setStage("detail");
+    setStage(item.tab === "effects" ? "play" : "detail");
   };
 
   const equip = (item: Item) => {
     setLoadout((current) => ({ ...current, [item.tab]: item.id }));
+    if (item.tab === "effects") {
+      const fx = fxOf(item);
+      writeEquippedFx(fx);
+      setWornFx(fx);
+    }
     setStage("browse");
     setFilter("owned");
     setTab(item.tab);
+  };
+
+  const wearFx = (item: Item) => {
+    const fx = fxOf(item);
+    writeEquippedFx(fx);
+    setWornFx(fx);
+    if (owned.includes(item.id)) {
+      setLoadout((current) => ({ ...current, effects: item.id }));
+    }
   };
 
   const buy = () => {
@@ -264,7 +292,15 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
 
   return (
     <main className="store-app" data-screen="store" data-store-shot={shot ?? stage}>
-      {stage === "congrats" ? (
+      {stage === "play" && selected.tab === "effects" ? (
+        <EffectPlay
+          item={selected}
+          worn={wornFx === fxOf(selected)}
+          onWear={() => wearFx(selected)}
+          onDetails={() => setStage("detail")}
+          onBack={() => setStage("browse")}
+        />
+      ) : stage === "congrats" ? (
         <Congrats item={selected} onEquip={() => equip(selected)} onClose={() => setStage("browse")} />
       ) : stage === "loadout" ? (
         <LoadoutView loadout={loadout} onBack={() => setStage("browse")} />
@@ -297,7 +333,7 @@ function StoreScreens({ onClose, shot }: { onClose?: () => void; shot: string | 
               equipped={loadout[selected.tab] === selected.id}
               coins={coins}
               gems={gems}
-              onBack={() => setStage("browse")}
+              onBack={() => setStage(selected.tab === "effects" ? "play" : "browse")}
               onEquip={() => equip(selected)}
               onBuy={() => setStage("confirm")}
               onPacks={() => setStage("packs")}
@@ -566,6 +602,49 @@ function SeasonPass({ onBack }: { onBack: () => void }) {
   );
 }
 
+function EffectPlay({
+  item,
+  worn,
+  onWear,
+  onDetails,
+  onBack,
+}: {
+  item: Item;
+  worn: boolean;
+  onWear: () => void;
+  onDetails: () => void;
+  onBack: () => void;
+}) {
+  const [run, setRun] = useState(1);
+  const fx = fxOf(item);
+  return (
+    <section className="fx-play" data-screen="store-fx" data-fx={fx}>
+      <FxBoard effect={fx} token={`store-${item.id}-${run}`} />
+      <div className="uhoh-preview-bar">
+        <button type="button" className="primary" data-action="replay-fx" onClick={tap(() => setRun((value) => value + 1))}>
+          Play again
+        </button>
+        <button type="button" className="capsule" data-action="wear-fx" onClick={tap(onWear)} disabled={worn}>
+          {worn ? "Wearing" : "Wear in preview"}
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          data-action="score-fx"
+          onClick={tap(() => {
+            onWear();
+            location.assign(`/?demo=uhoh&fx=${fx}`);
+          })}
+        >
+          See it on a score
+        </button>
+        <button type="button" className="text-button" onClick={tap(onDetails)}>Details</button>
+        <button type="button" className="text-button" onClick={tap(onBack)}>Back</button>
+      </div>
+    </section>
+  );
+}
+
 function ItemArt({ item, large = false }: { item: Item; large?: boolean }) {
   if (item.tab === "characters") return <Portrait id={item.avatarId} size={large ? "hero" : "grid"} />;
   if (item.tab === "tiles") return <TileSample skin={item.id} chain={large} />;
@@ -622,26 +701,41 @@ function Scene({ id }: { id: string }) {
 }
 
 function EffectStill({ id }: { id: string }) {
-  if (id === "fire") {
+  const fx = id === "goldburst" ? "legend" : id;
+  if (fx === "fire") {
     return (
       <span className="effect-still effect-fire" aria-hidden="true">
         <i /><i /><i />
       </span>
     );
   }
-  if (id === "money") {
+  if (fx === "money") {
     return (
       <span className="effect-still effect-money" aria-hidden="true">
         <i /><i /><i /><i /><i />
       </span>
     );
   }
-  if (id === "lightning") {
+  if (fx === "lightning") {
     return (
       <span className="effect-still effect-bolt" aria-hidden="true">
         <svg viewBox="0 0 64 96">
           <path d="M38 2 L14 46 H30 L22 94 L54 40 H36 Z" />
         </svg>
+      </span>
+    );
+  }
+  if (fx === "confetti" || fx === "trophy" || fx === "fireworks" || fx === "tumble") {
+    return (
+      <span className={`effect-still effect-${fx}`} aria-hidden="true">
+        <i /><i /><i /><i /><i />
+      </span>
+    );
+  }
+  if (fx === "quake" || fx === "legend") {
+    return (
+      <span className={`effect-still effect-${fx}`} aria-hidden="true">
+        <i />
       </span>
     );
   }

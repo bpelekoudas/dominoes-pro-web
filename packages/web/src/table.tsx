@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { readEquippedFx } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
 import {
   chooseDropEnd,
@@ -181,6 +182,7 @@ export function Table({
             spinner: placed?.spinner,
           }}
           anchor={anchor}
+          effect={readEquippedFx()}
           onShake={setShake}
           onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
           onDone={() => {

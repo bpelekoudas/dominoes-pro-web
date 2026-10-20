@@ -3,7 +3,7 @@ import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
-import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
+import { demoAward, demoRequested, fxGalleryRequested, FxGallery, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
@@ -185,6 +185,10 @@ export function App() {
     sessionStorage.setItem("uhoh.splash", "1");
     setSplash(false);
   };
+
+  if (fxGalleryRequested() && !view) {
+    return <FxGallery />;
+  }
 
   if (storeDemoRequested() && !view) {
     return <StorePreview shot={new URLSearchParams(location.search).get("shot")} />;
