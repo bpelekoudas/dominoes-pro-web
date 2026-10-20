@@ -478,6 +478,15 @@ input {
     0 0 0 2px rgba(213, 163, 54, 0.95),
     0 0 16px rgba(213, 163, 54, 0.8);
 }
+.table-scroll.hand-over .board-tile.last-move {
+  z-index: 3;
+}
+.table-scroll.hand-over .board-tile.last-move .domino {
+  box-shadow:
+    inset 0 0 0 2px #fff,
+    0 0 0 4px var(--gold),
+    0 0 22px 6px rgba(227, 30, 38, 0.9);
+}
 .end-cap {
   z-index: 2;
   border: 0;
@@ -844,15 +853,42 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   z-index: 40;
   left: 12px;
   right: 12px;
-  top: 64px;
-  max-height: calc(100dvh - 80px);
   overflow: auto;
   background: #1b1b1b;
   color: var(--paper);
   border: 1px solid rgba(213, 163, 54, 0.7);
-  border-radius: 16px;
   padding: 16px;
 }
+.ended-screen {
+  top: 64px;
+  max-height: calc(100dvh - 80px);
+  border-radius: 16px;
+}
+.hand-summary {
+  top: auto;
+  bottom: 0;
+  max-height: 54dvh;
+  border-radius: 16px 16px 0 0;
+}
+.felt-app.showing-result .table-frame { flex: none; height: 44dvh; }
+.felt-app.showing-result .hand-tray { visibility: hidden; }
+.winner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.winner-row h2 { margin: 0; }
+.last-tile-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 700;
+}
+.last-tile-line .domino { width: 36px; height: 72px; flex: none; }
 .hand-summary h2, .ended-screen p { margin: 0 0 8px; }
 .ended-screen .result-kicker {
   font-family: "Red Hat Text", sans-serif;
@@ -1133,7 +1169,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   background: #142016;
 }
 .demo-felt .seat-chip { position: relative; left: auto; right: auto; top: auto; max-width: none; opacity: 1; }
-.hand-summary.demo-summary { position: relative; top: auto; left: auto; right: auto; max-height: none; }
+.hand-summary.demo-summary { position: relative; top: auto; bottom: auto; left: auto; right: auto; max-height: none; }
 
 .arcade-home {
   min-height: 100dvh;

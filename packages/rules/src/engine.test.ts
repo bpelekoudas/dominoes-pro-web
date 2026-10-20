@@ -113,6 +113,118 @@ describe("opening lead", () => {
     expect(led.lastPlay?.total).toBe(10);
     expect(led.scores.b).toBe(10);
   });
+
+  it("deals the big six again when a new game starts, then lets that hand's winner lead", () => {
+    const first = {
+      a: ["6-6", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["5-5", "1-1", "1-3", "1-4", "1-5", "2-2", "2-3"],
+    };
+    const config = { boneyardMode: "draw_one" as const, seriesLength: 3 as const, targetScore: 50 };
+    let match = start([A, B], deckFor(["a", "b"], first), config);
+    match = { ...match, scores: { a: 50, b: 0 } };
+    match = play(match, "a", "6-6", "lead");
+    expect(match.lastHand?.gameWinnerId).toBe("a");
+    expect(match.lastPlay?.tileId).toBe("6-6");
+    expect(match.hand?.board.center?.tileId).toBe("6-6");
+    expect(match.hand?.phase).toBe("complete");
+
+    const second = {
+      a: ["0-0", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["6-6", "1-1", "1-3", "1-4", "1-5", "2-2", "2-3"],
+    };
+    const next = beginHand(match, deckFor(["a", "b"], second));
+    expect(next.gameNumber).toBe(2);
+    expect(next.handNumber).toBe(1);
+    expect(next.scores).toEqual({ a: 0, b: 0 });
+    expect(next.hand?.openingTileId).toBe("6-6");
+    expect(next.hand?.leaderId).toBe("b");
+    expect(applyIntent(next, "a", { type: "play", tileId: "0-0", endId: "lead" }).ok).toBe(false);
+    expect(applyIntent(next, "b", { type: "play", tileId: "1-1", endId: "lead" }).ok).toBe(false);
+    const led = play(next, "b", "6-6", "lead");
+
+    const gone = play(
+      {
+        ...led,
+        hand: {
+          ...led.hand!,
+          hands: { a: ["5-5"], b: ["5-6"] },
+          boneyard: [],
+          phase: "await_play",
+          turnIndex: 1,
+        },
+      },
+      "b",
+      "5-6",
+      "east",
+    );
+    expect(gone.lastHand?.reason).toBe("domino");
+    expect(gone.lastHand?.winnerIds).toEqual(["b"]);
+    expect(gone.lastHand?.gameWinnerId).toBeNull();
+    expect(gone.lastPlay?.tileId).toBe("5-6");
+    expect(gone.lastPlay?.playerId).toBe("b");
+    expect(gone.hand?.phase).toBe("complete");
+    expect(gone.hand?.board.center?.tileId).toBe("6-6");
+    const shown = project(gone, metaOf(gone, "a"));
+    expect(shown.phase).toBe("between");
+    expect(shown.board?.center?.tileId).toBe("6-6");
+    expect(shown.lastPlay?.tileId).toBe("5-6");
+
+    const follow = beginHand(gone, deckFor(["a", "b"], second));
+    expect(follow.gameNumber).toBe(2);
+    expect(follow.handNumber).toBe(2);
+    expect(follow.hand?.leaderId).toBe("b");
+    expect(follow.hand?.openingTileId).toBeNull();
+  });
+
+  it("falls back to the highest double when a new game's boneyard holds the big six", () => {
+    const first = {
+      a: ["6-6", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["4-4", "1-1", "1-3", "1-4", "1-5", "2-2", "2-3"],
+    };
+    let match = start([A, B], deckFor(["a", "b"], first), {
+      boneyardMode: "draw_until",
+      seriesLength: 3,
+      targetScore: 10,
+    });
+    match = play({ ...match, scores: { a: 10, b: 0 } }, "a", "6-6", "lead");
+    const dealt = {
+      a: ["5-5", "0-1", "0-2", "0-3", "0-4", "1-2", "1-3"],
+      b: ["4-4", "1-4", "1-5", "2-3", "2-4", "2-5", "3-4"],
+    };
+    const next = beginHand(match, deckFor(["a", "b"], dealt, ["6-6"]));
+    expect(next.hand?.openingTileId).toBe("5-5");
+    expect(next.hand?.leaderId).toBe("a");
+  });
+
+  it("keeps an older log where the winner opened the next game with any tile", () => {
+    const first = {
+      a: ["5-5", "0-1", "0-2", "0-3", "0-4", "1-2", "1-3"],
+      b: ["4-4", "1-4", "1-5", "2-3", "2-4", "2-5", "3-4"],
+    };
+    const config = { boneyardMode: "draw_one" as const, seriesLength: 3 as const, targetScore: 10 };
+    const deck1 = deckFor(["a", "b"], first, ["6-6"]);
+    let match = beginHand(createMatch([A, B], config), deck1, 2);
+    expect(match.hand?.openingTileId).toBe("5-5");
+    match = play(match, "a", "5-5", "lead");
+    expect(match.lastHand?.gameWinnerId).toBe("a");
+    const second = {
+      a: ["3-3", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["6-6", "1-1", "1-3", "1-4", "1-5", "2-2", "2-3"],
+    };
+    const deck2 = deckFor(["a", "b"], second);
+    const next = beginHand(match, deck2, 2);
+    expect(next.hand?.leaderId).toBe("a");
+    expect(next.hand?.openingTileId).toBeNull();
+    const led = play(next, "a", "3-3", "lead");
+    const log = [
+      { deck: deck1, actions: [{ playerId: "a", intent: { type: "play" as const, tileId: "5-5", endId: "lead" } }] },
+      { deck: deck2, actions: [{ playerId: "a", intent: { type: "play" as const, tileId: "3-3", endId: "lead" } }] },
+    ];
+    const again = replayMatch([A, B], config, log, 2);
+    expect(again.hand?.board.center?.tileId).toBe("3-3");
+    expect(again.gameNumber).toBe(led.gameNumber);
+    expect(() => replayMatch([A, B], config, log, 3)).toThrow();
+  });
 });
 
 describe("spinner score is what the table shows and what the player is paid", () => {
@@ -227,6 +339,7 @@ describe("owner checklist", () => {
     const next = beginHand(led, deckFor(ids, hands, ["6-6"]));
     expect(next.gameNumber).toBe(2);
     expect(next.scores.a).toBe(0);
+    expect(next.hand?.openingTileId).toBe("5-5");
     expect(next.hand?.leaderId).toBe("a");
   });
 
@@ -502,7 +615,7 @@ describe("series lead and replay", () => {
     }
   });
 
-  it("lets the winner of each hand lead the next one, across games too", () => {
+  it("lets the winner lead the next hand, and deals the big six at the start of each game", () => {
     const report = playSeeded(4, {
       players: [A, B],
       boneyardMode: "draw_until",
@@ -573,16 +686,17 @@ function playSeeded(
     guard += 1;
     if (!match.hand || match.hand.phase === "complete") {
       const expectedLeader = match.nextLeaderId;
+      const freshGame = match.hand === null || Boolean(match.lastHand?.gameWinnerId);
       const seed = namedSeed(seedNumber, hands.length);
       const deck = shuffleWithSeed(seed);
       match = beginHand(match, deck);
-      if (expectedLeader) {
+      if (freshGame) {
+        expect(match.hand?.openingTileId).not.toBeNull();
+        if (match.handNumber === 1 && match.gameNumber > 1) crossedGame = true;
+      } else if (expectedLeader) {
         leadChecks += 1;
         expect(match.hand?.leaderId).toBe(expectedLeader);
         expect(match.hand?.openingTileId).toBeNull();
-        if (match.handNumber === 1 && match.gameNumber > 1) crossedGame = true;
-      } else {
-        expect(match.hand?.openingTileId).not.toBeNull();
       }
       hands.push({ seed, deck, actions: [] });
       expect(new Set(conservedTiles(match)).size).toBe(28);

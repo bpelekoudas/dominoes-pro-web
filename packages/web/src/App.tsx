@@ -379,8 +379,11 @@ function Game({
   }, [yourTurn, view.turnPlayerId, view.handNumber]);
 
   const playing = view.status !== "lobby";
+  const showingResult = Boolean(
+    view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended,
+  );
   return (
-    <main className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}`} data-skin="ivory">
+    <main className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`} data-skin="ivory">
       <div className="felt-column">
       <header className="playbar">
         <PlayMark />
@@ -895,10 +898,22 @@ function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () =>
   const seriesOver = Boolean(hand.seriesWinnerId);
   const seconds = view.continueDeadline ? Math.max(0, Math.ceil((view.continueDeadline - now) / 1000)) : null;
   const places = [...hand.placements].sort((a, b) => a.place - b.place || a.playerId.localeCompare(b.playerId));
+  const last = view.lastPlay;
+  const wentOut = hand.reason === "domino";
+  const lastFace = last ? faceOf(last.tileId) : null;
   return (
     <section className="hand-summary" data-screen={seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand"}>
       <p className="result-kicker">{seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
-      <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>
+      <div className="winner-row">
+        <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>
+        {last && lastFace ? (
+          <p className="last-tile-line" data-last-tile={last.tileId} data-last-player={last.playerId}>
+            <span>{wentOut ? "Went out with" : "Last played"}</span>
+            <Domino a={lastFace.low} b={lastFace.high} orientation="vertical" />
+            {wentOut ? null : <span>{names.get(last.playerId) ?? "Someone"}</span>}
+          </p>
+        ) : null}
+      </div>
       <p>{hand.summary}</p>
       <p className="round-note">Leftovers round down to the nearest 5.</p>
       <ol className="place-list">
@@ -1053,6 +1068,14 @@ function nameOf(view: PlayerView, playerId: string): string {
 function pretty(tileId: string): string {
   const [low, high] = tileId.split("-");
   return `${high}–${low}`;
+}
+
+function faceOf(tileId: string): { low: number; high: number } {
+  const [low, high] = tileId.split("-").map((part) => Number(part));
+  return {
+    low: Number.isFinite(low) ? low! : 0,
+    high: Number.isFinite(high) ? high! : 0,
+  };
 }
 
 function copyText(value: string) {

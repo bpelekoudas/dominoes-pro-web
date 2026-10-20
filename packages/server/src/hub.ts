@@ -14,6 +14,7 @@ import {
   tauntsForPlayer,
   randomSeed,
   RULES_VERSION,
+  canRestoreRules,
   turnHoldMs,
   avatarForSeed,
   pickDistinctAvatar,
@@ -896,7 +897,7 @@ export class Hub {
   }
 
   private restoreRoom(row: RoomRow): void {
-    if (row.rules_version !== RULES_VERSION) {
+    if (!canRestoreRules(row.rules_version)) {
       // Already closed on an earlier boot. Leave it on disk and do not load it again.
       if (row.status === "abandoned") return;
       const saved = row.rules_version == null ? "an older version" : `version ${row.rules_version}`;
@@ -964,6 +965,7 @@ export class Hub {
           room.seats.map((seat) => ({ id: seat.id, name: seat.name })),
           { ...room.settings, targetScore: 150 },
           logged,
+          row.rules_version ?? RULES_VERSION,
         );
         const last = logged[logged.length - 1]!;
         room.handId = last.id;

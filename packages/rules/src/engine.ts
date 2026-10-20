@@ -79,7 +79,7 @@ export interface HandState {
   board: BoardState;
   turnIndex: number;
   phase: "await_play" | "await_draw" | "await_knock" | "complete";
-  /** Set only on the first hand of a series. That tile must be the lead. */
+  /** Set on the first hand of a game. That tile must be the lead. */
   openingTileId: string | null;
   leaderId: string;
   boardPoints: Record<string, number>;
@@ -95,7 +95,7 @@ export interface MatchState {
   handNumber: number;
   phase: "ready" | "in_hand" | "series_over";
   hand: HandState | null;
-  /** Null only before the first hand. After that, the previous deal picks the leader. */
+  /** Null before the first hand. After a hand, this player leads the next one in the same game. */
   nextLeaderId: string | null;
   lastHand: HandResult | null;
   seriesWinnerId: string | null;
@@ -127,10 +127,15 @@ export interface LoggedHand {
 const SERIES_LENGTHS = new Set<SeriesLength>([3, 5, 7]);
 
 /**
- * Saved tables replay only when this matches the copy stored with the room.
- * Bump it when an older action log would no longer replay.
+ * Saved tables replay on this copy of the rules.
+ * Version 2 still restores: the winner of a game led the next game with any tile.
+ * Version 3 deals the big six again on the first hand of every game.
  */
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
+
+export function canRestoreRules(version: number | null): boolean {
+  return version === 2 || version === 3;
+}
 
 export function createMatch(players: MatchPlayer[], config: MatchConfig): MatchState {
   if (players.length < 2 || players.length > 4) {
@@ -253,7 +258,7 @@ export function openingLead(hands: Record<string, readonly string[]>): {
   return { leaderId: bestTile.leaderId, tileId: bestTile.tileId };
 }
 
-export function beginHand(match: MatchState, deck: string[]): MatchState {
+export function beginHand(match: MatchState, deck: string[], rulesVersion: number = RULES_VERSION): MatchState {
   if (match.phase === "series_over") throw new Error("The series is over.");
   if (match.hand && match.hand.phase !== "complete") {
     throw new Error("The current hand is still going.");
@@ -277,9 +282,12 @@ export function beginHand(match: MatchState, deck: string[]): MatchState {
   }
 
   const dealt = deal(deck, playerIds);
+  const freshGame = !match.hand || Boolean(match.lastHand?.gameWinnerId);
+  // Rooms saved before this change keep the old lead so their action log still replays.
+  const forceOpening = rulesVersion >= 3 ? freshGame : match.nextLeaderId === null;
   let leaderId: string;
   let openingTileId: string | null;
-  if (match.nextLeaderId === null) {
+  if (forceOpening || match.nextLeaderId === null) {
     const opening = openingLead(dealt.hands);
     leaderId = opening.leaderId;
     openingTileId = opening.tileId;
@@ -369,10 +377,11 @@ export function replayMatch(
   players: MatchPlayer[],
   config: MatchConfig,
   hands: readonly LoggedHand[],
+  rulesVersion: number = RULES_VERSION,
 ): MatchState {
   let match = createMatch(players, config);
   for (const hand of hands) {
-    match = beginHand(match, [...hand.deck]);
+    match = beginHand(match, [...hand.deck], rulesVersion);
     for (const action of hand.actions) {
       const result =
         action.intent.type === "timeout"

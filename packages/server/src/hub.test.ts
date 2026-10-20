@@ -1,7 +1,16 @@
 import { copyFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
-import { RULES_VERSION, shuffleWithSeed, type PlayerView } from "@uhoh/rules";
+import {
+  RULES_VERSION,
+  applyIntent,
+  beginHand,
+  createMatch,
+  currentPlayerId,
+  legalIntents,
+  shuffleWithSeed,
+  type PlayerView,
+} from "@uhoh/rules";
 import { Store } from "./db.js";
 import { BOT_TURN_MS, Hub, type ServerMessage } from "./hub.js";
 
@@ -702,6 +711,130 @@ describe("rooms", () => {
     expect(after?.players.map((player) => player.score)).toEqual(before?.players.map((player) => player.score));
     expect(after?.openEquation).toBe(before?.openEquation);
     restoredStore.db.close();
+  });
+
+  it("restores an older room where the winner opened the next game", () => {
+    const file = `/tmp/uhoh-rules2-${Date.now()}.sqlite`;
+    const store = new Store(file);
+    const players = [
+      { id: "p_alex", name: "Alex" },
+      { id: "p_sam", name: "Sam" },
+    ];
+    const config = { boneyardMode: "draw_one" as const, seriesLength: 3 as const, targetScore: 150 };
+    let match = createMatch(players, config);
+    const saved: Array<{ deck: string[]; actions: Array<{ playerId: string; intent: { type: "play" | "draw" | "knock"; tileId?: string; endId?: string } }> }> = [];
+    let deals = 0;
+    while (!match.lastHand?.gameWinnerId && deals < 30) {
+      deals += 1;
+      const seed = Buffer.alloc(32, deals);
+      const deck = shuffleWithSeed(seed);
+      match = beginHand(match, deck, 2);
+      const actions: Array<{ playerId: string; intent: { type: "play" | "draw" | "knock"; tileId?: string; endId?: string } }> = [];
+      let guard = 0;
+      while (match.hand && match.hand.phase !== "complete" && guard < 400) {
+        guard += 1;
+        const playerId = currentPlayerId(match);
+        if (!playerId) throw new Error("Nobody is up.");
+        const intent = legalIntents(match, playerId)[0];
+        if (!intent) throw new Error("No move.");
+        const result = applyIntent(match, playerId, intent);
+        if (!result.ok) throw new Error(result.error);
+        match = result.match;
+        actions.push({ playerId, intent });
+      }
+      saved.push({ deck, actions });
+    }
+    expect(match.lastHand?.gameWinnerId).toBeTruthy();
+    const winner = match.lastHand?.gameWinnerId ?? "";
+    const nextSeed = Buffer.alloc(32, 99);
+    const nextDeck = shuffleWithSeed(nextSeed);
+    const opened = beginHand(match, nextDeck, 2);
+    expect(opened.gameNumber).toBe(2);
+    expect(opened.hand?.openingTileId).toBeNull();
+    expect(opened.hand?.leaderId).toBe(winner);
+    const lead = legalIntents(opened, winner).find((intent) => intent.type === "play");
+    if (!lead || lead.type !== "play") throw new Error("The winner had nothing to lead.");
+    const led = applyIntent(opened, winner, lead);
+    if (!led.ok) throw new Error(led.error);
+    saved.push({ deck: nextDeck, actions: [{ playerId: winner, intent: lead }] });
+
+    const now = new Date().toISOString();
+    store.insertRoom({
+      id: "r_v2",
+      code: "OLDOPEN",
+      host_id: "p_alex",
+      series_id: "s_v2",
+      player_count: 2,
+      boneyard_mode: "draw_one",
+      series_length: 3,
+      status: "playing",
+      created_at: now,
+      rules_version: 2,
+    });
+    store.insertPlayer({
+      id: "p_alex",
+      room_id: "r_v2",
+      name: "Alex",
+      token: "a".repeat(32),
+      seat: 0,
+      created_at: now,
+      bot: 0,
+      difficulty: null,
+    });
+    store.insertPlayer({
+      id: "p_sam",
+      room_id: "r_v2",
+      name: "Sam",
+      token: "s".repeat(32),
+      seat: 1,
+      created_at: now,
+      bot: 0,
+      difficulty: null,
+    });
+    saved.forEach((hand, index) => {
+      const id = `h_v2_${index}`;
+      store.insertHand({
+        id,
+        room_id: "r_v2",
+        series_id: "s_v2",
+        game_number: index === saved.length - 1 ? 2 : 1,
+        hand_number: index === saved.length - 1 ? 1 : index + 1,
+        seed: index.toString(16).padStart(2, "0"),
+        deck_json: JSON.stringify(hand.deck),
+        result_json: null,
+        created_at: now,
+      });
+      hand.actions.forEach((action, seq) => {
+        store.insertAction({
+          hand_id: id,
+          seq: seq + 1,
+          player_id: action.playerId,
+          payload_json: JSON.stringify(action.intent),
+          created_at: now,
+        });
+      });
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hub = new Hub(store, 30, () => 0, 60_000);
+      expect(warn.mock.calls.map((call) => String(call[0])).join("\n")).not.toMatch(/r_v2/);
+      expect(store.room("r_v2")?.status).toBe("playing");
+      expect(store.room("r_v2")?.rules_version).toBe(2);
+      const messages: ServerMessage[] = [];
+      const back = hub.connect(
+        { type: "reconnect", token: "a".repeat(32) },
+        (message) => messages.push(message),
+        () => undefined,
+      );
+      expect(back.ok).toBe(true);
+      const view = latestView(messages);
+      expect(view?.gameNumber).toBe(2);
+      expect(view?.board?.center?.tileId).toBe(lead.tileId);
+      expect(view?.lastPlay?.playerId).toBe(winner);
+    } finally {
+      warn.mockRestore();
+      store.db.close();
+    }
   });
 });
 

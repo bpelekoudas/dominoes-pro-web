@@ -116,6 +116,7 @@ export function Table({
   const pop = useScorePop(view.lastPlay);
   const popAt = useAnchor(stageRef, layout, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const lastTileId = view.lastPlay?.tileId ?? null;
+  const handOver = view.phase === "between" || view.phase === "over";
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
@@ -124,7 +125,8 @@ export function Table({
 
   return (
     <div
-      className={`table-scroll${dropLead ? " drop-ready" : ""}${shake ? " shaking" : ""}`}
+      className={`table-scroll${dropLead ? " drop-ready" : ""}${shake ? " shaking" : ""}${handOver && lastTileId ? " hand-over" : ""}`}
+      data-last-tile={lastTileId ?? ""}
       data-shake={shake ?? "off"}
       ref={viewportRef}
       data-open-total={view.openTotal}
@@ -143,7 +145,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 style={place(tile, layout.fit)}
                 data-board-tile={tile.tileId}
               >
