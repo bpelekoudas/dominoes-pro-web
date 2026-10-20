@@ -19,6 +19,6 @@ describe("UH-OH moment", () => {
     expect(turnHoldMs(35)).toBe(BIG_MOMENT_MS);
     expect(BIG_MOMENT_SCORE).toBe(20);
     expect(BIG_MOMENT_MS).toBeGreaterThanOrEqual(1500);
-    expect(BIG_MOMENT_MS).toBeLessThanOrEqual(2000);
+    expect(BIG_MOMENT_MS).toBeLessThanOrEqual(2500);
   });
 });

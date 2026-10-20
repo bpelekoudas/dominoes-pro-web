@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
-import { FX_LIST, createFxScene, drawFx, normalizeFx, readEquippedFx, type FxId } from "./fx.js";
+import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { playUhOh, unlockSound } from "./sound.js";
 
@@ -32,6 +33,17 @@ export function demoAward(): number {
 
 export function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+function buzz(heavy: boolean): void {
+  const vibrate = navigator.vibrate?.bind(navigator);
+  if (!vibrate) return;
+  vibrate(heavy ? [16, 28, 22] : [12]);
+}
+
+function boardEdge(): "left" | "right" | null {
+  const edge = new URLSearchParams(location.search).get("edge");
+  return edge === "left" || edge === "right" ? edge : null;
 }
 
 export interface HitBox {
@@ -73,6 +85,7 @@ export function MomentLayer({
   const fxId = normalizeFx(effect);
   const level = bigMomentLevel(awarded) ?? "medium";
   const [phase, setPhase] = useState<"impact" | "shatter" | "title">(reduced ? "title" : "impact");
+  const [shake, setShake] = useState<BigMomentLevel | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.uhohPhase = phase;
@@ -87,6 +100,7 @@ export function MomentLayer({
     setPhase(reduced ? "title" : "impact");
     onPhaseRef.current?.(reduced ? "title" : "impact");
     playUhOh();
+    const shake = reduced ? null : HEAVY_FX.has(fxId) ? (level === "small" ? "medium" : level) : "small";
     const timers = [
       window.setTimeout(() => {
         setPhase("shatter");
@@ -95,33 +109,40 @@ export function MomentLayer({
       window.setTimeout(() => {
         setPhase("title");
         onPhaseRef.current?.("title");
-      }, reduced ? 0 : 920),
-      window.setTimeout(() => onShakeRef.current(reduced ? null : level), reduced ? 0 : SLAM_MS),
-      window.setTimeout(() => onShakeRef.current(null), reduced ? 0 : SLAM_MS + SHAKE_MS),
+      }, reduced ? 0 : 640),
+      window.setTimeout(() => {
+        setShake(shake);
+        onShakeRef.current(shake);
+        if (shake) buzz(shake !== "small");
+      }, reduced ? 0 : 200),
+      window.setTimeout(() => {
+        setShake(null);
+        onShakeRef.current(null);
+      }, reduced ? 0 : 200 + SHAKE_MS),
       window.setTimeout(() => onDoneRef.current(), reduced ? REDUCED_MS : TOTAL_MS),
     ];
     return () => {
       for (const timer of timers) window.clearTimeout(timer);
+      setShake(null);
       onShakeRef.current(null);
     };
-  }, [token, level, reduced]);
+  }, [fxId, token, level, reduced]);
 
   useLayoutEffect(() => {
     if (reduced) return;
     const canvas = canvasRef.current;
-    const stage = canvas?.parentElement;
-    if (!canvas || !stage) return;
-    const rect = stage.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    if (!canvas || width < 8 || height < 8) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.floor(rect.width * dpr);
-    canvas.height = Math.floor(rect.height * dpr);
-    const hitX = anchor ? anchor.x - rect.left : rect.width / 2;
-    const hitY = anchor ? anchor.y - rect.top : rect.height / 2;
-    stage.style.setProperty("--hit-x", `${(hitX / rect.width) * 100}%`);
-    stage.style.setProperty("--hit-y", `${(hitY / rect.height) * 100}%`);
-    const glass = fxId === "glass" ? buildGlass(rect.width, rect.height, hitX, hitY, awarded) : null;
-    const themed = fxId === "glass" ? null : createFxScene(fxId, rect.width, rect.height, hitX, hitY, awarded);
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    const hitX = anchor ? anchor.x : width / 2;
+    const hitY = anchor ? anchor.y : height / 2;
+    document.documentElement.style.setProperty("--hit-x", `${(hitX / width) * 100}%`);
+    document.documentElement.style.setProperty("--hit-y", `${(hitY / height) * 100}%`);
+    const glass = fxId === "glass" ? buildGlass(width, height, hitX, hitY, awarded) : null;
+    const themed = fxId === "glass" ? null : createFxScene(fxId, width, height, hitX, hitY, awarded);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let frame = 0;
@@ -130,7 +151,7 @@ export function MomentLayer({
     const draw = (now: number) => {
       const t = now - started;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.clearRect(0, 0, width, height);
       if (glass) drawGlass(ctx, glass, t);
       else if (themed) drawFx(ctx, themed, t);
       const glassPhase = t < SLAM_MS ? "impact" : t < BREAK_MS ? "cracks" : t < 500 ? "loose" : t < 640 ? "mid" : "fly";
@@ -148,10 +169,19 @@ export function MomentLayer({
     ? { left: anchor.x, top: anchor.y, width: anchor.w, height: anchor.h }
     : { left: "50%", top: "46%", width: 44, height: 88 };
 
+  const burst = reduced
+    ? null
+    : createPortal(
+        <>
+          <canvas ref={canvasRef} className="uhoh-cracks" data-uhoh="shatter" data-shake={shake ?? "off"} />
+          <div className="uhoh-flash" aria-hidden="true" />
+        </>,
+        document.body,
+      );
+
   return (
     <>
-      {reduced ? null : <canvas ref={canvasRef} className="uhoh-cracks" data-uhoh="shatter" />}
-      {reduced ? null : <div className="uhoh-flash" aria-hidden="true" />}
+      {burst}
       {reduced || phase !== "impact" ? null : (
         <div className="uhoh-slam" style={hitStyle} data-uhoh="impact" data-tile={tileId ?? "demo"}>
           <Face a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
@@ -246,6 +276,7 @@ export function FxBoard({
   const [ready, setReady] = useState(false);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  const edge = boardEdge();
 
   useLayoutEffect(() => {
     const spot = stageRef.current?.querySelector<HTMLElement>("[data-board-tile='2-5']");
@@ -258,7 +289,7 @@ export function FxBoard({
   return (
     <div className={`fx-board${shake ? " shaking" : ""}`} data-shake={shake ?? "off"} data-fx={effect}>
       <div className="uhoh-stage" ref={stageRef}>
-        <div className="uhoh-chain" aria-hidden="true">
+        <div className="uhoh-chain" data-edge={edge ?? "center"} aria-hidden="true">
           <div className="uhoh-spot">
             <Face a={6} b={6} orientation="vertical" spinner />
           </div>

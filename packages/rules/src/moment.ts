@@ -9,7 +9,7 @@ export const BIG_MOMENT_SCORE = 20;
  * added so the animation does not eat their 30 seconds.
  * Long enough for the glass to clear and the words to be read.
  */
-export const BIG_MOMENT_MS = 2000;
+export const BIG_MOMENT_MS = 2400;
 
 export type BigMomentLevel = "small" | "medium" | "big";
 

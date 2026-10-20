@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FX_LIST, createFxScene, normalizeFx } from "./fx.js";
+import { FX_LIST, createFxScene, normalizeFx, peakReach } from "./fx.js";
 
 describe("uh-oh effects", () => {
   it("lists ten effects and falls back to the house shatter", () => {
@@ -21,22 +21,23 @@ describe("uh-oh effects", () => {
     expect(normalizeFx("legend")).toBe("legend");
   });
 
-  it("keeps each themed burst around the scoring tile", () => {
+  it("starts on the placed tile and reaches most of the screen", () => {
+    const origin = { x: 48, y: 610 };
     for (const fx of FX_LIST) {
       if (fx.id === "glass") continue;
-      const scene = createFxScene(fx.id, 390, 700, 180, 320, 25);
-      expect(scene.id).toBe(fx.id);
-      expect(scene.bits.length + scene.bolts.length).toBeGreaterThan(0);
-      for (const bit of scene.bits) {
-        expect(Math.hypot(bit.x - 180, bit.y - 320)).toBeLessThan(360);
-      }
+      const scene = createFxScene(fx.id, 390, 844, origin.x, origin.y, 25);
+      expect(scene.hitX).toBe(origin.x);
+      expect(scene.hitY).toBe(origin.y);
+      expect(scene.peak).toBeCloseTo(peakReach(390, 844, origin.x, origin.y), 4);
+      expect(scene.peak).toBeGreaterThan(390);
+      const travel = [
+        ...scene.bits.map((bit) => bit.far),
+        ...scene.bolts.map((bolt) => bolt.far),
+      ];
+      expect(travel.length).toBeGreaterThan(0);
+      expect(Math.max(...travel)).toBeGreaterThan(0.72);
       for (const bolt of scene.bolts) {
-        for (const [x, y] of bolt.pts) {
-          expect(x).toBeGreaterThan(-20);
-          expect(y).toBeGreaterThan(-20);
-          expect(x).toBeLessThan(410);
-          expect(y).toBeLessThan(720);
-        }
+        expect(bolt.pts[0]).toEqual([origin.x, origin.y]);
       }
     }
   });

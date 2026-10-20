@@ -48,6 +48,8 @@ export interface GlassScene {
   cracks: GlassCrack[];
   sparks: GlassSpark[];
   maxR: number;
+  hitX: number;
+  hitY: number;
   width: number;
   height: number;
 }
@@ -56,7 +58,8 @@ export function buildGlass(width: number, height: number, ox: number, oy: number
   const rand = mulberry(seed * 997 + 13);
   const hitX = clamp(ox, 12, Math.max(12, width - 12));
   const hitY = clamp(oy, 12, Math.max(12, height - 12));
-  const maxR = Math.hypot(Math.max(hitX, width - hitX), Math.max(hitY, height - hitY)) + 6;
+  const far = Math.hypot(Math.max(hitX, width - hitX), Math.max(hitY, height - hitY));
+  const maxR = Math.max(140, far * 0.8);
   const rays = 14;
   const rings = 6;
   const radii = ringRadii(maxR, rings, rand);
@@ -160,18 +163,23 @@ export function buildGlass(width: number, height: number, ox: number, oy: number
     });
   }
 
-  return { shards, cracks, sparks, maxR, width, height };
+  return { shards, cracks, sparks, maxR, hitX, hitY, width, height };
 }
 
 export function drawGlass(ctx: CanvasRenderingContext2D, scene: GlassScene, elapsed: number): void {
-  if (elapsed < SLAM_MS) return;
-  const crackU = Math.min(1, (elapsed - SLAM_MS) / CRACK_MS);
-  const grow = 1 - (1 - crackU) ** 3;
-  const broken = elapsed >= SLAM_MS + CRACK_MS;
-  const fly = broken ? (elapsed - (SLAM_MS + CRACK_MS)) / 1000 : 0;
+  if (elapsed < SLAM_MS - 40) return;
+  const expandU = clamp((elapsed - (SLAM_MS - 40)) / 820, 0, 1);
+  const grow = 1 - (1 - expandU) ** 3;
   const reach = grow * scene.maxR;
+  const fly = elapsed > 1180 ? (elapsed - 1180) / 1000 : 0;
+  const fade = elapsed > 1750 ? Math.max(0, 1 - (elapsed - 1750) / 650) : 1;
+
+  ctx.save();
+  ctx.globalAlpha = fade;
+  drawRing(ctx, scene.hitX, scene.hitY, reach, elapsed);
 
   for (const shard of scene.shards) {
+    if (shard.dist > reach + 16 && fly <= 0) continue;
     const age = fly - shard.delay;
     let dx = 0;
     let dy = 0;
@@ -181,18 +189,18 @@ export function drawGlass(ctx: CanvasRenderingContext2D, scene: GlassScene, elap
     let flying = false;
     if (age > 0) {
       flying = true;
-      dx = shard.vx * age;
-      dy = shard.vy * age + 680 * age * age;
+      dx = shard.vx * age * 0.85;
+      dy = shard.vy * age * 0.85 + 520 * age * age;
       rot = shard.vr * age;
       const spin = Math.cos(shard.tiltPhase + shard.tilt * age);
       tilt = Math.sign(spin || 1) * Math.max(0.16, Math.abs(spin));
-      alpha = age < 0.22 ? 0.92 : Math.max(0, 0.92 * (1 - (age - 0.22) / 0.95));
+      alpha = age < 0.28 ? 0.92 : Math.max(0, 0.92 * (1 - (age - 0.28) / 0.85));
     }
     if (alpha < 0.02) continue;
     paintShard(ctx, shard, dx, dy, rot, tilt, alpha, flying);
   }
 
-  const crackAlpha = broken ? Math.max(0, 1 - fly / 0.16) : 0.95;
+  const crackAlpha = fly > 0 ? Math.max(0, 1 - fly / 0.34) : 0.95;
   if (crackAlpha > 0.03) {
     ctx.save();
     ctx.lineCap = "round";
@@ -213,21 +221,38 @@ export function drawGlass(ctx: CanvasRenderingContext2D, scene: GlassScene, elap
     ctx.restore();
   }
 
-  if (broken) {
+  if (fly > 0) {
     for (const spark of scene.sparks) {
       const age = fly - spark.delay;
       if (age < 0 || age > spark.life) continue;
-      const fade = 1 - age / spark.life;
+      const sparkFade = 1 - age / spark.life;
       const x = spark.x + spark.vx * age;
       const y = spark.y + spark.vy * age + 280 * age * age;
-      ctx.fillStyle = `rgba(239, 239, 239, ${fade})`;
+      ctx.fillStyle = `rgba(239, 239, 239, ${sparkFade})`;
       ctx.fillRect(x, y, spark.size, spark.size);
       if (spark.size > 2) {
-        ctx.fillStyle = `rgba(214, 230, 242, ${fade * 0.8})`;
+        ctx.fillStyle = `rgba(214, 230, 242, ${sparkFade * 0.8})`;
         ctx.fillRect(x - spark.size, y + 1, spark.size * 0.7, spark.size * 0.7);
       }
     }
   }
+  ctx.restore();
+}
+
+function drawRing(ctx: CanvasRenderingContext2D, x: number, y: number, reach: number, elapsed: number): void {
+  const u = clamp((elapsed - 200) / 780, 0, 1);
+  if (u <= 0) return;
+  const alpha = (1 - u) * 0.85;
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(6, reach), 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(239, 248, 255, ${alpha})`;
+  ctx.lineWidth = 2 + (1 - u) * 7;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(4, reach * 0.62), 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.45})`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
 function paintShard(

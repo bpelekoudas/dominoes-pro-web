@@ -946,20 +946,36 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .fx-gallery-picks button[aria-pressed="true"] { background: var(--red); border-color: var(--red); }
 .uhoh-preview[data-clean="1"] .uhoh-preview-bar { display: none; }
 
+.uhoh-chain[data-edge="left"] {
+  position: absolute;
+  left: 12px;
+  top: 46%;
+  transform: translateY(-50%);
+}
+.uhoh-chain[data-edge="right"] {
+  position: absolute;
+  right: 12px;
+  top: 46%;
+  transform: translateY(-50%);
+}
 .uhoh-cracks,
 .uhoh-flash {
-  position: absolute;
+  position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 5;
+  z-index: 60;
 }
 .uhoh-flash {
+  z-index: 74;
   opacity: 0;
-  background: radial-gradient(circle at var(--hit-x, 50%) var(--hit-y, 46%), rgba(239, 239, 239, 0.42), transparent 32%);
-  animation: uhoh-impact 420ms ease-out 260ms forwards;
+  background: radial-gradient(circle at var(--hit-x, 50%) var(--hit-y, 46%), rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.28) 16%, transparent 46%);
+  animation: uhoh-impact 480ms ease-out 200ms forwards;
 }
+.uhoh-cracks[data-shake="small"] { animation: uhoh-shake-small 380ms linear; }
+.uhoh-cracks[data-shake="medium"] { animation: uhoh-shake-medium 380ms linear; }
+.uhoh-cracks[data-shake="big"] { animation: uhoh-shake-big 380ms linear; }
 @keyframes uhoh-impact {
   0% { opacity: 0.9; }
   100% { opacity: 0; }
@@ -973,15 +989,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .uhoh-slam .domino { width: 100%; height: 100%; }
 @keyframes uhoh-slam {
-  0% {
-    transform: translate3d(-50%, calc(-50% - 56px), 0) scale(1.6);
-    filter: blur(2.5px) drop-shadow(0 26px 12px rgba(0, 0, 0, 0.5));
-  }
-  76% {
-    transform: translate3d(-50%, -50%, 0) scale(1.05);
-    filter: blur(0) drop-shadow(0 3px 0 rgba(0, 0, 0, 0.55));
-  }
-  88% { transform: translate3d(-50%, calc(-50% - 7px), 0) scale(0.98); filter: none; }
+  0% { transform: translate3d(-50%, -50%, 0) scale(1, 1); filter: brightness(1); }
+  28% { transform: translate3d(-50%, -50%, 0) scale(1.28, 0.72); filter: brightness(1.9); }
+  62% { transform: translate3d(-50%, -50%, 0) scale(0.9, 1.16); filter: brightness(1.2); }
   100% { transform: translate3d(-50%, -50%, 0) scale(1); filter: none; }
 }
 .uhoh-title {
@@ -993,7 +1003,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   pointer-events: none;
   text-align: center;
   opacity: 0;
-  animation: uhoh-title 1600ms linear 400ms forwards;
+  animation: uhoh-title 2000ms linear 400ms forwards;
 }
 .uhoh-word {
   display: flex;
