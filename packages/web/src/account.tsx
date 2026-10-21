@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { CATALOG } from "../../rules/src/catalog.js";
 import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
 import { AvatarFace, AvatarPicker } from "./avatars";
 
@@ -424,7 +425,7 @@ export function AccountLayer({ account }: { account: AccountController }) {
           <Leaderboard board={account.board} onBoard={account.showBoard} />
         ) : null}
         {account.page === "look" && account.user ? (
-          <AvatarPicker selected={account.user.avatarId} onPick={(id) => void account.saveAvatar(id)} />
+          <LookPicker selected={account.user.avatarId} onPick={(id) => void account.saveAvatar(id)} />
         ) : null}
         {account.page === "profile" && account.user ? (
           <>
@@ -526,6 +527,33 @@ function loadScript(src: string): Promise<void> {
     script.onerror = () => reject(new Error("script"));
     document.head.appendChild(script);
   });
+}
+
+function LookPicker({ selected, onPick }: { selected: string | null; onPick: (id: string) => void }) {
+  const starter = [
+    "homescreen",
+    ...CATALOG.filter((item) => item.category === "character" && item.obtain === "free" && item.avatarId).map((item) => item.avatarId as string),
+  ];
+  const [allowed, setAllowed] = useState<string[]>(selected ? [...new Set([...starter, selected])] : starter);
+  useEffect(() => {
+    let stopped = false;
+    void fetch("/api/store")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { owned?: string[]; items?: Array<{ id: string; avatarId: string | null; category: string }> } | null) => {
+        if (stopped || !body) return;
+        const ids = new Set(starter);
+        if (selected) ids.add(selected);
+        for (const item of body.items ?? []) {
+          if (item.category === "character" && item.avatarId && body.owned?.includes(item.id)) ids.add(item.avatarId);
+        }
+        setAllowed([...ids]);
+      })
+      .catch(() => undefined);
+    return () => {
+      stopped = true;
+    };
+  }, [selected]);
+  return <AvatarPicker selected={selected} onPick={onPick} allowed={allowed} />;
 }
 
 declare global {

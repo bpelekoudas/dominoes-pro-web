@@ -15,7 +15,17 @@ export const AVATARS = [
   { id: "retiredman", name: "Retired" },
   { id: "scarface", name: "Scarface" },
   { id: "techmogul", name: "Mogul" },
-  { id: "2hot4tv", name: "2 Hot" },
+  { id: "pitmaster", name: "Pitmaster" },
+  { id: "abuela", name: "Abuela" },
+  { id: "biker", name: "Biker" },
+  { id: "gymbro", name: "Gym Bro" },
+  { id: "trucker", name: "Trucker" },
+  { id: "surfer", name: "Surfer" },
+  { id: "cowgirl", name: "Cowgirl" },
+  { id: "rapper", name: "Rapper" },
+  { id: "bingograndma", name: "Bingo" },
+  { id: "mallcop", name: "Mall Cop" },
+  { id: "tailgatedad", name: "Tailgate" },
 ] as const;
 
 export type AvatarId = (typeof AVATARS)[number]["id"];

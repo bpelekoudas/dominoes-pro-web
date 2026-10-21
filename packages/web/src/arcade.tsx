@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Logo } from "./logo";
 import { AccountChip, type AccountUser } from "./account";
 import { AvatarFace, AvatarPicker, Portrait } from "./avatars";
+import { StoreScreen } from "./store";
 import { RankLine } from "./rank";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
 
@@ -72,6 +73,7 @@ export function ArcadeHome({
   onAccount,
   onBoard,
   onLook,
+  onRefresh,
   onPreview,
   forced = null,
 }: {
@@ -88,6 +90,7 @@ export function ArcadeHome({
   onAccount: () => void;
   onBoard: () => void;
   onLook: () => void;
+  onRefresh: () => void;
   onPreview: (() => void) | null;
   forced?: Sheet;
 }) {
@@ -105,6 +108,21 @@ export function ArcadeHome({
   const [tables, setTables] = useState<OpenTable[]>([]);
   const [muted, setMuteState] = useState(isMuted);
   const readyName = name.trim();
+  const [wearTick, setWearTick] = useState(0);
+  const [frameId, setFrameId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    let stopped = false;
+    void fetch("/api/store")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { loadout?: { frameId?: string | null } } | null) => {
+        if (!stopped) setFrameId(body?.loadout?.frameId ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      stopped = true;
+    };
+  }, [user?.id, wearTick]);
 
   useEffect(() => {
     if (sheet !== "multi") return;
@@ -157,7 +175,10 @@ export function ArcadeHome({
       </header>
 
       <div className="hero-stage">
-        <Portrait id={user?.avatarId} size="hero" />
+        <span className="hero-portrait">
+          <Portrait id={user?.avatarId} size="hero" />
+          {frameId ? <img className="hero-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
+        </span>
         <button
           type="button"
           className="change-look"
@@ -180,6 +201,17 @@ export function ArcadeHome({
         </button>
         <button type="button" className="capsule capsule-red" data-action="multi" disabled={connecting || !readyName} onClick={press(() => setSheet("multi"))}>
           Multiplayer
+        </button>
+        <button
+          type="button"
+          className="capsule"
+          data-action="store"
+          onClick={press(() => {
+            if (!user && readyName) onGuest(readyName);
+            setSheet("store");
+          })}
+        >
+          Store
         </button>
       </div>
 
@@ -366,16 +398,13 @@ export function ArcadeHome({
       ) : null}
 
       {sheet === "store" ? (
-        <section className="arcade-modal" role="dialog" aria-label="Store" data-screen="store">
-          <h2>Store</h2>
-          <p>The store opens later. Every character is free for now.</p>
-          <button type="button" className="capsule" onClick={press(() => { setSheet(null); onLook(); })}>
-            Change look
-          </button>
-          <button type="button" className="capsule capsule-back" onClick={press(() => setSheet(null))}>
-            Back
-          </button>
-        </section>
+        <StoreScreen
+          onClose={() => setSheet(null)}
+          onChanged={() => {
+            setWearTick((tick) => tick + 1);
+            onRefresh();
+          }}
+        />
       ) : null}
 
       {sheet === "settings" ? (
@@ -588,6 +617,7 @@ const demoHome = {
   onAccount: () => undefined,
   onBoard: () => undefined,
   onLook: () => undefined,
+  onRefresh: () => undefined,
   onPreview: null,
 };
 

@@ -108,6 +108,8 @@ export interface PlayerView {
     difficulty: BotDifficulty | null;
     rank: SeatRank | null;
     avatarId: string;
+    frameId: string | null;
+    effectId: string;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -165,6 +167,8 @@ export interface TableSeat {
   difficulty: BotDifficulty | null;
   rank?: SeatRank | null;
   avatarId?: string | null;
+  frameId?: string | null;
+  effectId?: string | null;
 }
 
 export interface TableMeta {
@@ -238,6 +242,8 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       difficulty: seat.difficulty,
       rank: seat.rank ?? null,
       avatarId: seat.avatarId || "homescreen",
+      frameId: seat.frameId ?? null,
+      effectId: seat.effectId || "glass",
     })),
     you: { hand: youHand },
     board,

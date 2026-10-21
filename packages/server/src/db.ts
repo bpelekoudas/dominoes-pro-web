@@ -336,6 +336,28 @@ export class Store {
         count INTEGER NOT NULL,
         PRIMARY KEY (room_id, series_id, game_number, player_id)
       );
+      CREATE TABLE IF NOT EXISTS wallets (
+        user_id TEXT PRIMARY KEY,
+        bones INTEGER NOT NULL,
+        gold_bones INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS owned_items (
+        user_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        acquired_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, item_id)
+      );
+      CREATE TABLE IF NOT EXISTS loadouts (
+        user_id TEXT PRIMARY KEY,
+        character_id TEXT,
+        tile_id TEXT,
+        table_id TEXT,
+        frame_id TEXT,
+        effect_id TEXT,
+        trash_id TEXT,
+        emote_id TEXT
+      );
     `);
     const roomsNow = this.db.prepare(`PRAGMA table_info(rooms)`).all() as Array<{ name: string }>;
     if (!roomsNow.some((column) => column.name === "casual")) {

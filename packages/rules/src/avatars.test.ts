@@ -7,6 +7,7 @@ describe("avatars", () => {
     expect(resolveAvatar("")).toBe("homescreen");
     expect(resolveAvatar("nope")).toBe("homescreen");
     expect(resolveAvatar("golfer")).toBe("golfer");
+    expect(resolveAvatar("2hot4tv")).toBe("homescreen");
   });
 
   it("gives computers distinct portraits and skips the house one", () => {

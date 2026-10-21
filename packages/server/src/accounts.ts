@@ -2,7 +2,8 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
 import { cleanName } from "./hub.js";
-import { isAvatarId, resolveAvatar } from "@uhoh/rules";
+import { isAvatarId, isWithheldId, resolveAvatar } from "@uhoh/rules";
+import { Cosmetics } from "./cosmetics.js";
 import { describePlayer, type PublicStanding } from "./ranking.js";
 
 export type ProviderName = "google" | "apple" | "email" | "guest";
@@ -189,7 +190,11 @@ export class Accounts {
   }
 
   setAvatar(userId: string, avatarId: string): SignInResult {
+    if (isWithheldId(avatarId)) return { outcome: "invalid", error: "That character is not available." };
     if (!isAvatarId(avatarId)) return { outcome: "invalid", error: "Pick one of the characters." };
+    if (!new Cosmetics(this.store, this.now).avatarAllowed(userId, avatarId)) {
+      return { outcome: "invalid", error: "Buy that character in the store first." };
+    }
     const user = this.store.user(userId);
     if (!user) return { outcome: "invalid", error: "That profile is gone." };
     this.store.updateUser(userId, { avatar_id: avatarId, updated_at: this.stamp() });

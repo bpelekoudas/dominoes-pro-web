@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
 import {
   chooseDropEnd,
@@ -69,6 +70,7 @@ export function Table({
   onPlay,
   onSelect,
   replayToken = 0,
+  tableArt = null,
 }: {
   view: PlayerView;
   selectedTile: string | null;
@@ -76,6 +78,7 @@ export function Table({
   aimEndId: string | null;
   onPlay: (tileId: string, endId: string) => void;
   onSelect: (tileId: string | null) => void;
+  tableArt?: string | null;
   replayToken?: number;
 }) {
   const board = view.board;
@@ -117,7 +120,7 @@ export function Table({
   const popAt = useAnchor(stageRef, layout, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const lastTileId = view.lastPlay?.tileId ?? null;
   const handOver = view.phase === "between" || view.phase === "over";
-  const { moment, dismissMoment } = useBigMoment(view.lastPlay, replayToken);
+  const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
   const anchor = useHitBox(stageRef, moment?.tileId ?? null, moment?.key ?? "", layout, scale);
@@ -132,6 +135,7 @@ export function Table({
       data-open-total={view.openTotal}
       data-board-scale={scale.toFixed(2)}
       data-drop-ready={dropLead ? "true" : "false"}
+      style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
       {!layout ? (
         <p className="empty-felt">The felt is clear. Whoever leads, play a tile.</p>
@@ -183,6 +187,7 @@ export function Table({
             spinner: placed?.spinner,
           }}
           anchor={anchor}
+          effect={moment.effect}
           onShake={setShake}
           onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
           onDone={() => {
@@ -269,26 +274,30 @@ function useScreenBoxes(
 
 function useBigMoment(
   lastPlay: PlayerView["lastPlay"],
+  players: PlayerView["players"],
   replayToken: number,
 ): {
-  moment: { key: string; awarded: number; tileId: string | null } | null;
+  moment: { key: string; awarded: number; tileId: string | null; effect: FxId } | null;
   dismissMoment: () => void;
 } {
   const liveKey = lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}` : "";
   const skip = useRef(liveKey);
-  const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null } | null>(null);
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null; effect: FxId } | null>(null);
   const dismiss = () => setMoment(null);
   useEffect(() => {
     if (liveKey === skip.current) return;
     skip.current = liveKey;
     if (!liveKey || !lastPlay) return;
-    setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId });
+    const scorer = playersRef.current.find((player) => player.id === lastPlay.playerId);
+    setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId, effect: normalizeFx(scorer?.effectId) });
   }, [liveKey, lastPlay]);
   const tileRef = useRef(lastPlay?.tileId ?? null);
   tileRef.current = lastPlay?.tileId ?? null;
   useEffect(() => {
     if (replayToken <= 0) return;
-    setMoment({ key: `demo-${replayToken}`, awarded: demoAward(), tileId: tileRef.current });
+    setMoment({ key: `demo-${replayToken}`, awarded: demoAward(), tileId: tileRef.current, effect: "glass" });
   }, [replayToken]);
   return { moment, dismissMoment: dismiss };
 }

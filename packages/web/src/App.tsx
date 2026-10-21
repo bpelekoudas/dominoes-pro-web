@@ -3,7 +3,7 @@ import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
-import { demoAward, demoRequested, UhOhPreview } from "./moment.js";
+import { demoAward, demoRequested, FxGallery, fxGalleryRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
@@ -11,6 +11,7 @@ import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./accou
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
 import { AvatarFace } from "./avatars";
+import { useMatchCosmetics } from "./store";
 
 interface ChatLine {
   id: number;
@@ -185,6 +186,10 @@ export function App() {
     setSplash(false);
   };
 
+  if (fxGalleryRequested() && !view) {
+    return <FxGallery />;
+  }
+
   if (menuDemoRequested() && !view) {
     return <MenuDemo />;
   }
@@ -223,6 +228,7 @@ export function App() {
           onAccount={() => account.openSheet("profile")}
           onBoard={() => account.showBoard("rating")}
           onLook={() => account.openSheet("look")}
+          onRefresh={() => void account.refresh()}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
         />
         {splash ? <Splash onDone={finishSplash} /> : null}
@@ -352,6 +358,7 @@ function Game({
   onAccount: () => void;
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
+  const cosmetics = useMatchCosmetics();
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const bubble = useTalkBubble(chat);
@@ -383,7 +390,11 @@ function Game({
     view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended,
   );
   return (
-    <main className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`} data-skin="ivory">
+    <main
+      className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`}
+      data-skin="ivory"
+      data-tile-skin={cosmetics.skin}
+    >
       <div className="felt-column">
       <header className="playbar">
         <PlayMark />
@@ -481,6 +492,7 @@ function Game({
                 onPlay={play}
                 onSelect={onSelect}
                 replayToken={replayToken}
+                tableArt={cosmetics.tableArt}
               />
               {right ? (
                 <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} view={view} />
@@ -705,6 +717,7 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
       <AvatarFace
         id={player.avatarId}
         bot={player.bot}
+        frameId={player.frameId}
         timer={player.isTurn && view.turnDeadline ? ratio : null}
       />
       <span className="chip-text">

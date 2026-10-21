@@ -1,4 +1,5 @@
 export * from "./tiles.js";
+export * from "./catalog.js";
 export * from "./avatars.js";
 export * from "./rng.js";
 export * from "./score.js";

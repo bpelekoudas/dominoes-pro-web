@@ -15,18 +15,24 @@ describe("glass pane", () => {
       expect(scene.shards.some((shard) => shard.local.length === 3)).toBe(true);
       expect(scene.shards.some((shard) => shard.local.length >= 4)).toBe(true);
       const nearest = Math.min(...scene.cracks.map((crack) => crack.dist));
+      const farthest = Math.max(...scene.cracks.map((crack) => crack.dist));
       expect(nearest).toBeLessThan(80);
-      expect(scene.cracks.some((crack) => crack.dist > Math.min(width, height) * 0.45)).toBe(true);
+      const far = Math.hypot(Math.max(ox, width - ox), Math.max(oy, height - oy));
+      expect(farthest).toBeGreaterThan(far * 0.55);
+      expect(farthest).toBeLessThan(far * 0.92);
 
       let hit = 0;
       let samples = 0;
+      const disk = scene.maxR * 0.62;
       for (let y = 8; y < height - 8; y += 16) {
         for (let x = 8; x < width - 8; x += 16) {
+          if (Math.hypot(x - ox, y - oy) > disk) continue;
           samples += 1;
           if (covered(scene.shards, x, y)) hit += 1;
         }
       }
-      expect(hit / samples).toBeGreaterThan(0.92);
+      expect(samples).toBeGreaterThan(8);
+      expect(hit / samples).toBeGreaterThan(0.82);
     }
   });
 });

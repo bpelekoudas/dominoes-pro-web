@@ -19,6 +19,7 @@ import {
   avatarForSeed,
   pickDistinctAvatar,
   resolveAvatar,
+  itemById,
   BIG_MOMENT_SCORE,
   CHAT_TEXT_LIMIT,
   type BoneyardMode,
@@ -30,6 +31,7 @@ import {
   type SeriesLength,
   type TableMeta,
 } from "@uhoh/rules";
+import { Cosmetics } from "./cosmetics.js";
 import { Store, type ChatRow, type RoomRow } from "./db.js";
 import { describePlayer, seatRankOf, settleGame } from "./ranking.js";
 
@@ -651,7 +653,8 @@ export class Hub {
       this.tell(seat, { type: "error", message: "Pick a line from the list." });
       return;
     }
-    const taunt = resolveTaunt(message.packId, message.tauntId);
+    const worn = message.packId === "worn" ? new Cosmetics(this.store).wornLines(seat.userId).find((line) => line.id === message.tauntId) : null;
+    const taunt = worn ?? resolveTaunt(message.packId, message.tauntId);
     if (!taunt) {
       this.tell(seat, { type: "error", message: "That line isn't in the pack." });
       return;
@@ -1164,6 +1167,16 @@ export class Hub {
     return resolveAvatar(seat.avatarId);
   }
 
+  private wearFor(seat: LiveSeat): { frameId: string | null; effectId: string } {
+    if (seat.bot || !seat.userId) return { frameId: null, effectId: "glass" };
+    try {
+      const loadout = new Cosmetics(this.store).loadout(seat.userId);
+      return { frameId: loadout.frameId, effectId: itemById(loadout.effectId)?.fxId || "glass" };
+    } catch {
+      return { frameId: null, effectId: "glass" };
+    }
+  }
+
   private setCasual(room: LiveRoom, seat: LiveSeat, casual: boolean): void {
     if (room.listed) {
       this.tell(seat, { type: "error", message: "A quick table stays ranked until computers sit down." });
@@ -1280,7 +1293,11 @@ export class Hub {
   }
 
   private view(room: LiveRoom, playerId: string): PlayerView {
-    return project(room.match, this.meta(room, playerId));
+    const projected = project(room.match, this.meta(room, playerId));
+    const seat = room.seats.find((candidate) => candidate.id === playerId);
+    const extra = new Cosmetics(this.store).wornLines(seat?.userId ?? null);
+    if (extra.length === 0) return projected;
+    return { ...projected, taunts: [...projected.taunts, ...extra] };
   }
 
   private meta(room: LiveRoom, youId: string): TableMeta {
@@ -1288,15 +1305,20 @@ export class Hub {
       roomCode: room.code,
       hostId: room.hostId,
       status: room.status,
-      seats: room.seats.map((seat) => ({
-        id: seat.id,
-        name: seat.name,
-        connected: seat.connected,
-        bot: seat.bot,
-        difficulty: seat.difficulty,
-        rank: this.rankFor(seat.userId),
-        avatarId: this.avatarFor(seat),
-      })),
+      seats: room.seats.map((seat) => {
+        const wear = this.wearFor(seat);
+        return {
+          id: seat.id,
+          name: seat.name,
+          connected: seat.connected,
+          bot: seat.bot,
+          difficulty: seat.difficulty,
+          rank: this.rankFor(seat.userId),
+          avatarId: this.avatarFor(seat),
+          frameId: wear.frameId,
+          effectId: wear.effectId,
+        };
+      }),
       settings: { ...room.settings, casual: room.casual },
       recap: this.showRecap(room) ? room.recap : null,
       quick:

@@ -32,10 +32,12 @@ export function AvatarFace({
   id,
   bot = false,
   timer = null,
+  frameId = null,
 }: {
   id: string | null | undefined;
   bot?: boolean;
   timer?: number | null;
+  frameId?: string | null;
 }) {
   const ratio = timer == null ? null : Math.max(0, Math.min(1, timer));
   return (
@@ -54,6 +56,7 @@ export function AvatarFace({
         </svg>
       ) : null}
       <Portrait id={id} size="chip" />
+      {frameId ? <img className="avatar-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
       {bot ? (
         <svg className="bot-mark" viewBox="0 0 24 36">
           <rect x="1.5" y="1.5" width="21" height="33" rx="3" />
@@ -70,14 +73,17 @@ export function AvatarFace({
 export function AvatarPicker({
   selected,
   onPick,
+  allowed,
 }: {
   selected: string | null | undefined;
   onPick: (id: string) => void;
+  allowed?: readonly string[];
 }) {
   const current = resolveAvatar(selected);
+  const list = allowed ? AVATARS.filter((avatar) => allowed.includes(avatar.id)) : AVATARS;
   return (
     <div className="avatar-grid" data-screen="picker">
-      {AVATARS.map((avatar) => (
+      {list.map((avatar) => (
         <button
           type="button"
           key={avatar.id}

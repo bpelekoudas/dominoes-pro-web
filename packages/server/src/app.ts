@@ -14,6 +14,7 @@ import {
   type SignInResult,
 } from "./accounts.js";
 import { BOT_TURN_MS, Hub, type ClientMessage, type ServerMessage } from "./hub.js";
+import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
 import { publicBase } from "./public-url.js";
@@ -41,6 +42,7 @@ export async function createApp(options: AppOptions = {}) {
       devMagicLink: !(process.env.RESEND_API_KEY && process.env.EMAIL_FROM) && magicLinkDevMode(),
     } satisfies AccountOptions);
 
+  const cosmetics = new Cosmetics(store);
   const hub = new Hub(
     store,
     20_000,
@@ -106,6 +108,35 @@ export async function createApp(options: AppOptions = {}) {
       if (saved.outcome !== "ok" || typeof body.displayName !== "string") return sendAuth(reply, request, saved);
     }
     return sendAuth(reply, request, accounts.rename(user.id, body.displayName ?? ""));
+  });
+
+  app.get("/api/store", async (request, reply) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to open the store." });
+    return cosmetics.snapshot(user.id);
+  });
+
+  app.post("/api/store/buy", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to open the store." });
+    const body = request.body as { itemId?: string; currency?: string };
+    const currency = body.currency === "gold" ? "gold" : body.currency === "bones" ? "bones" : null;
+    if (!currency || typeof body.itemId !== "string") return reply.code(400).send({ error: "Pick an item and a currency." });
+    const result = cosmetics.buy(user.id, body.itemId, currency);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    return result.snapshot;
+  });
+
+  app.post("/api/store/equip", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to open the store." });
+    const body = request.body as { itemId?: string };
+    if (typeof body.itemId !== "string") return reply.code(400).send({ error: "Pick an item." });
+    const result = cosmetics.equip(user.id, body.itemId);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    return result.snapshot;
   });
 
   app.post("/api/auth/google", async (request, reply) => {
