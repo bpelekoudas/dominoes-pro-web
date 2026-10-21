@@ -178,7 +178,7 @@ export function useMatchCosmetics(): { skin: string; tableArt: string | null } {
         const tile = body.items.find((item) => item.id === body.loadout.tileId);
         setWear({
           skin: tile?.skin || "ivory",
-          tableArt: body.loadout.tableId ? `/store/${body.loadout.tableId}.webp?v=5` : null,
+          tableArt: body.loadout.tableId ? `/store/${body.loadout.tableId}.webp?v=6` : null,
         });
       })
       .catch(() => undefined);
@@ -301,7 +301,7 @@ function Price({ item, owned, wearing }: { item: StoreItem; owned: boolean; wear
 function artSrc(item: StoreItem): string | null {
   if (!item.art) return null;
   if (item.avatarId) return `/avatars/${item.avatarId}.webp`;
-  if (item.category === "table") return `/store/${item.id}.webp?v=5`;
+  if (item.category === "table") return `/store/${item.id}.webp?v=6`;
   return `/store/${item.id}.webp`;
 }
 
