@@ -94,7 +94,12 @@ export function Table({
       const width = viewport.clientWidth;
       const height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
-      const next = Math.min(width / layout.fit.w, height / layout.fit.h, width >= 800 ? 2.4 : 2.2);
+      // Keep the chain on the green, inside the wooden rails, on a phone.
+      const padX = 12;
+      const padY = 28;
+      const roomW = Math.max(48, width - padX * 2);
+      const roomH = Math.max(48, height - padY * 2);
+      const next = Math.min(roomW / layout.fit.w, roomH / layout.fit.h, width >= 800 ? 2.4 : 2.2);
       setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
     };
     measure();
