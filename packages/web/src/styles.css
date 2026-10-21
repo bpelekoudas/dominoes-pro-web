@@ -951,7 +951,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .hand-summary {
   top: auto;
   bottom: 0;
-  max-height: 54dvh;
+  /* A long chain asks for a shorter sheet via --hand-sheet-max so the last
+     tile can stay on the felt instead of the chain climbing the rail. */
+  max-height: min(54dvh, var(--hand-sheet-max, 54dvh));
   border-radius: 16px 16px 0 0;
 }
 .felt-app.showing-result .hand-tray { visibility: hidden; }

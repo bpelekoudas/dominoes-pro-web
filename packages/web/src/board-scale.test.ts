@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { FIT_MARGIN } from "../../rules/src/layout.js";
 import {
   chainBounds,
+  FELT_PAD_Y,
   fitScale,
-  handOverShift,
+  handOverPlacement,
   nextBoardScale,
   PHONE_SCALE_CAP,
   scaleForTiles,
@@ -43,70 +44,71 @@ describe("board scale", () => {
     expect(nextBoardScale(longer, open, true)).toBe(open);
   });
 
-  it("lifts the frozen chain above the hand-over sheet without changing scale", () => {
+  it("keeps a hand-over chain inside the felt and lowers the sheet when the last tile needs room", () => {
     const open = scaleForTiles(tiles, felt, PHONE_SCALE_CAP);
     expect(scaleForTiles(tiles, felt, PHONE_SCALE_CAP)).toBe(open);
 
-    expect(handOverShift({
+    expect(handOverPlacement({
       feltTop: 100,
       feltHeight: 606,
       sheetTop: null,
       chainHeight: 247,
       lastTile: { top: 180, height: 40 },
-    })).toBe(0);
-    expect(handOverShift({
+    }).lift).toBe(0);
+    expect(handOverPlacement({
       feltTop: 100,
       feltHeight: 606,
       sheetTop: 800,
       chainHeight: 247,
       lastTile: null,
-    })).toBe(0);
+    })).toEqual({ lift: 0, sheetTop: null });
 
-    // Felt 100–706, sheet at 422. The 247px chain fits in the band, so the
-    // whole chain — including the last tile — moves above the sheet.
-    const fitted = handOverShift({
+    // Felt 100–706, sheet at 422. Shift only until the last tile clears it.
+    const fitted = handOverPlacement({
       feltTop: 100,
       feltHeight: 606,
       sheetTop: 422,
       chainHeight: 247,
       lastTile: { top: 200, height: 36 },
     });
-    const fittedTop = 100 + (606 - 247) / 2 + fitted;
-    expect(fittedTop).toBeGreaterThanOrEqual(108);
-    expect(fittedTop + 247).toBeLessThanOrEqual(422 - 28);
-    expect(handOverShift({
+    const naturalTop = 100 + (606 - 247) / 2;
+    const chainTop = naturalTop + fitted.lift;
+    expect(chainTop).toBeGreaterThanOrEqual(100 + FELT_PAD_Y);
+    expect(chainTop + 200 + 36).toBeLessThanOrEqual(422 - 28);
+    expect(chainTop + 247).toBeLessThanOrEqual(706 - FELT_PAD_Y);
+    expect(fitted.sheetTop).toBeNull();
+    expect(handOverPlacement({
       feltTop: 100,
       feltHeight: 606,
       sheetTop: 422,
       chainHeight: 247,
       lastTile: { top: 200, height: 36 },
-    })).toBe(fitted);
+    })).toEqual(fitted);
 
-    // A chain taller than the band keeps its scale. The last tile sits in the
-    // band, and the chain covers that band instead of leaving a gap under it.
-    const lastTile = { top: 360, height: 48 };
-    const tall = handOverShift({
+    // A 20-tile chain is taller than the gap above a 54dvh sheet. The top
+    // stops at the rail inset, and the sheet is told to start lower.
+    const lastTile = { top: 405, height: 28 };
+    const tall = handOverPlacement({
       feltTop: 100,
-      feltHeight: 535,
-      sheetTop: 390,
-      chainHeight: 419,
+      feltHeight: 622,
+      sheetTop: 421,
+      chainHeight: 433,
       lastTile,
     });
-    const naturalTop = 100 + (535 - 419) / 2;
-    const chainTop = naturalTop + tall;
-    const tileTop = chainTop + lastTile.top;
-    const tileBottom = tileTop + lastTile.height;
-    expect(tileTop).toBeGreaterThanOrEqual(108);
-    expect(tileBottom).toBeLessThanOrEqual(390 - 28);
-    expect(chainTop).toBeLessThanOrEqual(108);
-    expect(chainTop + 419).toBeGreaterThanOrEqual(390 - 28);
-    expect(handOverShift({
+    const tallNatural = 100 + (622 - 433) / 2;
+    const tallTop = tallNatural + tall.lift;
+    const tileBottom = tallTop + lastTile.top + lastTile.height;
+    expect(tallTop).toBeCloseTo(100 + FELT_PAD_Y, 5);
+    expect(tileBottom).toBeGreaterThan(421);
+    expect(tall.sheetTop).not.toBeNull();
+    expect(tall.sheetTop!).toBeGreaterThanOrEqual(tileBottom + 28);
+    expect(handOverPlacement({
       feltTop: 100,
-      feltHeight: 535,
-      sheetTop: 390,
-      chainHeight: 419,
+      feltHeight: 622,
+      sheetTop: 421,
+      chainHeight: 433,
       lastTile,
-    })).toBe(tall);
+    })).toEqual(tall);
   });
 
   it("pads the chain and ignores an empty board", () => {

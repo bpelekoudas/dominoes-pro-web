@@ -53,15 +53,17 @@ export function nextBoardScale(previous: number | null, computed: number, newHan
   return Math.min(previous, computed);
 }
 
-/** Clearance inside the felt, above the hand-over sheet. The gold ring sits in this gap. */
-export const HAND_OVER_BAND_TOP = 8;
+/** Gold ring clearance between the last tile and the hand-over sheet. */
 export const HAND_OVER_BAND_GAP = 28;
 
 export interface HandOverShiftInput {
   /** Felt top, in the same coordinate space as `sheetTop`. */
   feltTop: number;
   feltHeight: number;
-  /** Top of the hand-over sheet. Null when that sheet is not on screen. */
+  /**
+   * Top of the hand-over sheet at its normal height. Null when that sheet
+   * is not on screen. Pass that unconstrained top, not one already pushed down.
+   */
   sheetTop: number | null;
   /** Visual height of the chain box. Scale is not changed to produce this. */
   chainHeight: number;
@@ -69,48 +71,43 @@ export interface HandOverShiftInput {
   lastTile: { top: number; height: number } | null;
 }
 
+export interface HandOverPlacement {
+  /** translateY from the felt-centered position. */
+  lift: number;
+  /**
+   * Screen Y the sheet must sit at or below so the last tile stays visible.
+   * Null when the normal sheet already clears the tile.
+   */
+  sheetTop: number | null;
+}
+
 /**
- * Vertical shift that keeps the frozen chain readable above the hand-over sheet.
- * Pass the chain's natural, felt-centered position — not a rect that already
- * includes this shift — so measuring twice does not walk the board upward.
- * Scale is not an input. A chain that fits in the visible band is centered
- * there. A taller chain keeps its scale and slides the least amount that
- * leaves the last tile inside the band and covers that band.
+ * Shift the frozen chain just enough for the last tile to clear the sheet.
+ * The chain stays inside the felt: its top never crosses the rail inset.
+ * When the tile still would not fit, `sheetTop` says how far down the sheet
+ * has to start. Pass the natural centered position, not one that already
+ * includes this shift.
  */
-export function handOverShift(input: HandOverShiftInput): number {
+export function handOverPlacement(input: HandOverShiftInput): HandOverPlacement {
   const feltBottom = input.feltTop + input.feltHeight;
-  if (input.sheetTop == null || input.sheetTop >= feltBottom - 4) return 0;
-  const bandTop = input.feltTop + HAND_OVER_BAND_TOP;
-  const bandBottom = Math.min(feltBottom, input.sheetTop) - HAND_OVER_BAND_GAP;
-  if (bandBottom <= bandTop) return 0;
-  const bandHeight = bandBottom - bandTop;
+  const minTop = input.feltTop + FELT_PAD_Y;
+  const room = input.feltHeight - FELT_PAD_Y * 2;
+  const maxTop = room >= input.chainHeight ? feltBottom - FELT_PAD_Y - input.chainHeight : minTop;
   const naturalTop = input.feltTop + (input.feltHeight - input.chainHeight) / 2;
-
-  if (input.chainHeight <= bandHeight) {
-    return bandTop + (bandHeight - input.chainHeight) / 2 - naturalTop;
-  }
-
   const tile = input.lastTile ?? {
-    top: Math.max(0, input.chainHeight - Math.min(bandHeight, 48)),
-    height: Math.min(bandHeight, 48),
+    top: Math.max(0, input.chainHeight - Math.min(72, input.chainHeight)),
+    height: Math.min(72, input.chainHeight),
   };
-  const tileLo = bandTop - tile.top;
-  const tileHi = bandBottom - tile.height - tile.top;
-  const coverLo = bandBottom - input.chainHeight;
-  const coverHi = bandTop;
-  let lo = tileLo;
-  let hi = tileHi;
-  if (tileLo <= tileHi && coverLo <= coverHi) {
-    const overlapLo = Math.max(tileLo, coverLo);
-    const overlapHi = Math.min(tileHi, coverHi);
-    if (overlapLo <= overlapHi) {
-      lo = overlapLo;
-      hi = overlapHi;
-    }
+  const tileEnd = tile.top + tile.height;
+  const clamp = (top: number) => (maxTop <= minTop ? minTop : Math.min(maxTop, Math.max(minTop, top)));
+
+  if (input.sheetTop == null || input.sheetTop >= feltBottom - 4) {
+    return { lift: clamp(naturalTop) - naturalTop, sheetTop: null };
   }
-  if (lo > hi) {
-    const bandCenter = (bandTop + bandBottom) / 2;
-    return bandCenter - (tile.top + tile.height / 2) - naturalTop;
-  }
-  return Math.min(hi, Math.max(lo, naturalTop)) - naturalTop;
+
+  const neededTop = input.sheetTop - HAND_OVER_BAND_GAP - tileEnd;
+  const chainTop = clamp(Math.min(naturalTop, neededTop));
+  const tileBottom = chainTop + tileEnd;
+  const sheetTop = tileBottom + HAND_OVER_BAND_GAP > input.sheetTop + 0.5 ? tileBottom + HAND_OVER_BAND_GAP : null;
+  return { lift: chainTop - naturalTop, sheetTop };
 }

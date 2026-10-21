@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { FIT_MARGIN, layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
-import { chainBounds, DESK_SCALE_CAP, fitScale, handOverShift, nextBoardScale, PHONE_SCALE_CAP } from "./board-scale.js";
+import { chainBounds, DESK_SCALE_CAP, fitScale, handOverPlacement, nextBoardScale, PHONE_SCALE_CAP } from "./board-scale.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
@@ -130,32 +130,45 @@ export function Table({
   }, [layout, handOver, handKey]);
 
   useLayoutEffect(() => {
+    const root = document.documentElement;
     const viewport = viewportRef.current;
     if (!handOver || !viewport || !frame) {
       setLift((current) => (current === 0 ? current : 0));
+      root.style.removeProperty("--hand-sheet-max");
       return;
     }
     const measure = () => {
       const felt = viewport.getBoundingClientRect();
       const sheet = document.querySelector(".hand-summary");
-      const sheetTop = sheet ? sheet.getBoundingClientRect().top : null;
+      let sheetTop: number | null = null;
+      if (sheet) {
+        const cap = window.innerHeight * 0.54;
+        const naturalMax = Math.min(cap, sheet.scrollHeight);
+        sheetTop = window.innerHeight - naturalMax;
+      }
       const last = lastTileId && layout ? layout.tiles.find((tile) => tile.tileId === lastTileId) : undefined;
       const local = last ? place(last, frame) : null;
-      const next = Math.round(handOverShift({
+      const placement = handOverPlacement({
         feltTop: felt.top,
         feltHeight: felt.height,
         sheetTop,
         chainHeight: frame.h * scale,
         lastTile: local ? { top: local.top * scale, height: local.height * scale } : null,
-      }));
+      });
+      const next = Math.round(placement.lift);
       setLift((current) => (current === next ? current : next));
+      if (placement.sheetTop == null) root.style.removeProperty("--hand-sheet-max");
+      else root.style.setProperty("--hand-sheet-max", `${Math.max(120, Math.round(window.innerHeight - placement.sheetTop))}px`);
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
     const sheet = document.querySelector(".hand-summary");
     if (sheet) observer.observe(sheet);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--hand-sheet-max");
+    };
   }, [handOver, frame, scale, layout, lastTileId]);
 
   const focusTile = dragTileId ?? selectedTile;
