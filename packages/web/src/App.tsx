@@ -10,7 +10,7 @@ import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
-import { AvatarFace } from "./avatars";
+import { AvatarFace, BotBadge } from "./avatars";
 import { useMatchCosmetics } from "./store";
 
 interface ChatLine {
@@ -359,6 +359,15 @@ function Game({
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const cosmetics = useMatchCosmetics();
+  const botTable = view.players.find((player) => player.accountBot && player.tableId && player.tableId !== "TBL-001");
+  const botSkin = view.players.find((player) => player.accountBot && player.tileSkin && player.tileSkin !== "ivory");
+  const tableArt =
+    cosmetics.tableArt && !cosmetics.tableArt.includes("TBL-001")
+      ? cosmetics.tableArt
+      : botTable
+        ? `/store/${botTable.tableId}.webp`
+        : cosmetics.tableArt;
+  const tileSkin = cosmetics.skin !== "ivory" ? cosmetics.skin : botSkin?.tileSkin || cosmetics.skin;
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const bubble = useTalkBubble(chat);
@@ -393,7 +402,7 @@ function Game({
     <main
       className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`}
       data-skin="ivory"
-      data-tile-skin={cosmetics.skin}
+      data-tile-skin={tileSkin}
     >
       <div className="felt-column">
       <header className="playbar">
@@ -467,9 +476,11 @@ function Game({
           playerCount={view.settings.playerCount}
           waitUntil={view.quick.waitUntil}
           canFill={view.quick.canFill}
+          botFillAt={view.quick.botFillAt ?? null}
           serverNow={view.serverNow}
           onCancel={onCancelQuick}
           onFill={() => onSend({ type: "fill-quick" })}
+          onFillBots={() => onSend({ type: "fill-bots" })}
           onKeep={() => onSend({ type: "keep-waiting" })}
         />
       ) : view.status === "lobby" ? (
@@ -492,7 +503,7 @@ function Game({
                 onPlay={play}
                 onSelect={onSelect}
                 replayToken={replayToken}
-                tableArt={cosmetics.tableArt}
+                tableArt={tableArt}
               />
               {right ? (
                 <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} view={view} />
@@ -587,10 +598,11 @@ function Lobby({
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
             <span className="who">
-              <AvatarFace id={player.avatarId} bot={player.bot} />
+              <AvatarFace id={player.avatarId} bot={player.bot && !player.accountBot} frameId={player.frameId} />
               <span>
                 {player.isYou ? `${player.name} (you)` : player.name}
-                {player.bot ? (
+                {player.accountBot ? <BotBadge /> : null}
+                {player.bot && !player.accountBot ? (
                   <small className="bot-label">Computer · {labelDifficulty(player.difficulty)}</small>
                 ) : player.rank ? (
                   <RankLine
@@ -604,7 +616,7 @@ function Lobby({
                 ) : null}
               </span>
             </span>
-            {player.bot && host ? (
+            {player.bot && !player.accountBot && host ? (
               <button
                 type="button"
                 className="text-button"
@@ -710,19 +722,21 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
   return (
     <div
       className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+      data-account-bot={player.accountBot ? "true" : "false"}
       data-player-id={player.id}
       data-turn={player.isTurn ? "true" : "false"}
       data-turn-timer={player.isTurn && view.turnDeadline ? "true" : "false"}
     >
       <AvatarFace
         id={player.avatarId}
-        bot={player.bot}
+        bot={player.bot && !player.accountBot}
         frameId={player.frameId}
         timer={player.isTurn && view.turnDeadline ? ratio : null}
       />
       <span className="chip-text">
         <span className="chip-name">
           {player.isYou ? "You" : player.name}
+          {player.accountBot ? <BotBadge /> : null}
           {!player.connected && !player.bot ? <em className="away"> away</em> : null}
         </span>
         <span className="chip-meta">

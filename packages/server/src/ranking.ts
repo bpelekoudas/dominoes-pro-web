@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolveAvatar, type PointBreakdown, type RankRecap, type RankedPlayerRecap, type SeatRank, type TierStep } from "@uhoh/rules";
 import type { StandingUpdate, Store, UserRow } from "./db.js";
+import { applyGameBones, grantSeasonRewards } from "./economy.js";
 
 export const START_RATING = 1200;
 export const RATING_FLOOR = 100;
@@ -330,21 +331,23 @@ export function seatRankOf(standing: PublicStanding): SeatRank {
   };
 }
 
-export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50) {
+export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50, includeBots = true) {
   const season = currentSeason(store, now);
   for (const user of store.allUsers()) {
     if ((user.season_id ?? 0) !== season.id) alignSeason(store, user.id, season, now);
   }
-  const rows = board === "season" ? store.topBySeason(limit) : store.topByRating(limit);
+  const rows = board === "season" ? store.topBySeason(limit, includeBots) : store.topByRating(limit, includeBots);
   return {
     seasonId: season.id,
     seasonEndsAt: season.endsAt,
+    includeBots,
     rows: rows.map((user) => {
       const tier = tierAt(user.season_points ?? 0);
       return {
         name: user.display_name,
         avatarId: resolveAvatar(user.avatar_id),
         guest: user.is_guest === 1,
+        bot: user.is_bot === 1,
         rating: user.rating ?? START_RATING,
         provisional: provisional(user.ranked_games ?? 0),
         tierId: tier.id,
@@ -489,6 +492,21 @@ export function settleGame(store: Store, input: SettleInput): RankRecap {
       stepFloor: afterTier.stepFloor,
       nextAt: afterTier.nextAt,
     };
+    applyGameBones(store, seat.userId, {
+      completed: input.completed,
+      won,
+      moments: seat.bigMoments,
+      day: today,
+      at: input.now.toISOString(),
+      roomId: input.roomId,
+      seriesId: input.seriesId,
+      gameNumber: input.gameNumber,
+    });
+    const seasonGrants = grantSeasonRewards(store, seat.userId, pointsAfter, input.now.toISOString());
+    if (seasonGrants.length > 0) {
+      console.log(`[season] ${seat.name} earned ${seasonGrants.join(", ")}`);
+      store.insertBotEvent("grant", seat.name, JSON.stringify({ items: seasonGrants, points: pointsAfter }), input.now.toISOString());
+    }
     store.insertRatingEvent({
       id: randomUUID(),
       user_id: seat.userId,

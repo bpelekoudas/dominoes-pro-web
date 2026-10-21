@@ -23,7 +23,7 @@ export interface CosmeticLoadout {
 }
 
 export interface StoreSnapshot {
-  testBalance: true;
+  testBalance: boolean;
   bones: number;
   goldBones: number;
   owned: string[];
@@ -69,10 +69,11 @@ export class Cosmetics {
     this.ensure(userId);
     const wallet = this.wallet(userId);
     const loadout = this.loadout(userId);
+    const bot = this.store.user(userId)?.is_bot === 1;
     return {
-      testBalance: true,
-      bones: wallet?.bones ?? TEST_BONES,
-      goldBones: wallet?.gold_bones ?? TEST_GOLD,
+      testBalance: !bot,
+      bones: wallet?.bones ?? (bot ? 0 : TEST_BONES),
+      goldBones: wallet?.gold_bones ?? (bot ? 0 : TEST_GOLD),
       owned: this.owned(userId),
       loadout,
       items: CATALOG,
@@ -155,9 +156,10 @@ export class Cosmetics {
     if (!user) return;
     const stamp = this.stamp();
     if (!this.wallet(userId)) {
+      const bot = user.is_bot === 1;
       this.store.db
-        .prepare(`INSERT INTO wallets (user_id, bones, gold_bones, created_at) VALUES (?, ?, ?, ?)`)
-        .run(userId, TEST_BONES, TEST_GOLD, stamp);
+        .prepare(`INSERT INTO wallets (user_id, bones, gold_bones, created_at, earned_today) VALUES (?, ?, ?, ?, 0)`)
+        .run(userId, bot ? 0 : TEST_BONES, bot ? 0 : TEST_GOLD, stamp);
     }
     for (const item of CATALOG) {
       if (item.obtain === "free") this.grant(userId, item.id);

@@ -70,6 +70,14 @@ export function AvatarFace({
   );
 }
 
+export function BotBadge() {
+  return (
+    <small className="bot-badge" data-bot-badge="true">
+      BOT
+    </small>
+  );
+}
+
 export function AvatarPicker({
   selected,
   onPick,

@@ -66,6 +66,7 @@ export type ClientMessage =
   | { type: "set-casual"; casual: boolean }
   | { type: "quick"; name: string; size: number | "any" }
   | { type: "fill-quick" }
+  | { type: "fill-bots" }
   | { type: "keep-waiting" }
   | { type: "cancel-quick" }
   | { type: "join"; code: string; name: string }
@@ -100,9 +101,18 @@ interface LiveSeat {
   leaveTimer: ReturnType<typeof setTimeout> | null;
   chatTimes: number[];
   missedTurn: boolean;
-  /** Account that sat down, when the phone had one. Computers stay null. */
+  /** Account that sat down. Anonymous computers stay null. Account bots keep theirs. */
   userId: string | null;
   avatarId: string;
+  /** Plays itself and has a user account. Anonymous computers are bots without this. */
+  accountBot: boolean;
+}
+
+export interface AccountBotCard {
+  userId: string;
+  name: string;
+  avatarId: string;
+  difficulty: BotDifficulty;
 }
 
 interface LiveRoom {
@@ -121,6 +131,8 @@ interface LiveRoom {
   createdAt: number;
   /** When the wait offer may appear. Null on a private room. */
   quickWaitUntil: number | null;
+  /** When account bots sit down if the table is still open. Null when bots are off. */
+  botFillAt: number | null;
   recap: RankRecap | null;
   status: "lobby" | "playing" | "complete" | "abandoned";
   seats: LiveSeat[];
@@ -146,6 +158,13 @@ export const BOT_TURN_MS = 2_000;
 
 /** How long a quick table waits before it offers to fill empty seats with computers. */
 export const QUICK_WAIT_MS = 60_000;
+
+/** How long a quick table waits before account bots take the open seats. */
+export const QUICK_BOT_FILL_MS = 15_000;
+
+function defaultAccountPace(): number {
+  return 1_000 + Math.floor(Math.random() * 2_001);
+}
 
 function defaultBotPace(): number {
   return BOT_TURN_MS;
@@ -198,6 +217,8 @@ export class Hub {
   private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly continueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly botFillTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private roster: () => AccountBotCard[] = () => [];
 
   constructor(
     private readonly store: Store,
@@ -206,8 +227,44 @@ export class Hub {
     private readonly turnLimitMs = 30_000,
     private readonly continueMs = 9_000,
     private readonly quickWaitMs = QUICK_WAIT_MS,
+    private readonly quickBotFillMs = QUICK_BOT_FILL_MS,
+    private readonly accountBotPace: () => number = defaultAccountPace,
   ) {
     this.restore();
+  }
+
+  /** Account bots that may sit at a quick table. Empty until the league starts. */
+  setRoster(roster: () => AccountBotCard[]): void {
+    this.roster = roster;
+    this.armWaitingBots();
+  }
+
+  /** Seat bots at quick tables that opened before the roster existed. */
+  armWaitingBots(): void {
+    for (const room of this.rooms.values()) {
+      if (room.listed && room.status === "lobby") this.armBotFill(room);
+    }
+  }
+
+  /** One missed human turn. The second one abandons the table. */
+  missTurn(playerId: string): void {
+    const room = this.roomFor(playerId);
+    if (!room) return;
+    this.onTurnTimeout(room.id, playerId);
+  }
+
+  /** Drop a probe table so it does not keep playing. */
+  discardRoom(playerId: string): void {
+    const room = this.roomFor(playerId);
+    if (room) this.dropRoom(room);
+  }
+
+  /** Drop every live table that includes one of these accounts. */
+  dropUsers(userIds: readonly string[]): void {
+    const ids = new Set(userIds);
+    for (const room of [...this.rooms.values()]) {
+      if (room.seats.some((seat) => seat.userId && ids.has(seat.userId))) this.dropRoom(room);
+    }
   }
 
   connect(
@@ -239,6 +296,7 @@ export class Hub {
     else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
     else if (message.type === "set-casual") this.setCasual(room, seat, message.casual === true);
     else if (message.type === "fill-quick") this.fillQuick(room, seat);
+    else if (message.type === "fill-bots") this.fillAccountBots(room.id, seat);
     else if (message.type === "keep-waiting") this.keepWaiting(room, seat);
     else if (message.type === "cancel-quick") this.cancelQuick(room, seat);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
@@ -332,6 +390,7 @@ export class Hub {
       listed: message.listed === true,
       createdAt: Date.now(),
       quickWaitUntil: message.listed === true ? Date.now() + this.quickWaitMs : null,
+      botFillAt: null,
       recap: null,
       status: "lobby",
       seats: [],
@@ -381,6 +440,7 @@ export class Hub {
       avatar_id: seat.avatarId,
     });
     this.remember(room);
+    this.armBotFill(room);
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
     return { ok: true, session: { playerId: seat.id, generation } };
@@ -432,6 +492,7 @@ export class Hub {
         if (host) this.start(room, host);
         return { ok: true, session: { playerId: seat.id, generation } };
       }
+      this.armBotFill(room);
     }
     this.broadcast(room);
     return { ok: true, session: { playerId: seat.id, generation } };
@@ -478,6 +539,8 @@ export class Hub {
       this.tell(seat, { type: "error", message: "Wait until everyone has joined." });
       return;
     }
+    this.clearTimer(this.botFillTimers, room.id);
+    room.botFillAt = null;
     const match = createMatch(
       room.seats.map((player) => ({ id: player.id, name: player.name })),
       { ...room.settings, targetScore: 150 },
@@ -490,6 +553,7 @@ export class Hub {
       room.status = "lobby";
       room.match = null;
       this.store.updateRoom(room.id, { status: "lobby" });
+      this.armBotFill(room);
       this.tell(seat, { type: "error", message: "The deal didn't go through. Try again." });
       return;
     }
@@ -812,7 +876,7 @@ export class Hub {
     if (!turnId) return;
     const seat = room.seats.find((candidate) => candidate.id === turnId);
     if (!seat?.bot) return;
-    const wait = Math.max(0, this.botPace());
+    const wait = seat.accountBot ? Math.max(0, this.accountBotPace()) : Math.max(0, this.botPace());
     const timer = setTimeout(() => {
       this.botTimers.delete(room.id);
       this.playBot(room.id, seat.id);
@@ -834,6 +898,14 @@ export class Hub {
   }
 
   private botTaunt(room: LiveRoom, seat: LiveSeat): void {
+    if (seat.accountBot && seat.userId && Math.random() < 0.55) {
+      const worn = new Cosmetics(this.store).wornLines(seat.userId);
+      if (worn.length > 0) {
+        const line = worn[Math.floor(Math.random() * worn.length)]!;
+        this.chat(room, seat, { type: "chat", kind: "preset", packId: line.packId, tauntId: line.id });
+        return;
+      }
+    }
     const lines = tauntsForPlayer();
     if (lines.length === 0) return;
     const line = lines[Math.floor(Math.random() * lines.length)];
@@ -851,6 +923,7 @@ export class Hub {
     this.clearTimer(this.botTimers, room.id);
     this.clearTimer(this.turnTimers, room.id);
     this.clearTimer(this.continueTimers, room.id);
+    this.clearTimer(this.botFillTimers, room.id);
     for (const seat of room.seats) this.byPlayer.delete(seat.id);
     this.rooms.delete(room.id);
     this.byCode.delete(room.code);
@@ -879,6 +952,7 @@ export class Hub {
       room.hostId = human.id;
       this.store.updateRoom(room.id, { host_id: room.hostId });
     }
+    if (room.listed && room.status === "lobby") this.armBotFill(room);
     this.broadcast(room);
   }
 
@@ -921,6 +995,7 @@ export class Hub {
       listed: row.listed === 1,
       createdAt: Date.parse(row.created_at) || Date.now(),
       quickWaitUntil: row.listed === 1 && row.status === "lobby" ? Date.now() + this.quickWaitMs : null,
+      botFillAt: null,
       recap: null,
       status: row.status as LiveRoom["status"],
       seats: [],
@@ -951,6 +1026,7 @@ export class Hub {
           asDifficulty(player.difficulty),
           player.user_id ?? null,
           avatar,
+          player.bot === 1 && Boolean(player.user_id),
         ),
       );
     }
@@ -994,6 +1070,7 @@ export class Hub {
     this.remember(room);
     if (room.betweenHands) this.armContinue(room);
     if (room.status === "playing") this.scheduleBot(room);
+    if (room.listed && room.status === "lobby") this.armBotFill(room);
   }
 
   private remember(room: LiveRoom): void {
@@ -1011,6 +1088,7 @@ export class Hub {
     difficulty: BotDifficulty | null = null,
     userId: string | null = null,
     avatarId: string | null = null,
+    accountBot = false,
   ): LiveSeat {
     return {
       id,
@@ -1025,9 +1103,98 @@ export class Hub {
       close: null,
       leaveTimer: null,
       chatTimes: [],
-      userId: bot ? null : userId,
+      userId: accountBot ? userId : bot ? null : userId,
       avatarId: resolveAvatar(avatarId),
+      accountBot,
     };
+  }
+
+  private armBotFill(room: LiveRoom): void {
+    this.clearTimer(this.botFillTimers, room.id);
+    room.botFillAt = null;
+    if (!room.listed || room.status !== "lobby") return;
+    if (room.seats.length >= room.settings.playerCount) return;
+    if (this.roster().length === 0) return;
+    const wait = Math.max(0, this.quickBotFillMs);
+    room.botFillAt = Date.now() + wait;
+    const timer = setTimeout(() => {
+      this.botFillTimers.delete(room.id);
+      this.fillAccountBots(room.id);
+    }, wait);
+    timer.unref?.();
+    this.botFillTimers.set(room.id, timer);
+  }
+
+  private fillAccountBots(roomId: string, asker?: LiveSeat): void {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.listed || room.status !== "lobby") {
+      if (asker) this.tell(asker, { type: "error", message: "This table has already started." });
+      return;
+    }
+    this.clearTimer(this.botFillTimers, room.id);
+    room.botFillAt = null;
+    const cards = this.freeBots(room);
+    if (cards.length === 0 && room.seats.length < room.settings.playerCount) {
+      if (asker) this.tell(asker, { type: "error", message: "No bots are seated on this server." });
+      this.broadcast(room);
+      return;
+    }
+    while (room.seats.length < room.settings.playerCount && cards.length > 0) {
+      const card = cards.shift();
+      if (!card) break;
+      this.pushAccountBot(room, card);
+    }
+    if (room.seats.length < room.settings.playerCount) {
+      this.armBotFill(room);
+      this.broadcast(room);
+      return;
+    }
+    const host = room.seats.find((candidate) => candidate.id === room.hostId) ?? asker;
+    if (!host) return;
+    this.start(room, host);
+  }
+
+  private freeBots(room: LiveRoom): AccountBotCard[] {
+    const busy = new Set<string>();
+    for (const live of this.rooms.values()) {
+      if (live.status === "complete" || live.status === "abandoned") continue;
+      for (const seat of live.seats) {
+        if (seat.accountBot && seat.userId) busy.add(seat.userId);
+      }
+    }
+    const inRoom = new Set(room.seats.map((seat) => seat.userId).filter((id): id is string => Boolean(id)));
+    const open = this.roster().filter((card) => !busy.has(card.userId) && !inRoom.has(card.userId));
+    if (open.length > 0) return open;
+    return this.roster().filter((card) => !inRoom.has(card.userId));
+  }
+
+  private pushAccountBot(room: LiveRoom, card: AccountBotCard): void {
+    const avatarId = resolveAvatar(card.avatarId);
+    const seat = this.makeSeat(
+      makeId("p"),
+      card.name,
+      randomBytes(32).toString("hex"),
+      true,
+      true,
+      card.difficulty,
+      card.userId,
+      avatarId,
+      true,
+    );
+    room.seats.push(seat);
+    this.byPlayer.set(seat.id, room.id);
+    this.store.insertPlayer({
+      id: seat.id,
+      room_id: room.id,
+      name: seat.name,
+      token: seat.token,
+      seat: room.seats.length - 1,
+      created_at: nowIso(),
+      bot: 1,
+      difficulty: card.difficulty,
+      user_id: card.userId,
+      avatar_id: avatarId,
+    });
   }
 
   private bind(seat: LiveSeat, send: (message: ServerMessage) => void, close: () => void): number {
@@ -1134,6 +1301,7 @@ export class Hub {
   private keepWaiting(room: LiveRoom, seat: LiveSeat): void {
     if (!room.listed || room.status !== "lobby") return;
     room.quickWaitUntil = Date.now() + this.quickWaitMs;
+    this.armBotFill(room);
     this.broadcast(room);
     void seat;
   }
@@ -1163,17 +1331,41 @@ export class Hub {
   }
 
   private avatarFor(seat: LiveSeat): string {
-    if (!seat.bot && seat.userId) return this.portraitFor(seat.userId);
+    if (seat.userId) return this.portraitFor(seat.userId);
     return resolveAvatar(seat.avatarId);
   }
 
-  private wearFor(seat: LiveSeat): { frameId: string | null; effectId: string } {
-    if (seat.bot || !seat.userId) return { frameId: null, effectId: "glass" };
+  private lookFor(seat: LiveSeat): {
+    frameId: string | null;
+    effectId: string;
+    effectItemId: string | null;
+    tileId: string | null;
+    tileSkin: string;
+    tableId: string | null;
+  } {
+    const plain = {
+      frameId: null,
+      effectId: "glass",
+      effectItemId: null,
+      tileId: null,
+      tileSkin: "ivory",
+      tableId: null,
+    };
+    if (!seat.userId) return plain;
     try {
       const loadout = new Cosmetics(this.store).loadout(seat.userId);
-      return { frameId: loadout.frameId, effectId: itemById(loadout.effectId)?.fxId || "glass" };
+      const effect = itemById(loadout.effectId);
+      const tile = itemById(loadout.tileId);
+      return {
+        frameId: loadout.frameId,
+        effectId: effect?.fxId || "glass",
+        effectItemId: loadout.effectId,
+        tileId: loadout.tileId,
+        tileSkin: tile?.skin || "ivory",
+        tableId: loadout.tableId,
+      };
     } catch {
-      return { frameId: null, effectId: "glass" };
+      return plain;
     }
   }
 
@@ -1255,7 +1447,7 @@ export class Hub {
       playerId: seat.id,
       name: seat.name,
       userId: seat.userId,
-      bot: seat.bot,
+      bot: seat.bot && !seat.accountBot,
       score: scores[seat.id] ?? 0,
       left: leaverId === seat.id,
       bigMoments: moments[seat.id] ?? 0,
@@ -1306,24 +1498,33 @@ export class Hub {
       hostId: room.hostId,
       status: room.status,
       seats: room.seats.map((seat) => {
-        const wear = this.wearFor(seat);
+        const wear = this.lookFor(seat);
         return {
           id: seat.id,
           name: seat.name,
           connected: seat.connected,
           bot: seat.bot,
+          accountBot: seat.accountBot,
           difficulty: seat.difficulty,
           rank: this.rankFor(seat.userId),
           avatarId: this.avatarFor(seat),
           frameId: wear.frameId,
           effectId: wear.effectId,
+          effectItemId: wear.effectItemId,
+          tileId: wear.tileId,
+          tileSkin: wear.tileSkin,
+          tableId: wear.tableId,
         };
       }),
       settings: { ...room.settings, casual: room.casual },
       recap: this.showRecap(room) ? room.recap : null,
       quick:
         room.listed && room.status === "lobby"
-          ? { waitUntil: room.quickWaitUntil ?? 0, canFill: Date.now() >= (room.quickWaitUntil ?? 0) }
+          ? {
+              waitUntil: room.quickWaitUntil ?? 0,
+              canFill: Date.now() >= (room.quickWaitUntil ?? 0),
+              botFillAt: room.botFillAt,
+            }
           : null,
       youId,
       turnDeadline: room.turnDeadline,

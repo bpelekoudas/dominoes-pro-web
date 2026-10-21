@@ -791,6 +791,19 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .seat-list li, .link-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .seat-list .who { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .seat-list .text-button { min-height: 44px; }
+.bot-badge,
+.board-name .bot-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  color: var(--gold);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  line-height: 1.45;
+  vertical-align: 1px;
+}
 .bot-label {
   display: block;
   color: var(--gold);

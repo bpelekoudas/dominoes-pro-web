@@ -11,6 +11,7 @@
     "dev": "npm run build:rules && concurrently -n rules,server,web -c yellow,blue,green \"tsc -p packages/rules --watch --preserveWatchOutput\" \"npm run dev -w @uhoh/server\" \"npm run dev -w @uhoh/web\"",
     "build": "npm run build:rules && tsc -p packages/server && npm run build -w @uhoh/web",
     "start": "node --disable-warning=ExperimentalWarning packages/server/dist/index.js",
+    "bots:purge": "node --disable-warning=ExperimentalWarning packages/server/dist/purge-bots.js",
     "test": "vitest run && npm run test:legacy",
     "test:legacy": "node test_logic.js && node test_ai.js",
     "typecheck": "tsc -p packages/rules --noEmit && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit"

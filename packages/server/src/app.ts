@@ -13,7 +13,8 @@ import {
   type AccountOptions,
   type SignInResult,
 } from "./accounts.js";
-import { BOT_TURN_MS, Hub, type ClientMessage, type ServerMessage } from "./hub.js";
+import { BotLeague, leaderboardIncludesBots } from "./bots.js";
+import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
@@ -50,7 +51,9 @@ export async function createApp(options: AppOptions = {}) {
     envMs("TURN_LIMIT_MS", 30_000),
     envMs("CONTINUE_MS", 9_000),
     envMs("QUICK_WAIT_MS", 60_000),
+    envMs("QUICK_BOT_FILL_MS", QUICK_BOT_FILL_MS),
   );
+  const bots = new BotLeague(store, hub, cosmetics);
   const app = Fastify({
     logger: true,
     trustProxy: true,
@@ -84,9 +87,21 @@ export async function createApp(options: AppOptions = {}) {
   app.get("/api/open-tables", async () => ({ tables: hub.openTables() }));
 
   app.get("/api/leaderboard", async (request) => {
-    const query = request.query as { board?: string };
+    const query = request.query as { board?: string; bots?: string };
     const board = query.board === "season" ? "season" : "rating";
-    return { board, ...leaderboard(store, board, new Date()) };
+    const includeBots = leaderboardIncludesBots() && query.bots !== "0" && query.bots !== "false";
+    return { board, ...leaderboard(store, board, new Date(), 50, includeBots) };
+  });
+
+  app.get("/api/bots/summary", async () => bots.summary());
+
+  app.post("/api/admin/bots/purge", async (request, reply) => {
+    const expected = process.env.BOT_ADMIN_TOKEN?.trim() ?? "";
+    if (!expected) return reply.code(404).send({ error: "Not found." });
+    const header = request.headers["x-bot-admin"];
+    const token = Array.isArray(header) ? header[0] : header;
+    if (token !== expected) return reply.code(403).send({ error: "Not allowed." });
+    return bots.purge();
   });
 
   app.get("/api/auth/config", async () => accounts.config());
@@ -250,7 +265,13 @@ export async function createApp(options: AppOptions = {}) {
     }
   }
 
-  return { app, store, accounts, hub };
+  bots.setHealth(async () => {
+    const started = performance.now();
+    const response = await app.inject({ method: "GET", url: "/health" });
+    return { status: response.statusCode, ms: Math.round(performance.now() - started) };
+  });
+
+  return { app, store, accounts, hub, bots };
 }
 
 function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {

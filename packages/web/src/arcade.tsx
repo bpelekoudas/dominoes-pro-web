@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "./logo";
 import { AccountChip, type AccountUser } from "./account";
-import { AvatarFace, AvatarPicker, Portrait } from "./avatars";
+import { AvatarFace, AvatarPicker, BotBadge, Portrait } from "./avatars";
 import { StoreScreen } from "./store";
 import { RankLine } from "./rank";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
@@ -439,9 +439,11 @@ export function QuickWait({
   playerCount,
   waitUntil,
   canFill,
+  botFillAt = null,
   serverNow,
   onCancel,
   onFill,
+  onFillBots,
   onKeep,
 }: {
   players: Array<{
@@ -449,32 +451,44 @@ export function QuickWait({
     name: string;
     isYou: boolean;
     bot: boolean;
+    accountBot?: boolean;
     avatarId: string;
     rank: { tierId: string; tierName?: string; step: "III" | "II" | "I" | null; rating: number; provisional: boolean } | null;
   }>;
   playerCount: number;
   waitUntil: number;
   canFill: boolean;
+  botFillAt?: number | null;
   serverNow: number;
   onCancel: () => void;
   onFill: () => void;
+  onFillBots?: () => void;
   onKeep: () => void;
 }) {
   const clock = useServerClock(serverNow);
   const left = Math.max(0, waitUntil - clock);
+  const botLeft = botFillAt == null ? null : Math.max(0, botFillAt - clock);
   const open = Math.max(0, playerCount - players.length);
   const offer = canFill || left <= 0;
   return (
     <section className="quick-wait" data-screen="quick-wait">
       <p className="eyebrow">Quick match</p>
       <h2>Finding a table</h2>
-      <p className="hint">Best of 3. Draw until you can play. All human, so this one counts toward your rating.</p>
+      <p className="hint">
+        Best of 3. Draw until you can play.
+        {botFillAt != null
+          ? " A bot sits down if the seat stays open, and the game still counts toward your rating."
+          : " All human, so this one counts toward your rating."}
+      </p>
       <ul className="quick-seats">
         {players.map((player) => (
           <li key={player.id}>
-            <AvatarFace id={player.avatarId} bot={player.bot} />
+            <AvatarFace id={player.avatarId} bot={player.bot && !player.accountBot} />
             <span className="quick-who">
-              <strong>{player.isYou ? "You" : player.name}</strong>
+              <strong>
+                {player.isYou ? "You" : player.name}
+                {player.accountBot ? <BotBadge /> : null}
+              </strong>
               {player.rank ? (
                 <RankLine
                   tierId={player.rank.tierId}
@@ -496,6 +510,11 @@ export function QuickWait({
           </li>
         ))}
       </ul>
+      {botFillAt != null && onFillBots ? (
+        <button type="button" className="capsule capsule-red" data-action="fill-bots" onClick={press(onFillBots)}>
+          Play with a bot{botLeft != null && botLeft > 0 ? ` · ${Math.ceil(botLeft / 1000)}s` : ""}
+        </button>
+      ) : null}
       {offer ? (
         <div className="quick-offer" data-quick-offer="true">
           <p>Still an open seat. Keep waiting, or fill the rest with computers. Computers take this game off the rating.</p>
@@ -506,9 +525,9 @@ export function QuickWait({
             Fill with computers
           </button>
         </div>
-      ) : (
+      ) : botFillAt == null ? (
         <p className="hint">Asking again in {Math.ceil(left / 1000)}s if the table is still open.</p>
-      )}
+      ) : null}
       <button type="button" className="capsule capsule-back" data-action="cancel-quick" onClick={press(onCancel)}>
         Cancel
       </button>

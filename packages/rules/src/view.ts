@@ -105,11 +105,17 @@ export interface PlayerView {
     isYou: boolean;
     isTurn: boolean;
     bot: boolean;
+    /** Server account that plays itself. Anonymous computers stay bot without this. */
+    accountBot: boolean;
     difficulty: BotDifficulty | null;
     rank: SeatRank | null;
     avatarId: string;
     frameId: string | null;
     effectId: string;
+    effectItemId: string | null;
+    tileId: string | null;
+    tileSkin: string;
+    tableId: string | null;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -153,7 +159,7 @@ export interface PlayerView {
   } | null;
   recap: RankRecap | null;
   /** Set while a public quick table is still waiting for people. */
-  quick: { waitUntil: number; canFill: boolean } | null;
+  quick: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
   lastPlay: LastPlay | null;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
@@ -164,11 +170,16 @@ export interface TableSeat {
   name: string;
   connected: boolean;
   bot: boolean;
+  accountBot?: boolean;
   difficulty: BotDifficulty | null;
   rank?: SeatRank | null;
   avatarId?: string | null;
   frameId?: string | null;
   effectId?: string | null;
+  effectItemId?: string | null;
+  tileId?: string | null;
+  tileSkin?: string | null;
+  tableId?: string | null;
 }
 
 export interface TableMeta {
@@ -183,7 +194,7 @@ export interface TableMeta {
     casual?: boolean;
   };
   recap?: RankRecap | null;
-  quick?: { waitUntil: number; canFill: boolean } | null;
+  quick?: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
   youId: string;
   turnDeadline?: number | null;
   turnBudgetMs?: number;
@@ -239,11 +250,16 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       isYou: seat.id === meta.youId,
       isTurn: seat.id === turnPlayerId,
       bot: seat.bot,
+      accountBot: seat.accountBot === true,
       difficulty: seat.difficulty,
       rank: seat.rank ?? null,
       avatarId: seat.avatarId || "homescreen",
       frameId: seat.frameId ?? null,
       effectId: seat.effectId || "glass",
+      effectItemId: seat.effectItemId ?? null,
+      tileId: seat.tileId ?? null,
+      tileSkin: seat.tileSkin || "ivory",
+      tableId: seat.tableId ?? null,
     })),
     you: { hand: youHand },
     board,

@@ -56,6 +56,8 @@ export interface UserRow {
   last_win_day?: string | null;
   peak_tier?: string;
   peak_step?: string | null;
+  /** 1 for a server-owned practice account. Humans stay 0. */
+  is_bot?: number;
 }
 
 export interface StandingUpdate {
@@ -389,6 +391,32 @@ export class Store {
     addUser("last_win_day", "last_win_day TEXT");
     addUser("peak_tier", "peak_tier TEXT NOT NULL DEFAULT 'rookie'");
     addUser("peak_step", "peak_step TEXT");
+    addUser("is_bot", "is_bot INTEGER NOT NULL DEFAULT 0");
+    const walletCols = this.db.prepare(`PRAGMA table_info(wallets)`).all() as Array<{ name: string }>;
+    const walletNames = new Set(walletCols.map((column) => column.name));
+    if (!walletNames.has("earned_day")) this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_day TEXT`);
+    if (!walletNames.has("earned_today")) {
+      this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_today INTEGER NOT NULL DEFAULT 0`);
+    }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS bone_grants (
+        user_id TEXT NOT NULL,
+        room_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, room_id, series_id, game_number)
+      );
+      CREATE TABLE IF NOT EXISTS bot_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS bot_events_kind ON bot_events (kind);
+    `);
   }
 
   insertRoom(room: RoomRow): void {
@@ -700,16 +728,52 @@ export class Store {
     return this.db.prepare(`SELECT * FROM users`).all() as unknown as UserRow[];
   }
 
-  topByRating(limit: number): UserRow[] {
-    return this.db
-      .prepare(`SELECT * FROM users ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`)
-      .all(limit) as unknown as UserRow[];
+  topBySeason(limit: number, includeBots = true): UserRow[] {
+    const sql = includeBots
+      ? `SELECT * FROM users ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`
+      : `SELECT * FROM users WHERE is_bot = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`;
+    return this.db.prepare(sql).all(limit) as unknown as UserRow[];
   }
 
-  topBySeason(limit: number): UserRow[] {
-    return this.db
-      .prepare(`SELECT * FROM users ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`)
-      .all(limit) as unknown as UserRow[];
+  topByRating(limit: number, includeBots = true): UserRow[] {
+    const sql = includeBots
+      ? `SELECT * FROM users ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`
+      : `SELECT * FROM users WHERE is_bot = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`;
+    return this.db.prepare(sql).all(limit) as unknown as UserRow[];
+  }
+
+  markBot(id: string): void {
+    this.db.prepare(`UPDATE users SET is_bot = 1 WHERE id = ?`).run(id);
+  }
+
+  listBots(): UserRow[] {
+    return this.db.prepare(`SELECT * FROM users WHERE is_bot = 1 ORDER BY display_name ASC`).all() as unknown as UserRow[];
+  }
+
+  insertBotEvent(kind: string, name: string, detail: string, at: string): void {
+    this.db
+      .prepare(`INSERT INTO bot_events (kind, name, detail, created_at) VALUES (?, ?, ?, ?)`)
+      .run(kind, name, detail, at);
+  }
+
+  /** Deletes bot accounts and the stats, wallets, and items that belong to them. */
+  purgeBots(): number {
+    const rows = this.db.prepare(`SELECT id FROM users WHERE is_bot = 1`).all() as Array<{ id: string }>;
+    for (const row of rows) {
+      this.db.prepare(`DELETE FROM wallets WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM owned_items WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM loadouts WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM rating_history WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM identities WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM season_peaks WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM bone_grants WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM players WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM users WHERE id = ?`).run(row.id);
+    }
+    this.db.prepare(`DELETE FROM bot_events`).run();
+    this.db.prepare(`DELETE FROM app_meta WHERE key LIKE 'bot_%'`).run();
+    return rows.length;
   }
 
   ratingEvent(userId: string, roomId: string, seriesId: string, gameNumber: number): RatingEventRow | null {
