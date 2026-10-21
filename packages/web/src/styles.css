@@ -105,7 +105,7 @@ input {
 .code-input, .big-code { letter-spacing: 0.28em; text-transform: uppercase; }
 .big-code { font-size: 3rem; margin: 0; }
 .choices { display: flex; flex-wrap: wrap; gap: 8px; }
-.choices button, .taunts button, .text-button, .code-chip, .talk-toggle, .end-cap {
+.choices button, .taunts button, .text-button, .code-chip, .talk-toggle {
   border: 1px solid var(--line);
   background: transparent;
   color: var(--paper);
@@ -259,17 +259,27 @@ input {
 .rail { position: relative; z-index: 2; }
 .rail:not(.turn) .backs,
 .rail:not(.turn) .seat-chip { opacity: 0.58; }
-.rail-top { height: 58px; flex: none; }
+.rail-top {
+  min-height: 52px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 2px;
+}
 .rail-left, .rail-right { width: 46px; flex: none; }
 .backs { pointer-events: none; overflow: hidden; }
 .backs-top {
-  position: absolute;
-  top: 0;
-  left: 118px;
-  right: 6px;
-  height: 30px;
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  height: 28px;
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: flex-end;
 }
 .backs-left, .backs-right {
   position: absolute;
@@ -314,7 +324,13 @@ input {
   background: rgba(16, 16, 16, 0.88);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
-.rail-top .seat-chip { left: 6px; top: 8px; }
+.rail-top .seat-chip {
+  position: relative;
+  left: auto;
+  top: auto;
+  flex: none;
+  max-width: 48%;
+}
 .rail-left .seat-chip { left: 2px; top: 6px; }
 .rail-right .seat-chip { right: 2px; top: 6px; }
 .you-float .seat-chip { position: relative; left: auto; top: auto; right: auto; }
@@ -372,20 +388,22 @@ input {
 .you-float { position: relative; z-index: 4; flex: none; }
 .you-float .talk-bubble { left: 0; bottom: calc(100% + 4px); }
 .tray-notices {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 6px 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 0 2px 6px;
+  padding: 0 2px 2px;
+  position: relative;
+  z-index: 5;
 }
 .tray-copy {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  flex: 1 1 160px;
+  justify-content: center;
+  gap: 3px;
   min-width: 0;
 }
 .tray-row {
@@ -465,8 +483,18 @@ input {
   transition: transform 280ms ease;
 }
 .board-tile, .end-cap { position: absolute; }
+.board-tile { min-width: 0; min-height: 0; }
+/* Fill the layout box exactly. A percentage height loses to the domino's
+   min-content size, so the face paints outside the box and covers the next tile. */
 .board-tile .domino,
-.board-tile .domino.horizontal { width: 100%; height: 100%; }
+.board-tile .domino.horizontal {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+}
 .board-tile .half { padding: 3px; }
 .board-tile .half i { width: 5px; height: 5px; }
 .board-tile.last-move { z-index: 1; }
@@ -492,8 +520,10 @@ input {
   border: 0;
   background: transparent;
   padding: 0;
+  min-width: 0;
   min-height: 0;
   border-radius: 8px;
+  box-shadow: none;
 }
 .end-cap::before {
   content: "";
@@ -519,12 +549,15 @@ input {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-top: 8px;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-top: 12px;
   justify-content: safe center;
   touch-action: pan-x;
   flex: 1;
   min-width: 0;
 }
+.hand::-webkit-scrollbar { display: none; }
 .hand-tile {
   border: 0;
   background: transparent;
@@ -535,8 +568,8 @@ input {
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
-.hand-tile.playable { opacity: 1; transform: translateY(-4px); }
-.hand-tile.selected { transform: translateY(-12px); }
+.hand-tile.playable { opacity: 1; transform: translateY(-2px); }
+.hand-tile.selected { transform: translateY(-8px); }
 .hand-tile.lifted { opacity: 0.3; }
 .bone-pile {
   width: 56px;
@@ -858,9 +891,26 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .avatar { position: relative; }
 .timer-ring circle { fill: none; stroke: rgba(239, 239, 239, 0.25); stroke-width: 3; }
 .timer-arc { stroke: var(--gold) !important; stroke-dasharray: 100; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 18px 18px; }
-.turn-bar { position: relative; height: 28px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); overflow: hidden; }
+.turn-bar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, 148px);
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
 .turn-bar span { position: absolute; inset: 0; background: var(--gold); transform-origin: left center; }
-.turn-bar em { position: relative; z-index: 1; font-style: normal; font-weight: 700; }
+.turn-bar em {
+  position: relative;
+  z-index: 1;
+  font-style: normal;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #141414;
+}
 .hand-summary, .ended-screen {
   position: fixed;
   z-index: 40;
@@ -1433,6 +1483,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .avatar-frame { z-index: 2; }
 
+body:has(.store-screen) { overflow: hidden; height: 100dvh; }
 .store-screen {
   position: fixed;
   inset: 0;
@@ -1440,27 +1491,71 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
+  height: 100%;
+  max-height: 100dvh;
+  overflow: hidden;
   background: var(--charcoal-deep);
   color: var(--paper);
   padding: calc(8px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
 }
-.store-bar { display: flex; align-items: center; gap: 12px; }
-.store-bar h2 { margin: 0; font-size: 2.2rem; }
-.store-bar .capsule { width: auto; min-height: 40px; padding: 0 16px; }
+.store-bar { display: flex; align-items: center; gap: 10px; flex: none; min-height: 40px; }
+.store-bar h2 { margin: 0; font-size: 1.7rem; line-height: 1; }
+.store-bar .capsule { width: auto; min-height: 36px; padding: 0 14px; }
 .store-balance {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  align-items: baseline;
+  min-height: 28px;
 }
-.store-balance span {
-  font-family: "Bebas Neue", Impact, sans-serif;
-  letter-spacing: 0.06em;
+.store-balance .balance-kicker {
+  flex: none;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.balance-chips { display: flex; gap: 6px; min-width: 0; }
+.balance-chips strong,
+.price-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(213, 163, 54, 0.14);
   color: var(--gold);
-  font-size: 1.2rem;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.store-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.bone-pip, .gold-pip {
+  width: 10px;
+  height: 14px;
+  flex: none;
+  border-radius: 2px;
+  background: #f4f4f4;
+  box-shadow: inset 0 -6px 0 #e31e26;
+}
+.gold-pip { background: var(--gold); box-shadow: inset 0 -6px 0 #8a6414; }
+.store-tabs {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  min-height: 40px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 2px 0 4px;
+  background: var(--charcoal-deep);
+}
+.store-tabs::-webkit-scrollbar { display: none; }
 .store-tabs button {
   flex: none;
   min-height: 36px;
@@ -1469,23 +1564,66 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   background: transparent;
   color: var(--paper);
   padding: 0 12px;
+  white-space: nowrap;
 }
-.store-tabs button[aria-selected="true"] { background: var(--red); border-color: var(--red); }
-.store-grid { overflow: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-bottom: 12px; }
-.store-card {
+.store-tabs button[aria-selected="true"] {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+  box-shadow: 0 0 0 1px rgba(227, 30, 38, 0.45);
+}
+.store-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
-  gap: 4px;
-  justify-items: start;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+.store-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   text-align: left;
-  min-height: 44px;
+  min-height: 228px;
+  height: auto;
   padding: 8px;
   border-radius: 16px;
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.35);
   color: var(--paper);
+  overflow: hidden;
 }
-.store-card.wearing { border-color: var(--gold); }
-.store-art { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 12px; background: #111; }
+.store-card.wearing { border-color: var(--gold); box-shadow: 0 0 0 1px rgba(213, 163, 54, 0.45); }
+.store-art-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 112px;
+  flex: none;
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(213, 163, 54, 0.16), transparent 55%),
+    #111;
+}
+.store-art-frame .store-art,
+.store-detail .store-art-frame .store-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  object-position: center top;
+  border-radius: 0;
+  background: transparent;
+}
 .store-art.missing {
   display: grid;
   place-items: center;
@@ -1493,28 +1631,56 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   font-size: 2.4rem;
   color: var(--gold);
 }
-.store-name { font-weight: 700; line-height: 1.15; }
-.rarity { font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.rarity-rare { color: #8ec8ff; }
-.rarity-epic { color: #d58cff; }
-.rarity-legendary { color: var(--gold); }
-.store-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.store-name {
+  font-weight: 700;
+  line-height: 1.15;
+  min-height: 2.3em;
+}
+.rarity-badge {
+  align-self: flex-start;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #d7d7d7;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.rarity-rare { color: #8ec8ff; text-shadow: 0 0 8px rgba(142, 200, 255, 0.85); }
+.rarity-epic { color: #d58cff; text-shadow: 0 0 8px rgba(213, 140, 255, 0.85); }
+.rarity-legendary { color: var(--gold); text-shadow: 0 0 10px rgba(213, 163, 54, 0.95); }
+.store-badges, .price-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .store-badges em {
   font-style: normal;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(213, 163, 54, 0.18);
   color: var(--gold);
 }
-.store-price { display: flex; flex-direction: column; font-size: 0.78rem; color: var(--paper); }
+.store-badges em.owned { background: rgba(255, 255, 255, 0.1); color: var(--paper); }
+.store-badges em.equipped { background: var(--gold); color: #141414; }
+.store-card.skeleton { pointer-events: none; }
+.store-card.skeleton .store-art-frame,
+.skel {
+  background: linear-gradient(90deg, #1b1b1b 0%, #2c2c2c 50%, #1b1b1b 100%);
+  background-size: 200% 100%;
+  animation: store-shimmer 1.2s ease-in-out infinite;
+  border-radius: 8px;
+  min-height: 12px;
+  color: transparent;
+}
+@keyframes store-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
 .store-detail {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 41;
-  max-height: 88dvh;
+  max-height: min(88dvh, 720px);
   overflow: auto;
   display: grid;
   gap: 8px;
@@ -1523,9 +1689,12 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   background: #161616;
   border-top: 1px solid var(--gold);
 }
-.store-detail .store-art { max-height: 220px; }
+.store-detail .store-art-frame { aspect-ratio: 16 / 10; min-height: 140px; max-height: 42dvh; }
 .store-detail h3 { margin: 0; font-family: "Bebas Neue", Impact, sans-serif; letter-spacing: 0.05em; font-size: 2rem; }
 .store-buy { display: grid; gap: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .store-card.skeleton .store-art-frame, .skel { animation: none; }
+}
 
 .felt-app[data-tile-skin="neon"] .domino:not(.face-down) { background: #071018; color: #39f3ff; box-shadow: inset 0 0 0 1px #39f3ff, 0 0 8px rgba(57, 243, 255, 0.45); }
 .felt-app[data-tile-skin="neon"] .domino:not(.face-down) .half i { background: #39f3ff; }

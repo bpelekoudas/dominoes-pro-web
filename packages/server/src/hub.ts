@@ -319,7 +319,7 @@ export class Hub {
   }> {
     const tables = [];
     for (const room of this.rooms.values()) {
-      if (!room.listed || room.status !== "lobby") continue;
+      if (!room.listed || !this.openToHumans(room)) continue;
       if (room.seats.length >= room.settings.playerCount) continue;
       const humans = room.seats.filter((seat) => !seat.bot);
       tables.push({
@@ -440,6 +440,7 @@ export class Hub {
       avatar_id: seat.avatarId,
     });
     this.remember(room);
+    this.releaseAccount(accountUserId, room.id);
     this.armBotFill(room);
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
@@ -457,7 +458,12 @@ export class Hub {
     const code = message.code.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const room = this.byCode.get(code) ? this.rooms.get(this.byCode.get(code)!) : undefined;
     if (!room) return { ok: false, error: "No table with that code." };
-    if (room.status !== "lobby") return { ok: false, error: "That game has already started." };
+    if (!this.openToHumans(room)) {
+      return {
+        ok: false,
+        error: room.status === "lobby" ? "That table isn't open." : "That game has already started.",
+      };
+    }
     if (room.seats.length >= room.settings.playerCount) return { ok: false, error: "That table is full." };
     const seat = this.makeSeat(
       makeId("p"),
@@ -1127,10 +1133,11 @@ export class Hub {
 
   private fillAccountBots(roomId: string, asker?: LiveSeat): void {
     const room = this.rooms.get(roomId);
-    if (!room || !room.listed || room.status !== "lobby") {
+    if (!room || !this.openToHumans(room) || !room.listed) {
       if (asker) this.tell(asker, { type: "error", message: "This table has already started." });
       return;
     }
+    if (!room.seats.some((seat) => !seat.bot)) return;
     this.clearTimer(this.botFillTimers, room.id);
     room.botFillAt = null;
     const cards = this.freeBots(room);
@@ -1255,7 +1262,10 @@ export class Hub {
       return { ok: false, error: "Pick 2, 3, 4, or any size." };
     }
     const existing = this.findQuick(size);
-    if (existing) return this.join({ type: "join", name, code: existing.code }, send, close, accountUserId);
+    if (existing) {
+      this.releaseAccount(accountUserId, existing.id);
+      return this.join({ type: "join", name, code: existing.code }, send, close, accountUserId);
+    }
     return this.create(
       {
         type: "create",
@@ -1271,12 +1281,42 @@ export class Hub {
     );
   }
 
+  /**
+   * A person can only sit at a brand-new lobby. A game that has dealt, and a
+   * table whose seats are all bots, stay closed. Background bot games never
+   * take a human.
+   */
+  private openToHumans(room: LiveRoom): boolean {
+    if (room.id.startsWith("bot_")) return false;
+    if (room.status !== "lobby" || room.match || room.handId || room.actionSeq > 0) return false;
+    if (room.seats.length > 0 && room.seats.every((seat) => seat.bot)) return false;
+    return true;
+  }
+
+  /** Leave any other table so Play vs computer and Quick Match deal a new game. */
+  private releaseAccount(userId: string | null, exceptRoomId?: string): void {
+    if (!userId) return;
+    for (const room of [...this.rooms.values()]) {
+      if (room.id === exceptRoomId) continue;
+      for (const seat of [...room.seats]) {
+        if (seat.userId !== userId || seat.bot) continue;
+        seat.connected = false;
+        const close = seat.close;
+        seat.send = null;
+        seat.close = null;
+        close?.();
+        if (room.status === "lobby") this.removeLobbySeat(room.id, seat.id);
+      }
+    }
+  }
+
   private findQuick(size: 2 | 3 | 4 | "any"): LiveRoom | null {
     const open = [...this.rooms.values()].filter(
       (room) =>
         room.listed &&
-        room.status === "lobby" &&
+        this.openToHumans(room) &&
         room.seats.length < room.settings.playerCount &&
+        room.seats.some((seat) => !seat.bot) &&
         room.seats.every((seat) => !seat.bot) &&
         (size === "any" || room.settings.playerCount === size),
     );
@@ -1517,6 +1557,7 @@ export class Hub {
         };
       }),
       settings: { ...room.settings, casual: room.casual },
+      sharedTableId: this.sharedTableId(room),
       recap: this.showRecap(room) ? room.recap : null,
       quick:
         room.listed && room.status === "lobby"
@@ -1534,6 +1575,19 @@ export class Hub {
       continueDeadline: room.continueDeadline,
       ended: room.ended,
     };
+  }
+
+  /**
+   * The felt everyone sees. The host's table wins. In a quick match the
+   * first human is that host when the recorded host is a bot. A bot never
+   * picks the felt while a person is seated.
+   */
+  private sharedTableId(room: LiveRoom): string {
+    const host = room.seats.find((seat) => seat.id === room.hostId) ?? null;
+    const human = host && !host.bot ? host : (room.seats.find((seat) => !seat.bot) ?? null);
+    const owner = human ?? host ?? room.seats[0] ?? null;
+    if (!owner) return "TBL-001";
+    return this.lookFor(owner).tableId || "TBL-001";
   }
 
   private roomFor(playerId: string): LiveRoom | null {

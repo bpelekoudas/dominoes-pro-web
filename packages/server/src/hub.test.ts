@@ -12,6 +12,7 @@ import {
   type PlayerView,
 } from "@uhoh/rules";
 import { Store } from "./db.js";
+import { Cosmetics } from "./cosmetics.js";
 import { BOT_TURN_MS, Hub, type ServerMessage } from "./hub.js";
 
 function latestView(messages: ServerMessage[]): PlayerView | null {
@@ -939,6 +940,159 @@ describe("quick match", () => {
 
     connect({ type: "create", name: "Pat", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 });
     expect(hub.openTables()).toHaveLength(0);
+  });
+
+  it("deals a fresh computer game and will not seat a human in one already going", () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 60_000);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "solo", name: "Bryan", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3, difficulty: "easy" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const view = latestView(messages);
+    expect(view?.status).toBe("playing");
+    expect(view?.handNumber).toBe(1);
+    expect(view?.gameNumber).toBe(1);
+    expect(view?.players.every((player) => player.score === 0)).toBe(true);
+    expect(view?.players.some((player) => player.bot && player.name === "Bones")).toBe(true);
+    const opponent = view?.players.find((player) => !player.isYou);
+    const dealt = (view?.you.hand.length ?? 0) + (opponent?.tileCount ?? 0) + (view?.boneyardCount ?? 0) + boardIds(view).length;
+    expect(dealt).toBe(28);
+    expect(boardIds(view)).toHaveLength(0);
+    if (view?.turnPlayerId === view?.yourId) expect(view?.openingTileId).toBeTruthy();
+
+    const code = view?.roomCode ?? "";
+    const walkedIn = hub.connect({ type: "join", name: "Sam", code }, () => undefined, () => undefined);
+    expect(walkedIn.ok).toBe(false);
+
+    const quickMessages: ServerMessage[] = [];
+    const quick = hub.connect(
+      { type: "quick", name: "Sam", size: 2 },
+      (message) => quickMessages.push(message),
+      () => undefined,
+    );
+    expect(quick.ok).toBe(true);
+    const quickView = latestView(quickMessages);
+    expect(quickView?.status).toBe("lobby");
+    expect(quickView?.roomCode).not.toBe(code);
+    expect(hub.openTables().some((table) => table.code === code)).toBe(false);
+  });
+
+  it("never lets a human join a bot-only table", () => {
+    const store = new Store(":memory:");
+    const now = new Date().toISOString();
+    store.insertRoom({
+      id: "bot_league1",
+      code: "BOTGM1",
+      host_id: "bp1",
+      series_id: "league",
+      player_count: 2,
+      boneyard_mode: "draw_until",
+      series_length: 3,
+      status: "lobby",
+      created_at: now,
+      rules_version: RULES_VERSION,
+      casual: 0,
+      listed: 1,
+    });
+    for (const [index, name] of ["Pip Squeak", "Double Six"].entries()) {
+      store.insertPlayer({
+        id: index === 0 ? "bp1" : "bp2",
+        room_id: "bot_league1",
+        name,
+        token: `bot-token-${index}-0123456789abcdef`,
+        seat: index,
+        created_at: now,
+        bot: 1,
+        difficulty: "medium",
+        user_id: `bot_${index}`,
+        avatar_id: "homescreen",
+      });
+    }
+    const hub = new Hub(store, 30);
+    const joined = hub.connect({ type: "join", name: "Bryan", code: "BOTGM1" }, () => undefined, () => undefined);
+    expect(joined.ok).toBe(false);
+    expect(hub.openTables().some((table) => table.code === "BOTGM1")).toBe(false);
+    const messages: ServerMessage[] = [];
+    const quick = hub.connect({ type: "quick", name: "Bryan", size: 2 }, (message) => messages.push(message), () => undefined);
+    expect(quick.ok).toBe(true);
+    expect(latestView(messages)?.roomCode).not.toBe("BOTGM1");
+    expect(latestView(messages)?.status).toBe("lobby");
+  });
+
+  it("shows the host table to every phone, and a human beats a bot", () => {
+    const store = new Store(":memory:");
+    const now = new Date().toISOString();
+    const cosmetics = new Cosmetics(store);
+    for (const [id, name] of [
+      ["host", "Host"],
+      ["guest", "Guest"],
+      ["bot_pip", "Pip"],
+    ] as const) {
+      store.insertUser({
+        id,
+        display_name: name,
+        avatar_id: "homescreen",
+        created_at: now,
+        updated_at: now,
+        is_guest: id === "bot_pip" ? 0 : 1,
+      });
+      cosmetics.loadout(id);
+    }
+    store.markBot("bot_pip");
+    for (const [userId, itemId] of [
+      ["host", "TBL-003"],
+      ["guest", "TBL-007"],
+      ["bot_pip", "TBL-006"],
+    ] as const) {
+      store.db
+        .prepare(`INSERT INTO owned_items (user_id, item_id, acquired_at) VALUES (?, ?, ?)`)
+        .run(userId, itemId, now);
+      const worn = cosmetics.equip(userId, itemId);
+      expect(worn.ok, "equip").toBe(true);
+    }
+
+    const hub = new Hub(store, 30, () => 60_000);
+    const hostMessages: ServerMessage[] = [];
+    const host = hub.connect(
+      { type: "create", name: "Host", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => hostMessages.push(message),
+      () => undefined,
+      "host",
+    );
+    if (!host.ok) throw new Error(host.error);
+    const code = latestView(hostMessages)?.roomCode ?? "";
+    const guestMessages: ServerMessage[] = [];
+    const guest = hub.connect(
+      { type: "join", name: "Guest", code },
+      (message) => guestMessages.push(message),
+      () => undefined,
+      "guest",
+    );
+    expect(guest.ok).toBe(true);
+    expect(latestView(hostMessages)?.tableId).toBe("TBL-003");
+    expect(latestView(guestMessages)?.tableId).toBe("TBL-003");
+    expect(latestView(guestMessages)?.players.find((player) => player.isYou)?.tileSkin).toBe("ivory");
+
+    hub.setRoster(() => [{ userId: "bot_pip", name: "Pip", avatarId: "homescreen", difficulty: "easy" }]);
+    const quickMessages: ServerMessage[] = [];
+    const quick = hub.connect(
+      { type: "quick", name: "Host", size: 2 },
+      (message) => quickMessages.push(message),
+      () => undefined,
+      "host",
+    );
+    if (!quick.ok) throw new Error(quick.error);
+    hub.command(quick.session.playerId, { type: "fill-bots" });
+    const playing = latestView(quickMessages);
+    expect(playing?.status).toBe("playing");
+    expect(playing?.tableId).toBe("TBL-003");
+    expect(playing?.players.find((player) => player.accountBot)?.tableId).toBe("TBL-006");
+    expect(playing?.players.every((player) => player.score === 0)).toBe(true);
+    expect(boardIds(playing)).toHaveLength(0);
   });
 
   it("brings a waiting quick table back after a restart", () => {

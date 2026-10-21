@@ -32,6 +32,8 @@ type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
 
 const TOKEN_KEY = "uhoh.token";
+/** Set while this tab is in a game, so a refresh resumes and a new visit deals fresh. */
+const RESUME_KEY = "uhoh.resume";
 
 export function App() {
   const [view, setView] = useState<PlayerView | null>(null);
@@ -95,6 +97,7 @@ export function App() {
         const message = handleMessage(String(event.data), setView, setChat, setError);
         if (message?.type === "welcome") {
           pending = null;
+          sessionStorage.setItem(RESUME_KEY, "1");
           localStorage.setItem(TOKEN_KEY, message.token);
           const url = `/r/${message.roomCode}`;
           if (location.pathname !== url) history.replaceState(null, "", url);
@@ -122,7 +125,7 @@ export function App() {
       connect();
     };
 
-    if (localStorage.getItem(TOKEN_KEY)) connect();
+    if (sessionStorage.getItem(RESUME_KEY) === "1" && localStorage.getItem(TOKEN_KEY)) connect();
     return () => {
       stopped = true;
       attempt += 1;
@@ -151,11 +154,15 @@ export function App() {
   const begin = async (first: { type: string; name: string; [key: string]: unknown }) => {
     const guest = await account.ensureGuest(first.name);
     if (!guest) return;
+    // Drop the saved seat first. A retry must not reopen a game that already started.
+    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.setItem(RESUME_KEY, "1");
     openSocket({ ...first, name: guest.displayName });
   };
 
   const leave = () => {
     leaveRef.current = true;
+    sessionStorage.removeItem(RESUME_KEY);
     localStorage.removeItem(TOKEN_KEY);
     socketRef.current?.close();
     setView(null);
@@ -359,15 +366,8 @@ function Game({
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const cosmetics = useMatchCosmetics();
-  const botTable = view.players.find((player) => player.accountBot && player.tableId && player.tableId !== "TBL-001");
-  const botSkin = view.players.find((player) => player.accountBot && player.tileSkin && player.tileSkin !== "ivory");
-  const tableArt =
-    cosmetics.tableArt && !cosmetics.tableArt.includes("TBL-001")
-      ? cosmetics.tableArt
-      : botTable
-        ? `/store/${botTable.tableId}.webp`
-        : cosmetics.tableArt;
-  const tileSkin = cosmetics.skin !== "ivory" ? cosmetics.skin : botSkin?.tileSkin || cosmetics.skin;
+  const tableArt = view.tableId ? `/store/${view.tableId}.webp` : null;
+  const tileSkin = cosmetics.skin || "ivory";
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const bubble = useTalkBubble(chat);
@@ -529,7 +529,7 @@ function Game({
                 {yourTurn ? <p className="your-turn">Your turn</p> : null}
                 {yourTurn ? <TurnBar view={view} /> : null}
                 <StatusLine view={view} />
-                {scoreMathOn() ? (
+                {demoRequested() ? (
                   <button type="button" className="uhoh-test" data-demo="uhoh" onClick={() => setReplayToken((value) => value + 1)}>
                     UH-OH
                   </button>
@@ -704,12 +704,13 @@ function SeatRail({
       data-player-id={player.id}
       data-tiles={player.tileCount}
     >
+      {edge === "top" ? <SeatChip player={player} view={view} /> : null}
       <div className={`backs backs-${edge}`} aria-hidden="true">
         {Array.from({ length: player.tileCount }, (_, index) => (
           <i key={index} className="tile-back" />
         ))}
       </div>
-      <SeatChip player={player} view={view} />
+      {edge === "top" ? null : <SeatChip player={player} view={view} />}
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
     </div>
   );

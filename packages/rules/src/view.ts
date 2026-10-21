@@ -160,6 +160,11 @@ export interface PlayerView {
   recap: RankRecap | null;
   /** Set while a public quick table is still waiting for people. */
   quick: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
+  /**
+   * One table skin for the whole match. Every client renders this.
+   * It is the host's equipped table, or the first human's when the host is a bot.
+   */
+  tableId: string;
   lastPlay: LastPlay | null;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
@@ -195,6 +200,8 @@ export interface TableMeta {
   };
   recap?: RankRecap | null;
   quick?: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
+  /** Shared table skin. The hub picks the host, never a bot while a human is seated. */
+  sharedTableId?: string | null;
   youId: string;
   turnDeadline?: number | null;
   turnBudgetMs?: number;
@@ -316,6 +323,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       : null,
     recap: meta.recap ?? null,
     quick: meta.quick ?? null,
+    tableId: meta.sharedTableId || "TBL-001",
     lastPlay: match?.lastPlay ?? null,
     lastDraw,
     taunts: tauntsForPlayer(),

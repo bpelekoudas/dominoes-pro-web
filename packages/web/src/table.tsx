@@ -133,6 +133,7 @@ export function Table({
       data-shake={shake ?? "off"}
       ref={viewportRef}
       data-open-total={view.openTotal}
+      data-table-id={view.tableId}
       data-board-scale={scale.toFixed(2)}
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}

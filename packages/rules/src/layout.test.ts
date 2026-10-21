@@ -509,6 +509,28 @@ describe("board layout", () => {
     expect(sawEveryArmBend).toBe(true);
   });
 
+  it("chains a horizontal tile onto a crosswise double without overlap", () => {
+    let board = placeTile(
+      { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
+      "lead",
+      tileById("6-6"),
+    );
+    for (const id of ["5-6", "5-5", "2-5"]) board = placeTile(board, "east", tileById(id));
+    const layout = layoutBoard(board);
+    const spinner = layout.tiles.find((tile) => tile.tileId === "6-6")!;
+    const five = layout.tiles.find((tile) => tile.tileId === "5-5")!;
+    const twoFive = layout.tiles.find((tile) => tile.tileId === "2-5")!;
+    expect(spinner.orientation).toBe("vertical");
+    expect(five.orientation).toBe("vertical");
+    expect(twoFive.orientation).toBe("horizontal");
+    expect(five.direction).toBe("east");
+    expect(twoFive.direction).toBe("east");
+    expect(twoFive.x - (five.x + five.w)).toBe(TILE_GAP);
+    expect(boxesOverlap(five, twoFive)).toBe(false);
+    expect(boxesOverlap(spinner, layout.tiles.find((tile) => tile.tileId === "5-6")!)).toBe(false);
+    assertLaidOut(board, "crosswise double", false);
+  });
+
   it("reports a fit box with a margin around the tiles", () => {
     const board = boardFromChain(chainFrom(tileById("3-3"), 4), "west");
     const layout = layoutBoard(board);

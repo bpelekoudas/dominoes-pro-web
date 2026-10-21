@@ -92,9 +92,17 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
         <h2>Store</h2>
       </header>
       <p className="store-balance" data-test-balance="true">
-        <span>Test balance</span>
-        <strong>{format(state?.bones)} Bones</strong>
-        <strong>{format(state?.goldBones)} Gold Bones</strong>
+        <span className="balance-kicker">Test balance</span>
+        <span className="balance-chips">
+          <strong>
+            <i className="bone-pip" aria-hidden="true" />
+            {format(state?.bones)}
+          </strong>
+          <strong>
+            <i className="gold-pip" aria-hidden="true" />
+            {format(state?.goldBones)}
+          </strong>
+        </span>
       </p>
       {error ? <p className="banner error">{error}</p> : null}
       <div className="store-tabs" role="tablist">
@@ -114,25 +122,35 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
         ))}
       </div>
       <div className="store-grid">
-        {items.map((item) => {
-          const owned = state?.owned.includes(item.id) ?? false;
-          const wearing = state ? wearingItem(state.loadout, item) : false;
-          return (
-            <button
-              type="button"
-              key={item.id}
-              className={`store-card${wearing ? " wearing" : ""}`}
-              data-item={item.id}
-              onClick={press(() => setPicked(item))}
-            >
-              <ItemArt item={item} />
-              <span className="store-name">{item.name}</span>
-              <span className={`rarity rarity-${item.rarity.toLowerCase()}`}>{item.rarity}</span>
-              <Badges item={item} />
-              <Price item={item} owned={owned} wearing={wearing} />
-            </button>
-          );
-        })}
+        {state === null
+          ? Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="store-card skeleton" aria-hidden="true">
+                <span className="store-art-frame" />
+                <span className="store-name skel"> </span>
+                <span className="skel"> </span>
+              </div>
+            ))
+          : items.map((item) => {
+              const owned = state.owned.includes(item.id);
+              const wearing = wearingItem(state.loadout, item);
+              return (
+                <button
+                  type="button"
+                  key={item.id}
+                  className={`store-card${wearing ? " wearing" : ""}`}
+                  data-item={item.id}
+                  onClick={press(() => setPicked(item))}
+                >
+                  <span className="store-art-frame">
+                    <ItemArt item={item} />
+                  </span>
+                  <span className="store-name">{item.name}</span>
+                  <span className={`rarity-badge rarity-${item.rarity.toLowerCase()}`}>{item.rarity}</span>
+                  <Badges item={item} owned={owned} wearing={wearing} />
+                  <Price item={item} owned={owned} wearing={wearing} />
+                </button>
+              );
+            })}
       </div>
       {picked && state ? (
         <ItemDetail
@@ -191,10 +209,12 @@ function ItemDetail({
   const sale = forSale(item);
   return (
     <div className="store-detail" role="dialog" aria-label={item.name} data-item-detail={item.id}>
-      <ItemArt item={item} />
+      <span className="store-art-frame">
+        <ItemArt item={item} />
+      </span>
       <h3>{item.name}</h3>
-      <p className={`rarity rarity-${item.rarity.toLowerCase()}`}>{item.rarity}</p>
-      <Badges item={item} />
+      <p className={`rarity-badge rarity-${item.rarity.toLowerCase()}`}>{item.rarity}</p>
+      <Badges item={item} owned={owned} wearing={wearing} />
       {item.description ? <p>{item.description}</p> : null}
       {item.unlock ? <p className="hint">{item.unlock}</p> : null}
       <Price item={item} owned={owned} wearing={wearing} />
@@ -226,41 +246,54 @@ function ItemDetail({
 }
 
 function ItemArt({ item }: { item: StoreItem }) {
+  const [failed, setFailed] = useState(false);
   const src = artSrc(item);
-  if (!src) {
+  if (!src || failed) {
     return (
       <span className="store-art missing" aria-hidden="true">
         {item.name.slice(0, 1)}
       </span>
     );
   }
-  return <img className="store-art" src={src} alt="" draggable={false} />;
+  return <img className="store-art" src={src} alt="" draggable={false} onError={() => setFailed(true)} />;
 }
 
-function Badges({ item }: { item: StoreItem }) {
-  const badges: string[] = [];
-  if (item.obtain === "season") badges.push("Season reward");
-  if (item.obtain === "achievement" || item.obtain === "tournament") badges.push("Earned");
-  if (item.limited && item.availableFrom && item.availableUntil) badges.push(`Limited ${item.availableFrom} – ${item.availableUntil}`);
-  else if (item.limited) badges.push("Limited");
+function Badges({ item, owned, wearing }: { item: StoreItem; owned: boolean; wearing: boolean }) {
+  const badges: Array<{ key: string; label: string; className?: string }> = [];
+  if (wearing) badges.push({ key: "equipped", label: "Equipped", className: "equipped" });
+  else if (owned) badges.push({ key: "owned", label: "Owned", className: "owned" });
+  if (item.obtain === "season") badges.push({ key: "season", label: "Season" });
+  if (item.obtain === "achievement" || item.obtain === "tournament") badges.push({ key: "earned", label: "Earned only" });
+  if (item.limited) badges.push({ key: "limited", label: "Limited" });
   if (badges.length === 0) return null;
   return (
     <span className="store-badges">
       {badges.map((badge) => (
-        <em key={badge}>{badge}</em>
+        <em key={badge.key} className={badge.className}>
+          {badge.label}
+        </em>
       ))}
     </span>
   );
 }
 
 function Price({ item, owned, wearing }: { item: StoreItem; owned: boolean; wearing: boolean }) {
-  if (wearing) return <span className="store-price">Wearing</span>;
-  if (owned) return <span className="store-price">Owned</span>;
+  if (wearing || owned) return null;
   if (!forSale(item)) return <span className="store-price">Not for sale</span>;
   return (
-    <span className="store-price">
-      {item.bones ? <span>{format(item.bones)} Bones</span> : null}
-      {item.gold ? <span>{format(item.gold)} Gold</span> : null}
+    <span className="price-row">
+      {item.bones ? (
+        <span className="price-chip">
+          <i className="bone-pip" aria-hidden="true" />
+          {format(item.bones)}
+        </span>
+      ) : null}
+      {item.gold ? (
+        <span className="price-chip">
+          <i className="gold-pip" aria-hidden="true" />
+          {format(item.gold)}
+        </span>
+      ) : null}
     </span>
   );
 }
