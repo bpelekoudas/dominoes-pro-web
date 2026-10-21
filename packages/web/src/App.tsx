@@ -390,7 +390,7 @@ function Game({
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const cosmetics = useMatchCosmetics();
-  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=4` : null;
+  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=5` : null;
   const tileSkin = cosmetics.skin || "ivory";
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
