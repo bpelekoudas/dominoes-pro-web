@@ -93,7 +93,7 @@ export function App() {
         else if (currentToken) next.send(JSON.stringify({ type: "reconnect", token: currentToken }));
       };
       next.onmessage = (event) => {
-        if (mine !== attempt) return;
+        if (mine !== attempt || leaveRef.current) return;
         const message = handleMessage(String(event.data), setView, setChat, setError);
         if (message?.type === "welcome") {
           pending = null;
@@ -160,7 +160,7 @@ export function App() {
     openSocket({ ...first, name: guest.displayName });
   };
 
-  const leave = () => {
+  const goHome = () => {
     leaveRef.current = true;
     sessionStorage.removeItem(RESUME_KEY);
     localStorage.removeItem(TOKEN_KEY);
@@ -171,6 +171,22 @@ export function App() {
     setStatus("idle");
     if (location.pathname !== "/") history.replaceState(null, "", "/");
   };
+
+  const leave = () => {
+    goHome();
+  };
+
+  // The match is already scored. Tell the server to drop this seat, then go home.
+  const finishMatch = () => {
+    leaveRef.current = true;
+    sessionStorage.removeItem(RESUME_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    send({ type: "finish" });
+    goHome();
+  };
+
+  const matchIsOver =
+    view?.phase === "over" || view?.status === "complete" || view?.status === "abandoned";
 
   useEffect(() => {
     if (!view?.recap) return;
@@ -259,7 +275,8 @@ export function App() {
         onToggleChat={() => setChatOpen((open) => !open)}
         onDismiss={() => setDismissedHand(handKey(view))}
         onLeaveArm={() => setLeaveArmed(true)}
-        onLeave={leave}
+        onLeave={matchIsOver ? finishMatch : leave}
+        onLeaveMatch={finishMatch}
         onCancelQuick={() => {
           send({ type: "cancel-quick" });
           leave();
@@ -339,6 +356,7 @@ function Game({
   onDismiss,
   onLeaveArm,
   onLeave,
+  onLeaveMatch,
   onCancelQuick,
   iris,
   onSend,
@@ -358,6 +376,7 @@ function Game({
   onDismiss: () => void;
   onLeaveArm: () => void;
   onLeave: () => void;
+  onLeaveMatch: () => void;
   onCancelQuick: () => void;
   iris: boolean;
   onSend: (message: object) => void;
@@ -461,13 +480,25 @@ function Game({
       {error ? <p className="banner error">{error}</p> : null}
       {view.ended ? (
         <section className="ended-screen" data-screen="player-left">
-          <p className="result-kicker">Game ended - {view.ended.name} left</p>
-          <ScoreList view={view} />
-          {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
+          <div className="hand-summary-scroll">
+            <p className="result-kicker">Game ended - {view.ended.name} left</p>
+            <ScoreList view={view} />
+            {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
+          </div>
+          <div className="match-over-actions">
+            <button type="button" className="primary" data-action="leave-match" onClick={onLeaveMatch}>
+              Leave Match
+            </button>
+          </div>
         </section>
       ) : null}
       {view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended ? (
-        <HandSummary view={view} onContinue={() => onSend({ type: "continue" })} />
+        <HandSummary
+          view={view}
+          onContinue={() => onSend({ type: "continue" })}
+          onRematch={() => onSend({ type: "rematch" })}
+          onLeaveMatch={onLeaveMatch}
+        />
       ) : null}
 
       {view.status === "lobby" && view.quick ? (
@@ -510,13 +541,6 @@ function Game({
               ) : null}
             </div>
           </div>
-          {view.canRematch ? (
-            <div className="actions">
-              <button type="button" className="primary" onClick={() => onSend({ type: "rematch" })}>
-                Play another series
-              </button>
-            </div>
-          ) : null}
           <div className="hand-tray">
             <div className="tray-notices">
               <div className="you-float">
@@ -915,7 +939,17 @@ function ScoreList({ view }: { view: PlayerView }) {
   );
 }
 
-function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () => void }) {
+function HandSummary({
+  view,
+  onContinue,
+  onRematch,
+  onLeaveMatch,
+}: {
+  view: PlayerView;
+  onContinue: () => void;
+  onRematch: () => void;
+  onLeaveMatch: () => void;
+}) {
   const hand = view.lastHand;
   const now = useServerNow(view.serverNow);
   if (!hand) return null;
@@ -969,9 +1003,22 @@ function HandSummary({ view, onContinue }: { view: PlayerView; onContinue: () =>
       <ScoreList view={view} />
       {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} faces={playerFaces(view)} /> : null}
       {view.betweenHands ? (
-        <button type="button" className="primary" data-action="continue" onClick={onContinue}>
-          Continue{seconds !== null ? ` · ${seconds}` : ""}
-        </button>
+        <div className="match-over-actions">
+          <button type="button" className="primary" data-action="continue" onClick={onContinue}>
+            Continue{seconds !== null ? ` · ${seconds}` : ""}
+          </button>
+        </div>
+      ) : view.phase === "over" || view.status === "complete" ? (
+        <div className="match-over-actions">
+          {view.canRematch ? (
+            <button type="button" className="secondary" data-action="rematch" onClick={onRematch}>
+              Play Again
+            </button>
+          ) : null}
+          <button type="button" className="primary" data-action="leave-match" onClick={onLeaveMatch}>
+            Leave Match
+          </button>
+        </div>
       ) : null}
     </section>
   );

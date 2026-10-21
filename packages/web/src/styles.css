@@ -937,20 +937,47 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   z-index: 40;
   left: 12px;
   right: 12px;
-  overflow: auto;
   background: #1b1b1b;
   color: var(--paper);
   border: 1px solid rgba(213, 163, 54, 0.7);
   padding: 16px;
 }
+.hand-summary-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
 .ended-screen {
   top: 64px;
-  max-height: calc(100dvh - 80px);
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: none;
   border-radius: 16px;
+}
+.match-over-actions {
+  flex: none;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  margin: 12px -16px -16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: #1b1b1b;
+  border-top: 1px solid rgba(213, 163, 54, 0.35);
+}
+.hand-summary .match-over-actions {
+  position: sticky;
+  bottom: 0;
+}
+.match-over-actions .primary {
+  min-height: 52px;
+  font-size: 1.05rem;
 }
 .hand-summary {
   top: auto;
   bottom: 0;
+  overflow: auto;
   /* A long chain asks for a shorter sheet via --hand-sheet-max so the last
      tile can stay on the felt instead of the chain climbing the rail. */
   max-height: min(54dvh, var(--hand-sheet-max, 54dvh));

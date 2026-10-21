@@ -1095,6 +1095,200 @@ describe("quick match", () => {
     expect(boardIds(playing)).toHaveLength(0);
   });
 
+  it("refuses to finish a match that is still going", () => {
+    const { store, hub, connect } = setup();
+    const alex = connect({
+      type: "create",
+      name: "Alex",
+      playerCount: 2,
+      boneyardMode: "draw_one",
+      seriesLength: 3,
+    });
+    const code = latestView(alex.messages)?.roomCode ?? "";
+    const sam = connect({ type: "join", code, name: "Sam" });
+    hub.command(alex.playerId, { type: "start" });
+    hub.command(alex.playerId, { type: "finish" });
+    expect(alex.messages.at(-1)).toMatchObject({ type: "error", message: "The match is still going." });
+    const token = welcomeToken(alex.messages);
+    expect(store.playerByToken(token)?.id).toBe(alex.playerId);
+
+    const again = hub.connect({ type: "reconnect", token }, () => undefined, () => undefined);
+    expect(again.ok).toBe(true);
+
+    const quickMessages: ServerMessage[] = [];
+    const quick = hub.connect(
+      { type: "quick", name: "Ada", size: 2 },
+      (message) => quickMessages.push(message),
+      () => undefined,
+    );
+    if (!quick.ok) throw new Error(quick.error);
+    const partner = hub.connect({ type: "quick", name: "Bea", size: 2 }, () => undefined, () => undefined);
+    if (!partner.ok) throw new Error(partner.error);
+    expect(latestView(quickMessages)?.status).toBe("playing");
+    hub.command(quick.session.playerId, { type: "finish" });
+    expect(quickMessages.at(-1)).toMatchObject({ type: "error", message: "The match is still going." });
+    expect(store.playerByToken(welcomeToken(quickMessages))?.id).toBe(quick.session.playerId);
+  });
+
+  it("drops a finished seat without paying Bones or rating again", () => {
+    const store = new Store(":memory:");
+    seatUser(store, "ada", "Ada");
+    seatUser(store, "bo", "Bo");
+    const hub = new Hub(store, 30, () => 0, 60_000);
+    const adaMessages: ServerMessage[] = [];
+    const boMessages: ServerMessage[] = [];
+    const ada = hub.connect(
+      { type: "create", name: "Ada", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => adaMessages.push(message),
+      () => undefined,
+      "ada",
+    );
+    if (!ada.ok) throw new Error(ada.error);
+    const code = latestView(adaMessages)?.roomCode ?? "";
+    const bo = hub.connect(
+      { type: "join", code, name: "Bo" },
+      (message) => boMessages.push(message),
+      () => undefined,
+      "bo",
+    );
+    if (!bo.ok) throw new Error(bo.error);
+    hub.command(ada.session.playerId, { type: "start" });
+
+    const players = [
+      { playerId: ada.session.playerId, messages: adaMessages },
+      { playerId: bo.session.playerId, messages: boMessages },
+    ];
+    let sawBreak = false;
+    const done = playSeries(hub, players, (paused) => {
+      if (sawBreak) return;
+      sawBreak = true;
+      hub.command(paused.playerId, { type: "finish" });
+      expect(paused.messages.at(-1)).toMatchObject({ type: "error", message: "The match is still going." });
+    });
+    expect(sawBreak).toBe(true);
+    expect(done?.status).toBe("complete");
+    expect(done?.phase).toBe("over");
+    expect(done?.betweenHands).toBe(false);
+    expect(latestView(adaMessages)?.canRematch).toBe(true);
+    expect(latestView(boMessages)?.canRematch).toBe(false);
+    const paid = {
+      ada: credits(store, "ada"),
+      bo: credits(store, "bo"),
+    };
+    expect(paid.ada.grants).toBeGreaterThan(0);
+    expect(paid.ada.bones).toBeGreaterThan(0);
+    expect(paid.bo.bones).toBeGreaterThan(0);
+    expect(paid.ada.history).toBeGreaterThan(0);
+
+    hub.command(bo.session.playerId, { type: "finish" });
+    expect(store.playerByToken(welcomeToken(boMessages))).toBeNull();
+    const boBack = hub.connect(
+      { type: "reconnect", token: welcomeToken(boMessages) },
+      () => undefined,
+      () => undefined,
+    );
+    expect(boBack.ok).toBe(false);
+    expect(latestView(adaMessages)?.status).toBe("complete");
+    expect(latestView(adaMessages)?.canRematch).toBe(false);
+    expect(latestView(adaMessages)?.players.some((player) => player.id === bo.session.playerId)).toBe(false);
+    hub.command(ada.session.playerId, { type: "rematch" });
+    expect(adaMessages.at(-1)).toMatchObject({
+      type: "error",
+      message: "Everyone has to still be here for another series.",
+    });
+    expect(credits(store, "ada")).toEqual(paid.ada);
+    expect(credits(store, "bo")).toEqual(paid.bo);
+
+    hub.command(ada.session.playerId, { type: "finish" });
+    expect(store.playerByToken(welcomeToken(adaMessages))).toBeNull();
+    const adaBack = hub.connect(
+      { type: "reconnect", token: welcomeToken(adaMessages) },
+      () => undefined,
+      () => undefined,
+    );
+    expect(adaBack.ok).toBe(false);
+    expect(store.roomByCode(code)).toBeNull();
+    expect(credits(store, "ada")).toEqual(paid.ada);
+    expect(credits(store, "bo")).toEqual(paid.bo);
+  });
+
+  it("lets the player who stayed leave after the opponent walks off", async () => {
+    const store = new Store(":memory:");
+    seatUser(store, "ada", "Ada");
+    seatUser(store, "bo", "Bo");
+    const hub = new Hub(store, 30, () => 0, 40, 60_000);
+    const adaMessages: ServerMessage[] = [];
+    const boMessages: ServerMessage[] = [];
+    const ada = hub.connect(
+      { type: "create", name: "Ada", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => adaMessages.push(message),
+      () => undefined,
+      "ada",
+    );
+    if (!ada.ok) throw new Error(ada.error);
+    const code = latestView(adaMessages)?.roomCode ?? "";
+    const bo = hub.connect(
+      { type: "join", code, name: "Bo" },
+      (message) => boMessages.push(message),
+      () => undefined,
+      "bo",
+    );
+    if (!bo.ok) throw new Error(bo.error);
+    hub.command(ada.session.playerId, { type: "start" });
+    const abandoned = await waitFor(
+      () => latestView(adaMessages)?.status === "abandoned" && latestView(boMessages)?.status === "abandoned",
+    );
+    expect(abandoned).toBe(true);
+    const paid = { ada: credits(store, "ada"), bo: credits(store, "bo") };
+    expect(paid.ada.history).toBeGreaterThan(0);
+
+    const stayer = latestView(boMessages)?.ended?.playerId === bo.session.playerId ? ada : bo;
+    const stayerMessages = stayer === ada ? adaMessages : boMessages;
+    expect(latestView(stayerMessages)?.ended).toBeTruthy();
+    hub.command(stayer.session.playerId, { type: "finish" });
+    expect(store.playerByToken(welcomeToken(stayerMessages))).toBeNull();
+    const back = hub.connect(
+      { type: "reconnect", token: welcomeToken(stayerMessages) },
+      () => undefined,
+      () => undefined,
+    );
+    expect(back.ok).toBe(false);
+    expect(credits(store, "ada")).toEqual(paid.ada);
+    expect(credits(store, "bo")).toEqual(paid.bo);
+
+    const other = stayer === ada ? bo : ada;
+    const otherMessages = other === ada ? adaMessages : boMessages;
+    expect(latestView(otherMessages)?.status).toBe("abandoned");
+    hub.command(other.session.playerId, { type: "finish" });
+    expect(store.roomByCode(code)).toBeNull();
+    expect(credits(store, "ada")).toEqual(paid.ada);
+    expect(credits(store, "bo")).toEqual(paid.bo);
+  });
+
+  it("lets a player leave a finished computer game", async () => {
+    const store = new Store(":memory:");
+    seatUser(store, "ada", "Ada");
+    const hub = new Hub(store, 30, () => 0, 40, 60_000);
+    const messages: ServerMessage[] = [];
+    const ada = hub.connect(
+      { type: "solo", name: "Ada", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      (message) => messages.push(message),
+      () => undefined,
+      "ada",
+    );
+    if (!ada.ok) throw new Error(ada.error);
+    const code = latestView(messages)?.roomCode ?? "";
+    const abandoned = await waitFor(() => latestView(messages)?.status === "abandoned", 4_000);
+    expect(abandoned).toBe(true);
+    const paid = credits(store, "ada");
+    hub.command(ada.session.playerId, { type: "finish" });
+    expect(store.playerByToken(welcomeToken(messages))).toBeNull();
+    const back = hub.connect({ type: "reconnect", token: welcomeToken(messages) }, () => undefined, () => undefined);
+    expect(back.ok).toBe(false);
+    expect(store.roomByCode(code)).toBeNull();
+    expect(credits(store, "ada")).toEqual(paid);
+  });
+
   it("brings a waiting quick table back after a restart", () => {
     const { store, connect } = setup();
     const ada = connect({ type: "quick", name: "Ada", size: 3 });
@@ -1105,6 +1299,75 @@ describe("quick match", () => {
     expect(tables[0]?.players[0]?.avatarId).toBe("homescreen");
   });
 });
+
+function seatUser(store: Store, id: string, name: string) {
+  const now = new Date().toISOString();
+  store.insertUser({
+    id,
+    display_name: name,
+    avatar_id: "homescreen",
+    created_at: now,
+    updated_at: now,
+    is_guest: 1,
+  });
+}
+
+function credits(store: Store, userId: string) {
+  const user = store.user(userId);
+  const bones = store.db.prepare(`SELECT bones FROM wallets WHERE user_id = ?`).get(userId) as
+    | { bones: number }
+    | undefined;
+  const grants = store.db.prepare(`SELECT COUNT(*) AS n FROM bone_grants WHERE user_id = ?`).get(userId) as {
+    n: number;
+  };
+  const history = store.db.prepare(`SELECT COUNT(*) AS n FROM rating_history WHERE user_id = ?`).get(userId) as {
+    n: number;
+  };
+  return {
+    rating: user?.rating ?? null,
+    points: user?.season_points ?? null,
+    games: user?.games_played ?? null,
+    bones: bones?.bones ?? 0,
+    grants: Number(grants.n),
+    history: Number(history.n),
+  };
+}
+
+function welcomeToken(messages: ServerMessage[]): string {
+  const welcome = messages.find((message) => message.type === "welcome");
+  return welcome?.type === "welcome" ? welcome.token : "";
+}
+
+function playSeries(
+  hub: Hub,
+  players: Array<{ playerId: string; messages: ServerMessage[] }>,
+  onBreak?: (player: { playerId: string; messages: ServerMessage[] }) => void,
+) {
+  for (let step = 0; step < 20_000; step += 1) {
+    const view = latestView(players[0]?.messages ?? []);
+    if (view?.status === "complete") return view;
+    const paused = players.find((player) => latestView(player.messages)?.betweenHands);
+    if (paused) {
+      onBreak?.(paused);
+      hub.command(paused.playerId, { type: "continue" });
+      continue;
+    }
+    const turn = players.find((player) => latestView(player.messages)?.turnPlayerId === player.playerId);
+    const turnView = turn ? latestView(turn.messages) : null;
+    if (!turn || !turnView) return turnView;
+    const play = turnView.legalPlays[0];
+    if (play) {
+      hub.command(turn.playerId, { type: "intent", intent: { type: "play", tileId: play.tileId, endId: play.endId } });
+    } else if (turnView.canDraw) {
+      hub.command(turn.playerId, { type: "intent", intent: { type: "draw" } });
+    } else if (turnView.canKnock) {
+      hub.command(turn.playerId, { type: "intent", intent: { type: "knock" } });
+    } else {
+      return turnView;
+    }
+  }
+  return latestView(players[0]?.messages ?? []);
+}
 
 function boardIds(view: PlayerView | null): string[] {
   if (!view?.board) return [];

@@ -284,7 +284,11 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       meta.status === "lobby" &&
       meta.youId === meta.hostId &&
       meta.seats.length === meta.settings.playerCount,
-    canRematch: status === "complete" && meta.youId === meta.hostId && !meta.ended,
+    canRematch:
+      status === "complete" &&
+      meta.youId === meta.hostId &&
+      !meta.ended &&
+      meta.seats.length === meta.settings.playerCount,
     openingTileId:
       match?.hand?.leaderId === meta.youId ? (match.hand.openingTileId ?? null) : null,
     gameNumber: match?.gameNumber ?? 0,

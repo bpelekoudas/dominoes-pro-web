@@ -77,6 +77,7 @@ export type ClientMessage =
   | { type: "chat"; kind: "text"; text: string }
   | { type: "continue" }
   | { type: "rematch" }
+  | { type: "finish" }
   | {
       type: "solo";
       name: string;
@@ -292,6 +293,7 @@ export class Hub {
     else if (message.type === "chat") this.chat(room, seat, message);
     else if (message.type === "continue") this.continueHand(room, seat);
     else if (message.type === "rematch") this.rematch(room, seat);
+    else if (message.type === "finish") this.finish(room, seat);
     else     if (message.type === "add-bot") this.addBot(room, seat, asDifficulty(message.difficulty));
     else if (message.type === "remove-bot") this.removeBot(room, seat, message.playerId);
     else if (message.type === "set-casual") this.setCasual(room, seat, message.casual === true);
@@ -575,6 +577,10 @@ export class Hub {
       this.tell(seat, { type: "error", message: "Only the host can start another series." });
       return;
     }
+    if (room.seats.length !== room.settings.playerCount) {
+      this.tell(seat, { type: "error", message: "Everyone has to still be here for another series." });
+      return;
+    }
     room.seriesId = makeId("s");
     room.status = "playing";
     this.store.updateRoom(room.id, { status: "playing", series_id: room.seriesId });
@@ -584,6 +590,34 @@ export class Hub {
     );
     this.openHand(room, match);
     this.broadcast(room);
+  }
+
+  /**
+   * Leave a finished table. Results are already saved, so this only drops the
+   * seat. A later reconnect with the old token cannot walk back into the game.
+   */
+  private finish(room: LiveRoom, seat: LiveSeat): void {
+    if (room.status !== "complete" && room.status !== "abandoned") {
+      this.tell(seat, { type: "error", message: "The match is still going." });
+      return;
+    }
+    this.releaseFinishedSeat(room, seat);
+  }
+
+  private releaseFinishedSeat(room: LiveRoom, seat: LiveSeat): void {
+    if (seat.leaveTimer) clearTimeout(seat.leaveTimer);
+    seat.leaveTimer = null;
+    const close = seat.close;
+    seat.send = null;
+    seat.close = null;
+    seat.connected = false;
+    seat.generation += 1;
+    room.seats = room.seats.filter((candidate) => candidate.id !== seat.id);
+    this.byPlayer.delete(seat.id);
+    this.store.deletePlayer(seat.id);
+    if (!room.seats.some((candidate) => !candidate.bot)) this.dropRoom(room);
+    else this.broadcast(room);
+    close?.();
   }
 
   private intent(room: LiveRoom, seat: LiveSeat, intent: Intent): void {
