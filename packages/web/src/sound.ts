@@ -1,9 +1,9 @@
+import { getAudioContext, unlockAudio } from "./audio-context.js";
 import { SOUND_FILES, type Cue, type SoundId, cuesForPlay } from "./cues.js";
+import { duckMusic } from "./music.js";
 
 const MUTE_KEY = "uhoh.mute";
 
-let context: AudioContext | null = null;
-let unlocked = false;
 let decoding: Promise<void> | null = null;
 
 const fetched = new Map<SoundId, Promise<ArrayBuffer>>();
@@ -19,14 +19,8 @@ export function setMuted(muted: boolean): void {
 }
 
 function audio(): AudioContext | null {
-  if (isMuted() || !unlocked) return null;
-  if (!context) {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return null;
-    context = new Ctx();
-  }
-  if (context.state === "suspended") void context.resume();
-  return context;
+  if (isMuted()) return null;
+  return getAudioContext();
 }
 
 /** Fetch the files early so the first play does not wait on the network. */
@@ -46,10 +40,9 @@ export function preloadSounds(): void {
 
 /** Call from the first tap so iOS will allow sound later. */
 export function unlockSound(): void {
-  unlocked = true;
+  const ctx = unlockAudio();
   preloadSounds();
-  const ctx = audio();
-  if (!ctx) return;
+  if (!ctx || isMuted()) return;
   const buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
   const source = ctx.createBufferSource();
   source.buffer = buffer;
@@ -138,6 +131,7 @@ export function playUiClick(): void {
 
 /** Heavy slam, glass, and the cha-ching, in time with the tile landing. */
 export function playUhOh(): void {
+  duckMusic(2400);
   playCues(cuesForPlay(25, "0-1"));
   if (isMuted() || reducedMotion()) return;
   if (typeof navigator.vibrate === "function") navigator.vibrate([24, 30, 48, 24, 90, 36, 130]);

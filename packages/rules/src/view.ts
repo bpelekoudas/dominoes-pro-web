@@ -382,15 +382,7 @@ function promptFor(
       : "Nothing fits. Draw until you can play.";
   }
   if (phase === "knock") return "Nothing fits, and the boneyard is empty. Knock.";
-  if (turnPlayerId === meta.youId) {
-    const opening = match.hand?.openingTileId;
-    if (opening && !match.hand?.board.center) {
-      const tile = tileById(opening);
-      const name = tile.low === tile.high ? `double ${tile.high}` : `${tile.high}–${tile.low}`;
-      return `You lead. Play the ${name}.`;
-    }
-    return "Your turn.";
-  }
+  if (turnPlayerId === meta.youId) return "Your turn.";
   const seat = meta.seats.find((candidate) => candidate.id === turnPlayerId);
   const name = seat?.bot ? `${seat.name} (computer)` : (seat?.name ?? "Someone");
   return `${name}'s turn.`;

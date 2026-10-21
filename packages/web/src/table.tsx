@@ -206,9 +206,7 @@ export function Table({
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
-      {!layout || !frame ? (
-        <p className="empty-felt">The felt is clear. Whoever leads, play a tile.</p>
-      ) : (
+      {layout && frame ? (
         <div
           className="board-scaler"
           style={{ width: frame.w * scale, height: frame.h * scale, transform: `translateY(${lift}px)` }}
@@ -246,7 +244,7 @@ export function Table({
             })}
           </div>
         </div>
-      )}
+      ) : null}
       {moment ? (
         <MomentLayer
           token={moment.key}

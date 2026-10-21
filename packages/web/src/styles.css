@@ -491,7 +491,6 @@ input {
   touch-action: none;
   z-index: 1;
 }
-.empty-felt { text-align: center; padding: 48px 20px; }
 .board-scaler {
   position: relative;
   transition: width 250ms ease, height 250ms ease, transform 250ms ease;
@@ -1421,6 +1420,26 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .arcade-modal h3 { margin: 16px 0 6px; font-family: "Bebas Neue", Impact, sans-serif; letter-spacing: 0.06em; font-size: 1.4rem; }
 .choices.chunky { display: grid; grid-template-columns: repeat(4, 1fr); }
 .choices.chunky button { min-height: 52px; font-family: "Bebas Neue", Impact, sans-serif; font-size: 1.4rem; letter-spacing: 0.06em; }
+.music-choices { margin: 0; }
+.music-choices button { flex: 1 1 30%; min-height: 44px; }
+.music-volume {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 8px;
+  color: var(--paper);
+  font-size: 0.95rem;
+}
+.music-volume input {
+  width: 100%;
+  min-height: 44px;
+  accent-color: var(--gold);
+}
+.music-credit {
+  margin: 0 0 12px;
+  color: rgba(255, 248, 230, 0.72);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 .avatar-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .avatar-grid button {
   min-height: 44px;

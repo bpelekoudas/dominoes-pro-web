@@ -5,6 +5,7 @@ import { seatAround, type SeatEdge } from "./seats.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
 import { demoAward, demoRequested, FxGallery, fxGalleryRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
+import { primeMusic } from "./music";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
@@ -140,13 +141,17 @@ export function App() {
 
   useEffect(() => {
     preloadSounds();
-    const unlock = () => unlockSound();
+    const unlock = () => {
+      unlockSound();
+      primeMusic();
+    };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
 
   const openSocket = (first: object) => {
     unlockSound();
+    primeMusic();
     setError(null);
     connectRef.current(first);
   };
@@ -385,7 +390,7 @@ function Game({
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const cosmetics = useMatchCosmetics();
-  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=3` : null;
+  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=4` : null;
   const tileSkin = cosmetics.skin || "ivory";
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);

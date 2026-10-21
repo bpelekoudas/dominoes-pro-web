@@ -4,6 +4,7 @@ import { AccountChip, type AccountUser } from "./account";
 import { AvatarFace, AvatarPicker, BotBadge, Portrait } from "./avatars";
 import { StoreScreen } from "./store";
 import { RankLine } from "./rank";
+import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume, type MusicChoice } from "./music";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
 
 type BoneyardMode = "draw_one" | "draw_until";
@@ -107,6 +108,8 @@ export function ArcadeHome({
   const [sheet, setSheet] = useState<Sheet>(forced);
   const [tables, setTables] = useState<OpenTable[]>([]);
   const [muted, setMuteState] = useState(isMuted);
+  const [music, setMusic] = useState<MusicChoice>(musicChoice);
+  const [musicLevel, setMusicLevel] = useState(() => Math.round(musicVolume() * 100));
   const readyName = name.trim();
   const [wearTick, setWearTick] = useState(0);
   const [frameId, setFrameId] = useState<string | null>(null);
@@ -420,8 +423,44 @@ export function ArcadeHome({
               setMuted(next);
             })}
           >
-            {muted ? "Sound off" : "Sound on"}
+            {muted ? "Sound effects off" : "Sound effects on"}
           </button>
+          <h3>Music</h3>
+          <div className="choices music-choices" data-music={music} role="group" aria-label="Music">
+            <button type="button" aria-pressed={music === "off"} data-action="music-off" onClick={press(() => { setMusic("off"); setMusicChoice("off"); })}>
+              Off
+            </button>
+            {MUSIC_TRACKS.map((track) => (
+              <button
+                key={track.id}
+                type="button"
+                aria-pressed={music === track.id}
+                data-action={`music-${track.id}`}
+                onClick={press(() => { setMusic(track.id); setMusicChoice(track.id); })}
+              >
+                {track.label}
+              </button>
+            ))}
+          </div>
+          <label className="music-volume">
+            Music volume
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={musicLevel}
+              data-action="music-volume"
+              aria-label="Music volume"
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                setMusicLevel(next);
+                setMusicVolume(next / 100);
+              }}
+            />
+          </label>
+          <p className="music-credit" data-music-credit>
+            These four tracks are CC0 (public domain). Credit is not required. Rap: Lofi Hip Hop Loop — Taylor Harris. Rock: Rock Theme 3 — Umplix. EDM: Synthwave House Loop — Fupi. Classical: Gymnopédie No. 1 — Erik Satie, performed by Teknopazzo.
+          </p>
           <button type="button" className="capsule capsule-red" onClick={press(onAccount)}>
             Sign in
           </button>
