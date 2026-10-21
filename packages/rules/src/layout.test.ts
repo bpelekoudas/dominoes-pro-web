@@ -145,14 +145,17 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
   }
 }
 
-/** Up turns right, right turns down, down turns left, left turns up. Never back toward the spinner. */
-const PINWHEEL: Record<ArmId, readonly string[]> = {
-  north: ["north", "east"],
-  east: ["east", "south"],
-  south: ["south", "west"],
-  west: ["west", "north"],
-};
+function perpendicular(a: string, b: string): boolean {
+  const horizontal = a === "east" || a === "west";
+  const otherHorizontal = b === "east" || b === "west";
+  return horizontal !== otherHorizontal;
+}
 
+/**
+ * An arm leaves along its own direction, then turns 90 degrees at most
+ * twice. It may come back across the open felt. It may not reverse into
+ * the tile it just left.
+ */
 function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): void {
   for (const arm of ARM_IDS) {
     const dirs: string[] = [];
@@ -160,12 +163,15 @@ function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): 
       const placed = layout.tiles.find((item) => item.tileId === tile.tileId);
       expect(placed, `${label} missing ${tile.tileId}`).toBeTruthy();
       if (!placed) continue;
-      expect(PINWHEEL[arm], `${label} ${arm} ${tile.tileId} turned ${placed.direction}`).toContain(placed.direction);
-      if (dirs[dirs.length - 1] !== placed.direction) dirs.push(placed.direction);
+      const prev = dirs[dirs.length - 1];
+      if (prev !== placed.direction) {
+        if (prev) expect(perpendicular(prev, placed.direction), `${label} ${arm} ${prev}>${placed.direction}`).toBe(true);
+        dirs.push(placed.direction);
+      }
     }
+    if (dirs.length === 0) continue;
+    expect(dirs[0], `${label} ${arm} left the spinner ${dirs.join(">")}`).toBe(arm);
     expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(3);
-    if (dirs.length >= 2) expect(dirs[1], `${label} ${arm}`).toBe(PINWHEEL[arm][1]);
-    if (dirs.length === 3) expect(dirs[2], `${label} ${arm} folded back`).toBe(arm);
   }
 }
 
@@ -359,14 +365,44 @@ describe("board layout", () => {
     assertLaidOut(bent, "double at a bend", true);
   });
 
-  it("bends a long arm outward and zooms out instead of folding back", () => {
-    const tiles = chainFrom(tileById("0-0"), 16);
-    const board = boardFromChain(tiles, "east");
-    const layout = layoutBoard(board);
-    const dirs = new Set(layout.tiles.filter((tile) => tile.arm === "east").map((tile) => tile.direction));
-    expect(dirs.has("south")).toBe(true);
-    expect([...dirs].every((dir) => dir === "east" || dir === "south")).toBe(true);
-    assertLaidOut(board, "long east", false);
+  it("snakes a long arm across the felt instead of piling into one corner", () => {
+    const boards = [
+      ["east", boardFromChain(chainFrom(tileById("0-0"), 12), "east")],
+      [
+        "west",
+        boardFromChain(
+          ["6-6", "5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-3", "3-5", "2-5", "2-6", "4-6"].map((id) => tileById(id)),
+          "west",
+        ),
+      ],
+    ] as const;
+    for (const [arm, board] of boards) {
+      const layout = layoutBoard(board);
+      const placed = layout.tiles.filter((tile) => tile.arm === arm);
+      const dirs = new Set(placed.map((tile) => tile.direction));
+      expect(dirs.has(arm), arm).toBe(true);
+      expect(dirs.size, arm).toBeGreaterThan(1);
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const tile of layout.tiles) {
+        minX = Math.min(minX, tile.x);
+        minY = Math.min(minY, tile.y);
+        maxX = Math.max(maxX, tile.x + tile.w);
+        maxY = Math.max(maxY, tile.y + tile.h);
+      }
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      expect(Math.abs(cx), `${arm} centered x`).toBeLessThan(PHONE_WIDTH / 5);
+      expect(Math.abs(cy), `${arm} centered y`).toBeLessThan(PHONE_HEIGHT / 3);
+      expect(maxX - minX, `${arm} uses the width`).toBeGreaterThan(PHONE_WIDTH * 0.55);
+      const reachRight = Math.max(...placed.map((tile) => tile.x + tile.w));
+      const reachLeft = Math.min(...placed.map((tile) => tile.x));
+      expect(reachRight, `${arm} reaches the right`).toBeGreaterThan(24);
+      expect(reachLeft, `${arm} reaches the left`).toBeLessThan(-24);
+      assertLaidOut(board, `balanced ${arm}`, false);
+    }
   });
 
   it("lays out spinner arms without overlaps", () => {
@@ -449,8 +485,9 @@ describe("board layout", () => {
   /**
    * The owner's phone: the up arm ran up, turned, then came back down
    * until its tip sat against the left arm's corner. That fold is rejected.
-   * The up arm may turn right, and only then further up. The left arm may
-   * turn up. Neither comes back toward the spinner.
+   * The up arm may turn right, and only then further up. It may not come
+   * back down or across onto the left arm. The left arm may turn up and,
+   * when the top is open, back across, but not down beside itself.
    */
   it("does not fold the up arm back down beside the left arm", () => {
     const board = ownersCrowdedBoard();
@@ -468,7 +505,6 @@ describe("board layout", () => {
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
     expect(westDirs).not.toContain("south");
-    expect(westDirs).not.toContain("east");
     assertLaidOut(board, "up arm beside left arm", false);
 
     let nearest = Infinity;

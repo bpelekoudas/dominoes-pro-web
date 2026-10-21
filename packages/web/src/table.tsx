@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { FIT_MARGIN, layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { chainBounds, DESK_SCALE_CAP, fitScale, handOverShift, nextBoardScale, PHONE_SCALE_CAP } from "./board-scale.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
@@ -83,30 +84,79 @@ export function Table({
 }) {
   const board = view.board;
   const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
+  const frame = useMemo(() => (layout ? chainBounds(layout.tiles, FIT_MARGIN) : null), [layout]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  const [lift, setLift] = useState(0);
+  const held = useRef<{ hand: string; scale: number } | null>(null);
+  const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
+  const frozen = useRef(false);
+  const handKey = `${view.gameNumber}:${view.handNumber}`;
+  const handOver = view.phase === "between" || view.phase === "over";
+  const lastTileId = view.lastPlay?.tileId ?? null;
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
     const measure = () => {
-      const width = viewport.clientWidth;
-      const height = viewport.clientHeight;
+      // Hand over keeps the last scale. The sheet must not zoom the chain.
+      if (frozen.current && held.current?.hand === handKey) return;
+      let width = viewport.clientWidth;
+      let height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
-      // Keep the chain on the green, inside the wooden rails, on a phone.
-      const padX = 12;
-      const padY = 28;
-      const roomW = Math.max(48, width - padX * 2);
-      const roomH = Math.max(48, height - padY * 2);
-      const next = Math.min(roomW / layout.fit.w, roomH / layout.fit.h, width >= 800 ? 2.4 : 2.2);
+      // The first felt size of the hand is the one that fits the chain.
+      // A later hint, banner, or sheet must not zoom it. A real resize
+      // changes the width and takes a fresh measurement.
+      const locked = feltLock.current;
+      if (locked?.hand === handKey && Math.abs(width - locked.w) < 32) {
+        width = locked.w;
+        height = locked.h;
+      } else {
+        feltLock.current = { hand: handKey, w: width, h: height };
+      }
+      const bounds = chainBounds(layout.tiles, FIT_MARGIN);
+      const computed = fitScale(bounds, { w: width, h: height }, width >= 800 ? DESK_SCALE_CAP : PHONE_SCALE_CAP);
+      const newHand = held.current?.hand !== handKey;
+      const next = nextBoardScale(newHand ? null : (held.current?.scale ?? null), computed, newHand);
+      held.current = { hand: handKey, scale: next };
+      frozen.current = handOver;
       setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [layout]);
+  }, [layout, handOver, handKey]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!handOver || !viewport || !frame) {
+      setLift((current) => (current === 0 ? current : 0));
+      return;
+    }
+    const measure = () => {
+      const felt = viewport.getBoundingClientRect();
+      const sheet = document.querySelector(".hand-summary");
+      const sheetTop = sheet ? sheet.getBoundingClientRect().top : null;
+      const last = lastTileId && layout ? layout.tiles.find((tile) => tile.tileId === lastTileId) : undefined;
+      const local = last ? place(last, frame) : null;
+      const next = Math.round(handOverShift({
+        feltTop: felt.top,
+        feltHeight: felt.height,
+        sheetTop,
+        chainHeight: frame.h * scale,
+        lastTile: local ? { top: local.top * scale, height: local.height * scale } : null,
+      }));
+      setLift((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    const sheet = document.querySelector(".hand-summary");
+    if (sheet) observer.observe(sheet);
+    return () => observer.disconnect();
+  }, [handOver, frame, scale, layout, lastTileId]);
 
   const focusTile = dragTileId ?? selectedTile;
   const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];
@@ -120,11 +170,9 @@ export function Table({
     const ids = new Set(slotKey.split(","));
     return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end), id: end.id }));
   }, [layout, slotKey]);
-  const slots = useScreenBoxes(stageRef, layout, scale, slotBoxes);
+  const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
   const pop = useScorePop(view.lastPlay);
-  const popAt = useAnchor(stageRef, layout, scale, pop?.tileId ?? null, pop?.endId ?? null);
-  const lastTileId = view.lastPlay?.tileId ?? null;
-  const handOver = view.phase === "between" || view.phase === "over";
+  const popAt = useAnchor(stageRef, layout, frame, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
@@ -140,23 +188,28 @@ export function Table({
       data-open-total={view.openTotal}
       data-table-id={view.tableId}
       data-board-scale={scale.toFixed(2)}
+      data-board-lift={String(lift)}
+      data-board-frozen={handOver ? "true" : "false"}
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
-      {!layout ? (
+      {!layout || !frame ? (
         <p className="empty-felt">The felt is clear. Whoever leads, play a tile.</p>
       ) : (
-        <div className="board-scaler" style={{ width: layout.fit.w * scale, height: layout.fit.h * scale }}>
+        <div
+          className="board-scaler"
+          style={{ width: frame.w * scale, height: frame.h * scale, transform: `translateY(${lift}px)` }}
+        >
           <div
             className="board-stage"
             ref={stageRef}
-            style={{ width: layout.fit.w, height: layout.fit.h, transform: `scale(${scale})` }}
+            style={{ width: frame.w, height: frame.h, transform: `scale(${scale})` }}
           >
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
                 className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
-                style={place(tile, layout.fit)}
+                style={place(tile, frame)}
                 data-board-tile={tile.tileId}
               >
                 <Domino a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
@@ -170,7 +223,7 @@ export function Table({
                   key={end.id}
                   type="button"
                   className={`end-cap${hot ? " hot" : ""}${aim ? " aim" : ""}`}
-                  style={place(end, layout.fit)}
+                  style={place(end, frame)}
                   data-end-id={end.id}
                   data-hot={hot ? "true" : "false"}
                   onClick={() => chooseEnd(end.id)}
@@ -249,7 +302,7 @@ interface ScreenBox {
 
 function useScreenBoxes(
   stageRef: { current: HTMLDivElement | null },
-  layout: BoardLayout | null,
+  fit: LayoutBox | null,
   scale: number,
   boxes: Array<LayoutBox & { id: string }>,
 ): ScreenBox[] {
@@ -257,14 +310,14 @@ function useScreenBoxes(
   const key = boxes.map((box) => `${box.id}:${box.x}:${box.y}:${box.w}:${box.h}`).join("|");
   useLayoutEffect(() => {
     const stage = stageRef.current;
-    if (!stage || !layout || boxes.length === 0) {
+    if (!stage || !fit || boxes.length === 0) {
       setPlaced([]);
       return;
     }
     const origin = stage.getBoundingClientRect();
     setPlaced(
       boxes.map((box) => {
-        const local = place(box, layout.fit);
+        const local = place(box, fit);
         return {
           id: box.id,
           left: origin.left + local.left * scale,
@@ -274,7 +327,7 @@ function useScreenBoxes(
         };
       }),
     );
-  }, [stageRef, layout, scale, key, boxes]);
+  }, [stageRef, fit, scale, key, boxes]);
   return placed;
 }
 
@@ -358,6 +411,7 @@ function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: 
 function useAnchor(
   stageRef: { current: HTMLDivElement | null },
   layout: BoardLayout | null,
+  fit: LayoutBox | null,
   scale: number,
   tileId: string | null,
   endId: string | null,
@@ -365,7 +419,7 @@ function useAnchor(
   const [at, setAt] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const stage = stageRef.current;
-    if (!stage || !layout || !tileId) {
+    if (!stage || !layout || !fit || !tileId) {
       setAt(null);
       return;
     }
@@ -377,12 +431,12 @@ function useAnchor(
       return;
     }
     const origin = stage.getBoundingClientRect();
-    const local = place(box, layout.fit);
+    const local = place(box, fit);
     setAt({
       left: origin.left + (local.left + local.width / 2) * scale,
       top: origin.top + local.top * scale,
     });
-  }, [stageRef, layout, scale, tileId, endId]);
+  }, [stageRef, layout, fit, scale, tileId, endId]);
   return at;
 }
 

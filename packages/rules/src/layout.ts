@@ -14,13 +14,14 @@ import { ARM_IDS, openEnds } from "./board.js";
  * Width is 416 so the tile forced straight off an early double still
  * lands inside: spinner, one tile, a double, then a full tile.
  *
- * An arm leaves the spinner and stays in its own quadrant. It runs
- * straight, then bends once in a clockwise pinwheel: up turns right,
- * right turns down, down turns left, left turns up. A second bend is
- * allowed only when it turns further away from the spinner and keeps a
- * full tile of clearance. The chain never folds back toward the middle.
- * If a bend would crowd another chain, the arm stays straight and the
- * felt zooms out.
+ * An arm leaves the spinner in its own quadrant. It runs straight, then
+ * bends at the edge of the phone. The first bend prefers the clockwise
+ * side (up turns right, right turns down, down turns left, left turns
+ * up) unless the other side is clearly emptier. A second bend prefers
+ * to keep going outward, but turns back across the open felt when that
+ * uses the empty half of the table and still keeps a full tile of
+ * clearance. The chain does not fold onto another arm or onto itself.
+ * If neither bend fits, the arm stays straight and the felt zooms out.
  *
  * A double sits crosswise to the chain. The next tile continues in the
  * same direction, its short end centred on the double's long side.
@@ -149,10 +150,17 @@ export function layoutBoard(board: BoardState): BoardLayout {
 }
 
 /**
- * Go straight. Bend once, clockwise, when the straight tile would leave
- * the phone or crowd another run. A second bend only turns further away
- * from the spinner. Otherwise stay straight and let the view zoom out.
- * A double, and the tile centred on it, never bend.
+ * One tile of imbalance. The outward bend wins a tie. The other way
+ * wins when it pulls the chain's box clearly closer to the spinner.
+ */
+const TURN_BIAS = 72;
+
+/**
+ * Go straight while the next tile fits on the phone. Bend when it would
+ * leave the felt or crowd another run. The clockwise / outward turn is
+ * preferred, and the other perpendicular is used when the rest of that
+ * run would sit in the empty half of the table. A double, and the tile
+ * centred on it, never bend.
  */
 function chooseStep(
   tile: OrientedTile,
@@ -174,21 +182,76 @@ function chooseStep(
   if (straightOk) return keep;
 
   if (cursor.bends >= 2) return keep;
-  const turn: LayoutDir = cursor.dir === home ? clockwise(home) : home;
+  // First bend: clockwise, or the other way when that side is open.
+  // Second bend: further outward, or back across the empty felt.
+  const preferred: LayoutDir = cursor.dir === home ? clockwise(home) : home;
+  const alternate = opposite(preferred);
   const secondBend = cursor.bends >= 1;
-  for (const box of bendChoices(cursor.box, cursor.dir, turn, isDouble)) {
-    if (secondBend && !pointsAway(box, turn)) continue;
-    if (!fits(box, home, occupants, centre, true, cursor.box)) continue;
-    // The next run is parallel to this arm's first run. A double sits
-    // crosswise and is wider than a normal tile, so the lane has to
-    // clear a full double, not just the tile in hand.
-    if (secondBend && !laneFitsDouble(turn, box, home, occupants, centre)) continue;
-    // The double stays centred on the new line. It may hang past the
-    // phone edge; the view zooms out. It may not crowd another chain.
-    if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false)) continue;
-    return { box, dir: turn, bends: cursor.bends + 1 };
+  let best: { box: LayoutBox; dir: LayoutDir; score: number } | null = null;
+  for (const turn of [preferred, alternate]) {
+    const pinwheel = turn === preferred;
+    const choices = bendChoices(cursor.box, cursor.dir, turn, isDouble);
+    for (let slide = 0; slide < choices.length; slide += 1) {
+      const box = choices[slide]!;
+      // The outward turn stays in the arm's quadrant. The turn toward
+      // open felt may cross the midline, but not another chain.
+      if (!fits(box, home, occupants, centre, true, cursor.box, pinwheel)) continue;
+      if (secondBend && pinwheel && !pointsAway(box, turn)) continue;
+      if (secondBend && !laneFitsDouble(turn, box, home, occupants, centre, pinwheel)) continue;
+      if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false, pinwheel)) continue;
+      const score = projectedImbalance(box, turn, upcoming, occupants, centre)
+        - (pinwheel ? TURN_BIAS : 0)
+        + slide * 4;
+      if (!best || score < best.score) best = { box, dir: turn, score };
+    }
   }
-  return keep;
+  if (!best) return keep;
+  return { box: best.box, dir: best.dir, bends: cursor.bends + 1 };
+}
+
+/** How far the chain's box sits from the spinner after a short run this way. */
+function projectedImbalance(
+  start: LayoutBox,
+  dir: LayoutDir,
+  upcoming: readonly OrientedTile[],
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+): number {
+  const boxes: LayoutBox[] = occupants.map((item) => item.box);
+  boxes.push(start);
+  let prev = start;
+  const limit = Math.min(upcoming.length, 7);
+  for (let index = 1; index < limit; index += 1) {
+    const nextTile = upcoming[index]!;
+    const next = straightBox(prev, dir, nextTile.low === nextTile.high);
+    if (!insidePhone(next) || overlapsAny(next, boxes) || intersectsBox(next, centre)) break;
+    let crowded = false;
+    for (const other of boxes) {
+      if (sameBox(other, prev)) continue;
+      if (boxGap(next, other) < ARM_GAP) {
+        crowded = true;
+        break;
+      }
+    }
+    if (crowded) break;
+    boxes.push(next);
+    prev = next;
+  }
+  return bboxImbalance(boxes);
+}
+
+function bboxImbalance(boxes: readonly LayoutBox[]): number {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + box.w);
+    maxY = Math.max(maxY, box.y + box.h);
+  }
+  return Math.abs((minX + maxX) / 2) + Math.abs((minY + maxY) / 2);
 }
 
 function bendChoices(prev: LayoutBox, from: LayoutDir, to: LayoutDir, isDouble: boolean): LayoutBox[] {
@@ -215,17 +278,18 @@ function roomForDouble(
   occupants: readonly Occupant[],
   centre: LayoutBox,
   phone: boolean,
+  quadrant = true,
 ): boolean {
   const next = upcoming[1];
   if (!next || next.low !== next.high) return true;
   const owned: Occupant[] = [...occupants, { box, arm: home }];
   const doubleBox = straightBox(box, dir, true);
-  if (!fits(doubleBox, home, owned, centre, phone, box)) return false;
+  if (!fits(doubleBox, home, owned, centre, phone, box, quadrant)) return false;
   const after = upcoming[2];
   if (!after) return true;
   const afterBox = straightBox(doubleBox, dir, after.low === after.high);
   const withDouble: Occupant[] = [...owned, { box: doubleBox, arm: home }];
-  return fits(afterBox, home, withDouble, centre, phone, doubleBox);
+  return fits(afterBox, home, withDouble, centre, phone, doubleBox, quadrant);
 }
 
 /**
@@ -239,9 +303,10 @@ function laneFitsDouble(
   home: ArmId,
   occupants: readonly Occupant[],
   centre: LayoutBox,
+  quadrant = true,
 ): boolean {
   const doubleBox = straightBox(box, dir, true);
-  if (!inQuadrant(doubleBox, home) || !insideHard(doubleBox)) return false;
+  if ((quadrant && !inQuadrant(doubleBox, home)) || !insideHard(doubleBox)) return false;
   if (overlapsAny(doubleBox, occupants.map((item) => item.box))) return false;
   if (intersectsBox(doubleBox, centre)) return false;
   for (const other of occupants) {
@@ -282,8 +347,9 @@ function fits(
   centre: LayoutBox,
   phone: boolean,
   prev: LayoutBox,
+  quadrant = true,
 ): boolean {
-  if (!insideHard(box) || !inQuadrant(box, home)) return false;
+  if (!insideHard(box) || (quadrant && !inQuadrant(box, home))) return false;
   if (phone && !insidePhone(box)) return false;
   if (overlapsAny(box, occupants.map((item) => item.box))) return false;
   if (intersectsBox(box, centre)) return false;
@@ -404,6 +470,13 @@ function clockwise(dir: LayoutDir): LayoutDir {
   if (dir === "south") return "west";
   if (dir === "west") return "north";
   return "east";
+}
+
+function opposite(dir: LayoutDir): LayoutDir {
+  if (dir === "east") return "west";
+  if (dir === "west") return "east";
+  if (dir === "north") return "south";
+  return "north";
 }
 
 export function boxesOverlap(a: LayoutBox, b: LayoutBox): boolean {

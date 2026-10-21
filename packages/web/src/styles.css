@@ -165,11 +165,22 @@ input {
   padding-right: env(safe-area-inset-right);
 }
 .felt-column {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+/* A reconnect or error note sits over the rail. It must not steal felt height
+   and zoom the chain. */
+.felt-column > .banner {
+  position: absolute;
+  z-index: 30;
+  top: 52px;
+  left: 8px;
+  right: 8px;
+  margin: 0;
 }
 .topbar, .hint, .actions, .draw-note {
   padding-left: 14px;
@@ -427,6 +438,8 @@ input {
   white-space: nowrap;
   pointer-events: none;
 }
+.your-turn.reserved,
+.turn-bar.reserved { visibility: hidden; }
 .status-line {
   position: relative;
   z-index: 4;
@@ -435,6 +448,10 @@ input {
   gap: 4px 8px;
   align-items: baseline;
   max-width: 100%;
+  height: 3.6em;
+  min-height: 3.6em;
+  max-height: 3.6em;
+  overflow: hidden;
   margin: 0;
   padding: 4px 8px;
   border-radius: 12px;
@@ -445,6 +462,7 @@ input {
   overflow: visible;
   pointer-events: none;
 }
+.status-line:empty { background: transparent; }
 .status-math { flex: none; font-variant-numeric: tabular-nums; }
 .status-prompt { color: var(--muted); white-space: normal; }
 .top-actions { display: flex; gap: 8px; }
@@ -474,13 +492,16 @@ input {
   z-index: 1;
 }
 .empty-felt { text-align: center; padding: 48px 20px; }
-.board-scaler { position: relative; }
+.board-scaler {
+  position: relative;
+  transition: width 250ms ease, height 250ms ease, transform 250ms ease;
+}
 .board-stage {
   position: absolute;
   top: 0;
   left: 0;
   transform-origin: top left;
-  transition: transform 280ms ease;
+  transition: transform 250ms ease;
 }
 .board-tile, .end-cap { position: absolute; }
 .board-tile { min-width: 0; min-height: 0; }
@@ -933,7 +954,6 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   max-height: 54dvh;
   border-radius: 16px 16px 0 0;
 }
-.felt-app.showing-result .table-frame { flex: none; height: 44dvh; }
 .felt-app.showing-result .hand-tray { visibility: hidden; }
 .winner-row {
   display: flex;
@@ -1182,7 +1202,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .hand-tile, .hand-tile.playable, .hand-tile.selected { transform: none; }
-  .board-stage, .drag-ghost.spring, .score-pop, .bone-pile.pulse { animation: none; transition: none; }
+  .board-scaler, .board-stage, .drag-ghost.spring, .score-pop, .bone-pile.pulse { animation: none; transition: none; }
   .score-pop { opacity: 1; }
   .uhoh-slam, .uhoh-cracks, .uhoh-flash { display: none; }
   .table-scroll.shaking, .uhoh-preview.shaking, .fx-board.shaking { animation: none; }

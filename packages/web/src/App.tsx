@@ -366,7 +366,7 @@ function Game({
 }) {
   const link = tableLink(view.roomCode, window.__UHOH__?.publicUrl, location.origin);
   const cosmetics = useMatchCosmetics();
-  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=2` : null;
+  const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=3` : null;
   const tileSkin = cosmetics.skin || "ivory";
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
@@ -526,8 +526,8 @@ function Game({
                 ) : null}
               </div>
               <div className="tray-copy">
-                {yourTurn ? <p className="your-turn">Your turn</p> : null}
-                {yourTurn ? <TurnBar view={view} /> : null}
+                <p className={`your-turn${yourTurn ? "" : " reserved"}`}>Your turn</p>
+                {yourTurn ? <TurnBar view={view} /> : <div className="turn-bar reserved" aria-hidden="true" />}
                 <StatusLine view={view} />
                 {demoRequested() ? (
                   <button type="button" className="uhoh-test" data-demo="uhoh" onClick={() => setReplayToken((value) => value + 1)}>
@@ -802,7 +802,6 @@ function StatusLine({ view }: { view: PlayerView }) {
   const note = drawNote(view);
   const prompt = view.prompt === "Your turn." ? null : view.prompt;
   const text = note ?? prompt;
-  if (!math && !text) return null;
   return (
     <p className="status-line" data-phase={view.phase}>
       {math ? <span className="status-math">{math}</span> : null}
