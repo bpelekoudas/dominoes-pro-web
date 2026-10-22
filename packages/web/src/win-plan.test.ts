@@ -143,9 +143,10 @@ describe("win banners", () => {
       seriesWinner: true,
       reduced: false,
     });
-    expect(worst.steps.map((step) => step.stage)).toEqual(["uhoh", "reveal", "banner", "sheet"]);
+    expect(worst.steps.map((step) => step.stage)).toEqual(["uhoh", "reveal", "banner", "lineup", "sheet"]);
     expect(worst.steps[2]?.banner).toBe("match");
     expect(worst.steps[2]?.ms).toBe(MATCH_BANNER_MS);
+    expect(worst.steps[3]).toEqual({ stage: "lineup", ms: 0 });
     expect(worst.untilSheet).toBeLessThan(9000);
 
     const game = celebrationTimeline({
@@ -158,6 +159,7 @@ describe("win banners", () => {
     });
     expect(game.steps.map((step) => step.banner ?? step.stage)).toEqual(["reveal", "game", "sheet"]);
     expect(game.steps[1]?.ms).toBe(GAME_BANNER_MS);
+    expect(game.steps.some((step) => step.stage === "lineup")).toBe(false);
 
     const quiet = celebrationTimeline({
       reason: "score",

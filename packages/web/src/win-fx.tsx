@@ -1,10 +1,13 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PlayerView } from "@uhoh/rules";
+import { isAvatarId } from "../../rules/src/avatars.js";
 import { scoreDomino } from "../../rules/src/score.js";
 import { Portrait, AvatarFace } from "./avatars";
+import { MatchLineup } from "./lineup";
 import { prefersReducedMotion } from "./moment";
 import { seatAround } from "./seats";
 import { playWinSting } from "./sound";
+import { matchLineSeed, winLineFor } from "./win-lines";
 import { Domino } from "./table";
 import {
   GAME_BANNER_MS,
@@ -45,7 +48,8 @@ export interface WinScoreState {
   hot: Record<string, boolean>;
 }
 
-type Stage = "idle" | "wait" | "pips" | "banner" | "done";
+type Stage = "idle" | "wait" | "pips" | "banner" | "lineup" | "done";
+type FreezeStage = "pips" | "banner" | "lineup";
 
 export interface HandCelebration {
   active: boolean;
@@ -77,7 +81,7 @@ export function useWinScore(playerId: string, score: number): { score: number; p
 
 const stung = new Set<string>();
 
-function playWinStingOnce(key: string, kind: "hand" | "game" | "match"): void {
+function playWinStingOnce(key: string, kind: "hand" | "game" | "match" | "lineup"): void {
   if (stung.has(key)) return;
   stung.add(key);
   playWinSting(kind);
@@ -143,7 +147,7 @@ function handKeyOf(view: PlayerView): string {
 
 export function useHandCelebration(
   view: PlayerView,
-  freeze: { at: number; stage: "pips" | "banner" } | null = null,
+  freeze: { at: number; stage: FreezeStage } | null = null,
 ): HandCelebration {
   const active = Boolean(
     view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended,
@@ -210,6 +214,14 @@ export function useHandCelebration(
       setStage("done");
       setSheet(true);
     };
+    const goLineup = () => {
+      setStage("lineup");
+      playWinStingOnce(`${keyNow}:lineup`, "lineup");
+    };
+    const afterBanner = (kind: BannerKindName) => {
+      if (kind === "match") goLineup();
+      else goSheet();
+    };
     const goBannerOrSheet = () => {
       const bannerNow = bannerRef.current;
       setShown(finalRef.current);
@@ -221,7 +233,7 @@ export function useHandCelebration(
       setStage("banner");
       playWinStingOnce(`${keyNow}:banner`, bannerNow.kind === "match" ? "match" : "game");
       const ms = bannerNow.kind === "match" ? MATCH_BANNER_MS : GAME_BANNER_MS;
-      timers.current.push(window.setTimeout(goSheet, ms));
+      timers.current.push(window.setTimeout(() => afterBanner(bannerNow.kind), ms));
     };
     const startPips = () => {
       setStage("pips");
@@ -253,9 +265,9 @@ export function useHandCelebration(
   const stageNow: Stage = !active || !plan ? "idle" : freeze ? freeze.stage : stage === "idle" ? (waitMs > 0 ? "wait" : "pips") : stage;
   const visible = (() => {
     if (!plan) return base;
-    if (freeze) return reduced || freeze.stage === "banner" ? final : scoreAt(base, plan, freeze.at, false);
+    if (freeze) return reduced || freeze.stage === "banner" || freeze.stage === "lineup" ? final : scoreAt(base, plan, freeze.at, false);
     if (reduced && active) return final;
-    if (stage === "banner" || stage === "done") return final;
+    if (stage === "banner" || stage === "lineup" || stage === "done") return final;
     if (stage === "pips" && Object.keys(shown).length > 0) return shown;
     return base;
   })();
@@ -270,7 +282,7 @@ export function useHandCelebration(
   const skip = () => {
     if (freeze) return;
     const current = stageRef.current;
-    if (current !== "pips" && current !== "banner") return;
+    if (current !== "pips" && current !== "banner" && current !== "lineup") return;
     clearTimers();
     setShown(finalRef.current);
     setPulse({});
@@ -281,10 +293,20 @@ export function useHandCelebration(
       const ms = bannerNow.kind === "match" ? MATCH_BANNER_MS : GAME_BANNER_MS;
       timers.current.push(
         window.setTimeout(() => {
+          if (bannerNow.kind === "match") {
+            setStage("lineup");
+            playWinStingOnce(`${keyRef.current}:lineup`, "lineup");
+            return;
+          }
           setStage("done");
           setSheet(true);
         }, ms),
       );
+      return;
+    }
+    if (current === "banner" && bannerNow?.kind === "match") {
+      setStage("lineup");
+      playWinStingOnce(`${keyRef.current}:lineup`, "lineup");
       return;
     }
     setStage("done");
@@ -553,18 +575,27 @@ export function WinShow({
   );
 }
 
-export function winPreviewRequested(): "pips" | "game" | "match" | null {
+export type WinPreviewMode = "pips" | "game" | "match" | "lineup";
+
+export function winPreviewRequested(): WinPreviewMode | null {
   const win = new URLSearchParams(location.search).get("win");
-  if (win === "pips" || win === "game" || win === "match") return win;
+  if (win === "pips" || win === "game" || win === "match" || win === "lineup") return win;
   return null;
 }
 
-function readFreeze(mode: "pips" | "game" | "match"): { at: number; stage: "pips" | "banner" } | null {
+function readFreeze(mode: WinPreviewMode): { at: number; stage: FreezeStage } | null {
+  if (mode === "lineup") return { at: 0, stage: "lineup" };
   const raw = new URLSearchParams(location.search).get("t");
   if (raw == null || raw === "") return null;
   const at = Number(raw);
   if (!Number.isFinite(at)) return null;
   return { at, stage: mode === "pips" ? "pips" : "banner" };
+}
+
+function previewWinnerAvatar(): string {
+  const raw = new URLSearchParams(location.search).get("winner");
+  if (!raw || !isAvatarId(raw) || raw === "homescreen") return "2hot4tv";
+  return raw;
 }
 
 const PREVIEW_TILES = [
@@ -573,20 +604,31 @@ const PREVIEW_TILES = [
   { id: "1-1", low: 1, high: 1 },
 ];
 
-function previewView(mode: "pips" | "game" | "match"): PlayerView {
-  const youWinHand = mode !== "match";
-  const awards = youWinHand ? scoreDomino({ you: 0, rio: 17 }, "you") : scoreDomino({ you: 17, rio: 0 }, "rio");
-  const youScore = youWinHand ? 55 : 30;
-  const rioScore = youWinHand ? 20 : 85;
-  const gameWinner = mode === "pips" ? null : mode === "game" ? "you" : "rio";
-  const seriesWinner = mode === "match" ? "rio" : null;
-  const seat = (id: string, name: string, score: number, tiles: number, isYou: boolean) => ({
+function loserAvatar(slot: number, winner: string): string {
+  const prefs = ["surfer", "hipster", "golfer", "barista", "grungerocker"].filter((id) => id !== winner);
+  return prefs[slot] ?? "biker";
+}
+
+function previewView(mode: WinPreviewMode): PlayerView {
+  const match = mode === "match" || mode === "lineup";
+  const winnerAvatar = previewWinnerAvatar();
+  const seriesWinner = match ? "you" : null;
+  const gameWinnerId = mode === "pips" ? null : mode === "game" ? "you" : "rio";
+  const seat = (
+    id: string,
+    name: string,
+    score: number,
+    tiles: number,
+    isYou: boolean,
+    avatarId: string,
+    index: number,
+  ) => ({
     id,
     name,
-    seat: isYou ? 0 : 1,
+    seat: index,
     connected: true,
     score,
-    gamesWon: seriesWinner === id ? 2 : 0,
+    gamesWon: seriesWinner === id || (mode === "game" && id === "you") ? 2 : 0,
     tileCount: tiles,
     isYou,
     isTurn: false,
@@ -594,7 +636,7 @@ function previewView(mode: "pips" | "game" | "match"): PlayerView {
     accountBot: false,
     difficulty: isYou ? null : ("medium" as const),
     rank: null,
-    avatarId: "homescreen",
+    avatarId,
     frameId: null,
     effectId: "glass",
     effectItemId: null,
@@ -602,75 +644,156 @@ function previewView(mode: "pips" | "game" | "match"): PlayerView {
     tileSkin: "ivory",
     tableId: "TBL-011",
   });
-  const youTiles = youWinHand ? [] : PREVIEW_TILES;
-  const rioTiles = youWinHand ? PREVIEW_TILES : [];
+  if (!match) {
+    const awards = scoreDomino({ you: 0, rio: 17 }, "you");
+    const youTiles: typeof PREVIEW_TILES = [];
+    const rioTiles = PREVIEW_TILES;
+    return {
+      roomCode: "WINFX",
+      status: "playing",
+      yourId: "you",
+      hostId: "you",
+      settings: { playerCount: 2, boneyardMode: "draw_until", seriesLength: 3, targetScore: 150, casual: true },
+      players: [
+        seat("you", "Alex", 55, youTiles.length, true, "homescreen", 0),
+        seat("rio", "Rio", 20, rioTiles.length, false, "homescreen", 1),
+      ],
+      you: { hand: youTiles },
+      board: null,
+      openEnds: [],
+      openTotal: 0,
+      openEquation: null,
+      boneyardCount: 0,
+      turnPlayerId: null,
+      phase: "between",
+      turnDeadline: null,
+      turnBudgetMs: 30_000,
+      serverNow: Date.now(),
+      betweenHands: true,
+      continueDeadline: Date.now() + 9000,
+      ended: null,
+      prompt: "Hand over.",
+      legalPlays: [],
+      canDraw: false,
+      canKnock: false,
+      canStart: false,
+      canRematch: false,
+      openingTileId: null,
+      gameNumber: 1,
+      handNumber: 4,
+      winsNeeded: 2,
+      seriesWinnerId: null,
+      lastHand: {
+        summary: "Alex went out and took 15 from the table.",
+        reason: "domino",
+        gameWinnerId,
+        seriesWinnerId: null,
+        winnerIds: ["you"],
+        nextLeaderId: "you",
+        pipCounts: { you: 0, rio: 17 },
+        leftoverAwards: awards,
+        placements: [
+          { playerId: "you", place: 1, pips: 0, tied: false },
+          { playerId: "rio", place: 2, pips: 17, tied: false },
+        ],
+        remaining: [
+          { playerId: "you", pips: 0, tiles: youTiles },
+          { playerId: "rio", pips: 17, tiles: rioTiles },
+        ],
+        scoresAfter: { you: 55, rio: 20 },
+        gameNumber: 1,
+        handNumber: 4,
+      },
+      recap: null,
+      quick: null,
+      tableId: "TBL-011",
+      lastPlay: { playerId: "you", tileId: "0-0", endId: "lead", total: 0, awarded: 0, seq: 1 },
+      lastDraw: null,
+      taunts: [],
+    };
+  }
+  const rioTiles = [{ id: "6-6", low: 6, high: 6 }];
+  const samTiles = [{ id: "4-4", low: 4, high: 4 }];
+  const jordanTiles = [{ id: "3-4", low: 3, high: 4 }];
+  const pipCounts = { you: 0, rio: 12, sam: 8, jordan: 7 };
+  const awards = scoreDomino(pipCounts, "you");
+  const scores = { you: 160, rio: 40, sam: 55, jordan: 30 };
   return {
     roomCode: "WINFX",
-    status: mode === "match" ? "complete" : "playing",
+    status: "complete",
     yourId: "you",
     hostId: "you",
-    settings: { playerCount: 2, boneyardMode: "draw_until", seriesLength: 3, targetScore: 150, casual: true },
-    players: [seat("you", "Alex", youScore, youTiles.length, true), seat("rio", "Rio", rioScore, rioTiles.length, false)],
-    you: { hand: youTiles },
+    settings: { playerCount: 4, boneyardMode: "draw_until", seriesLength: 3, targetScore: 150, casual: true },
+    players: [
+      seat("you", "Alex", scores.you, 0, true, winnerAvatar, 0),
+      seat("rio", "Rio", scores.rio, rioTiles.length, false, loserAvatar(0, winnerAvatar), 1),
+      seat("sam", "Sam", scores.sam, samTiles.length, false, loserAvatar(1, winnerAvatar), 2),
+      seat("jordan", "Jordan", scores.jordan, jordanTiles.length, false, loserAvatar(2, winnerAvatar), 3),
+    ],
+    you: { hand: [] },
     board: null,
     openEnds: [],
     openTotal: 0,
     openEquation: null,
     boneyardCount: 0,
     turnPlayerId: null,
-    phase: mode === "match" ? "over" : "between",
+    phase: "over",
     turnDeadline: null,
     turnBudgetMs: 30_000,
     serverNow: Date.now(),
-    betweenHands: mode !== "match",
-    continueDeadline: mode === "match" ? null : Date.now() + 9000,
+    betweenHands: false,
+    continueDeadline: null,
     ended: null,
-    prompt: "Hand over.",
+    prompt: "Series over.",
     legalPlays: [],
     canDraw: false,
     canKnock: false,
     canStart: false,
-    canRematch: mode === "match",
+    canRematch: true,
     openingTileId: null,
     gameNumber: 1,
     handNumber: 4,
     winsNeeded: 2,
-    seriesWinnerId: seriesWinner,
+    seriesWinnerId: "you",
     lastHand: {
-      summary: youWinHand ? "Alex went out and took 15 from the table." : "Rio went out and took 15 from the table.",
+      summary: "Alex went out and took the match.",
       reason: "domino",
-      gameWinnerId: gameWinner,
-      seriesWinnerId: seriesWinner,
-      winnerIds: [youWinHand ? "you" : "rio"],
-      nextLeaderId: youWinHand ? "you" : "rio",
-      pipCounts: youWinHand ? { you: 0, rio: 17 } : { you: 17, rio: 0 },
+      gameWinnerId: "you",
+      seriesWinnerId: "you",
+      winnerIds: ["you"],
+      nextLeaderId: "you",
+      pipCounts,
       leftoverAwards: awards,
       placements: [
-        { playerId: youWinHand ? "you" : "rio", place: 1, pips: 0, tied: false },
-        { playerId: youWinHand ? "rio" : "you", place: 2, pips: 17, tied: false },
+        { playerId: "you", place: 1, pips: 0, tied: false },
+        { playerId: "jordan", place: 2, pips: 7, tied: false },
+        { playerId: "sam", place: 3, pips: 8, tied: false },
+        { playerId: "rio", place: 4, pips: 12, tied: false },
       ],
       remaining: [
-        { playerId: "you", pips: youWinHand ? 0 : 17, tiles: youTiles },
-        { playerId: "rio", pips: youWinHand ? 17 : 0, tiles: rioTiles },
+        { playerId: "you", pips: 0, tiles: [] },
+        { playerId: "rio", pips: 12, tiles: rioTiles },
+        { playerId: "sam", pips: 8, tiles: samTiles },
+        { playerId: "jordan", pips: 7, tiles: jordanTiles },
       ],
-      scoresAfter: { you: youScore, rio: rioScore },
+      scoresAfter: scores,
       gameNumber: 1,
       handNumber: 4,
     },
     recap: null,
     quick: null,
     tableId: "TBL-011",
-    lastPlay: { playerId: youWinHand ? "you" : "rio", tileId: "0-0", endId: "lead", total: 0, awarded: 0, seq: 1 },
+    lastPlay: { playerId: "you", tileId: "0-0", endId: "lead", total: 0, awarded: 0, seq: 1 },
     lastDraw: null,
     taunts: [],
   };
 }
 
-function PreviewSeat({ id, name, score }: { id: string; name: string; score: number }) {
+function PreviewSeat({ id, name, score, avatarId }: { id: string; name: string; score: number; avatarId: string }) {
   const live = useWinScore(id, score);
   return (
     <div className={`seat-chip${id === "you" ? " you" : ""}${live.hot ? " win-hot" : ""}`} data-player-id={id}>
-      <AvatarFace id="homescreen" />
+      <AvatarFace id={avatarId} />
       <span className="chip-text">
         <span className="chip-name">{name}</span>
         <span className="chip-meta">
@@ -683,46 +806,55 @@ function PreviewSeat({ id, name, score }: { id: string; name: string; score: num
   );
 }
 
-export function WinPreview({ mode }: { mode: "pips" | "game" | "match" }) {
+function lineupCast(view: PlayerView) {
+  return view.players.map((player) => ({ id: player.id, name: player.name, avatarId: player.avatarId }));
+}
+
+export function WinPreview({ mode }: { mode: WinPreviewMode }) {
   const view = useMemo(() => previewView(mode), [mode]);
   const freeze = useMemo(() => readFreeze(mode), [mode]);
   const win = useHandCelebration(view, freeze);
-  const youTiles = mode === "match" ? PREVIEW_TILES : [];
-  const rioTiles = mode === "match" ? [] : PREVIEW_TILES;
+  const seated = seatAround(view.players);
+  const you = seated.find((seat) => seat.edge === "bottom");
+  const match = mode === "match" || mode === "lineup";
+  const settled = win.reduced || win.frozenAt != null;
+  const winnerName = view.players.find((player) => player.id === view.seriesWinnerId)?.name ?? "Rio";
   return (
     <WinScoreContext.Provider value={win.scores}>
       <main className="felt-app win-preview" data-tile-skin="ivory" data-win-stage={win.stage} data-screen="win-preview">
         <div
           className="win-preview-table"
           data-win-board="true"
+          data-players={view.players.length}
           data-table-id="TBL-011"
           style={{ backgroundImage: "url(/store/TBL-011.webp?v=7)" }}
         >
-          <div className="rail rail-top" data-edge="top" data-player-id="rio" data-tiles={rioTiles.length}>
-            <PreviewSeat id="rio" name="Rio" score={mode === "match" ? 85 : 20} />
-            <div className="backs backs-top" aria-hidden="true">
-              {rioTiles.map((tile) => (
-                <i key={tile.id} className="tile-back" />
-              ))}
-            </div>
-          </div>
+          {seated
+            .filter((seat) => seat.edge !== "bottom")
+            .map((seat) => (
+              <div key={seat.player.id} className={`rail rail-${seat.edge}`} data-edge={seat.edge} data-player-id={seat.player.id}>
+                <PreviewSeat id={seat.player.id} name={seat.player.name} score={seat.player.score} avatarId={seat.player.avatarId} />
+              </div>
+            ))}
           <div className="win-preview-chain" aria-hidden="true">
             <Domino a={6} b={6} orientation="vertical" spinner />
             <Domino a={6} b={3} orientation="horizontal" />
             <Domino a={3} b={1} orientation="vertical" />
           </div>
-          {youTiles.length > 0 ? (
+          {view.you.hand.length > 0 ? (
             <div className="preview-hand hand">
-              {youTiles.map((tile) => (
+              {view.you.hand.map((tile) => (
                 <div key={tile.id} className="hand-tile" data-tile-id={tile.id}>
                   <Domino a={tile.low} b={tile.high} orientation="vertical" />
                 </div>
               ))}
             </div>
           ) : null}
-          <div className="you-float">
-            <PreviewSeat id="you" name="You" score={mode === "match" ? 30 : 55} />
-          </div>
+          {you ? (
+            <div className="you-float">
+              <PreviewSeat id={you.player.id} name="You" score={you.player.score} avatarId={you.player.avatarId} />
+            </div>
+          ) : null}
         </div>
         {win.plan && (win.stage === "pips" || win.stage === "banner") ? (
           <WinShow
@@ -737,23 +869,43 @@ export function WinPreview({ mode }: { mode: "pips" | "game" | "match" }) {
             onLand={win.onLand}
           />
         ) : null}
+        {win.stage === "lineup" && win.banner ? (
+          <MatchLineup
+            players={lineupCast(view)}
+            winnerId={win.banner.winnerId}
+            line={winLineFor(
+              win.banner.avatarId,
+              matchLineSeed(view.roomCode, view.gameNumber, view.handNumber, win.banner.winnerId),
+            )}
+            motion={settled ? "off" : "on"}
+            instant={settled}
+            onContinue={win.skip}
+          />
+        ) : null}
         {win.sheet ? (
-          <div className="preview-continue match-over-actions">
-            {mode === "match" ? (
-              <>
+          match ? (
+            <section className="hand-summary" data-screen="series">
+              <p className="result-kicker">Series over</p>
+              <div className="winner-row">
+                <h2>{winnerName} won the hand</h2>
+              </div>
+              <p>{view.lastHand?.summary}</p>
+              <div className="match-over-actions">
                 <button type="button" className="secondary" data-action="rematch">
                   Play Again
                 </button>
                 <button type="button" className="primary" data-action="leave-match">
                   Leave Match
                 </button>
-              </>
-            ) : (
+              </div>
+            </section>
+          ) : (
+            <div className="preview-continue match-over-actions">
               <button type="button" className="primary" data-action="continue">
                 Continue
               </button>
-            )}
-          </div>
+            </div>
+          )
         ) : null}
       </main>
     </WinScoreContext.Provider>

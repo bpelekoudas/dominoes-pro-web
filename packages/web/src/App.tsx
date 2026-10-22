@@ -14,6 +14,8 @@ import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
 import { AvatarFace, BotBadge } from "./avatars";
 import { useMatchCosmetics } from "./store";
+import { MatchLineup } from "./lineup";
+import { matchLineSeed, winLineFor } from "./win-lines";
 import { useHandCelebration, useWinScore, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 
 interface ChatLine {
@@ -622,6 +624,19 @@ function Game({
           frozenAt={win.frozenAt}
           onSkip={win.skip}
           onLand={win.onLand}
+        />
+      ) : null}
+      {win.stage === "lineup" && win.banner ? (
+        <MatchLineup
+          players={view.players.map((player) => ({ id: player.id, name: player.name, avatarId: player.avatarId }))}
+          winnerId={win.banner.winnerId}
+          line={winLineFor(
+            win.banner.avatarId,
+            matchLineSeed(view.roomCode, view.lastHand?.gameNumber ?? view.gameNumber, view.lastHand?.handNumber ?? view.handNumber, win.banner.winnerId),
+          )}
+          motion={win.reduced || win.frozenAt != null ? "off" : "on"}
+          instant={win.reduced || win.frozenAt != null}
+          onContinue={win.skip}
         />
       ) : null}
     </main>

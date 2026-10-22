@@ -161,7 +161,7 @@ describe("bot economy", () => {
     expect(cosmetics.buy(bot.id, "CHR-015", "bones").ok).toBe(false);
     expect(cosmetics.buy(bot.id, "FRM-011", "bones").ok).toBe(false);
     expect(cosmetics.buy(bot.id, "TT-003", "bones").ok).toBe(false);
-    expect(cosmetics.equip(bot.id, "CHR-015").ok).toBe(false);
+    expect(cosmetics.equip(bot.id, "CHR-015").ok).toBe(true);
   });
 
   it("grants the free season track and skips the pass-only items", () => {

@@ -141,12 +141,20 @@ export function playUhOh(): void {
  * A short win sting at the SFX volume. It shares the mute switch and the
  * unlocked audio context, and it does not stop or duck anything already playing.
  */
-export function playWinSting(kind: "hand" | "game" | "match"): void {
+export function playWinSting(kind: "hand" | "game" | "match" | "lineup"): void {
   const ctx = audio();
   if (!ctx) return;
-  const notes = kind === "match" ? [392, 523.25, 659.25, 783.99] : kind === "game" ? [523.25, 659.25, 783.99] : [587.33, 880];
-  const peak = kind === "match" ? 0.2 : kind === "game" ? 0.16 : 0.12;
-  const step = kind === "hand" ? 0.07 : 0.09;
+  const notes =
+    kind === "lineup"
+      ? [130.81, 196, 311.13, 466.16]
+      : kind === "match"
+        ? [392, 523.25, 659.25, 783.99]
+        : kind === "game"
+          ? [523.25, 659.25, 783.99]
+          : [587.33, 880];
+  const peak = kind === "lineup" ? 0.24 : kind === "match" ? 0.2 : kind === "game" ? 0.16 : 0.12;
+  const step = kind === "lineup" ? 0.05 : kind === "hand" ? 0.07 : 0.09;
+  const hold = kind === "lineup" ? 0.26 : 0.2;
   try {
     const start = ctx.currentTime;
     for (let index = 0; index < notes.length; index += 1) {
@@ -157,11 +165,11 @@ export function playWinSting(kind: "hand" | "game" | "match"): void {
       const at = start + index * step;
       gain.gain.setValueAtTime(0.0001, at);
       gain.gain.exponentialRampToValueAtTime(peak, at + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + hold);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(at);
-      osc.stop(at + 0.22);
+      osc.stop(at + hold + 0.02);
     }
   } catch {
     return;

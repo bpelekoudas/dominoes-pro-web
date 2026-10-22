@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { avatarForSeed, DEFAULT_AVATAR, pickDistinctAvatar, resolveAvatar } from "./avatars.js";
 
 describe("avatars", () => {
-  it("falls back to the house portrait", () => {
+  it("falls back to the starter", () => {
     expect(resolveAvatar(null)).toBe(DEFAULT_AVATAR);
-    expect(resolveAvatar("")).toBe("homescreen");
-    expect(resolveAvatar("nope")).toBe("homescreen");
+    expect(resolveAvatar("")).toBe("2hot4tv");
+    expect(resolveAvatar("nope")).toBe("2hot4tv");
     expect(resolveAvatar("golfer")).toBe("golfer");
-    expect(resolveAvatar("2hot4tv")).toBe("homescreen");
+    expect(resolveAvatar("2hot4tv")).toBe("2hot4tv");
   });
 
   it("gives computers distinct portraits and skips the house one", () => {

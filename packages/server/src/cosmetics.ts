@@ -164,19 +164,25 @@ export class Cosmetics {
     for (const item of CATALOG) {
       if (item.obtain === "free") this.grant(userId, item.id);
     }
-    const worn = characterItem(user.avatar_id);
-    if (worn) this.grant(userId, worn.id);
-    const existing = this.store.db.prepare(`SELECT user_id FROM loadouts WHERE user_id = ?`).get(userId) as
-      | { user_id: string }
+    const existing = this.store.db.prepare(`SELECT character_id FROM loadouts WHERE user_id = ?`).get(userId) as
+      | { character_id: string | null }
       | undefined;
+    const bare = !user.avatar_id || user.avatar_id === "homescreen";
+    if (bare && !existing?.character_id) {
+      this.store.updateUser(userId, { avatar_id: "2hot4tv", updated_at: stamp });
+    }
+    const current = this.store.user(userId);
+    const worn = characterItem(current?.avatar_id);
+    if (worn) this.grant(userId, worn.id);
     if (!existing) {
-      const character = worn?.id ?? null;
       this.store.db
         .prepare(
           `INSERT INTO loadouts (user_id, character_id, tile_id, table_id, frame_id, effect_id, trash_id, emote_id)
            VALUES (?, ?, 'TIL-001', 'TBL-001', NULL, 'FX-001', 'TT-001', 'EMO-001')`,
         )
-        .run(userId, character);
+        .run(userId, worn?.id ?? null);
+    } else if (bare && !existing.character_id && worn) {
+      this.store.db.prepare(`UPDATE loadouts SET character_id = ? WHERE user_id = ?`).run(worn.id, userId);
     }
   }
 

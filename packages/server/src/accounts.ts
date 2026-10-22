@@ -393,7 +393,7 @@ export class Accounts {
     this.store.insertUser({
       id,
       display_name: displayName,
-      avatar_id: null,
+      avatar_id: "2hot4tv",
       created_at: stamp,
       updated_at: stamp,
       is_guest: guest ? 1 : 0,
@@ -416,6 +416,7 @@ export class Accounts {
   }
 
   private present(userId: string): PublicUser | null {
+    new Cosmetics(this.store, this.now).loadout(userId);
     const user = this.store.user(userId);
     if (!user) return null;
     const providers = this.store.identitiesForUser(userId).map((row) => row.provider as ProviderName);

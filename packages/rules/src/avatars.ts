@@ -1,5 +1,6 @@
 /** Portraits a player can wear. The house character is the default. */
 export const AVATARS = [
+  { id: "2hot4tv", name: "2 Hot 4 TV" },
   { id: "homescreen", name: "UH-OH" },
   { id: "barista", name: "Barista" },
   { id: "fisherman", name: "Fisherman" },
@@ -30,10 +31,11 @@ export const AVATARS = [
 
 export type AvatarId = (typeof AVATARS)[number]["id"];
 
-export const DEFAULT_AVATAR: AvatarId = "homescreen";
+/** New players, guests, and empty seats wear 2 Hot 4 TV. */
+export const DEFAULT_AVATAR: AvatarId = "2hot4tv";
 
-/** Characters a computer can wear. The house portrait stays with people. */
-const COMPUTER_AVATARS: AvatarId[] = AVATARS.filter((avatar) => avatar.id !== DEFAULT_AVATAR).map((avatar) => avatar.id);
+/** Characters a computer can wear. The house portrait stays off the bot pool; the starter does not. */
+const COMPUTER_AVATARS: AvatarId[] = AVATARS.filter((avatar) => avatar.id !== "homescreen").map((avatar) => avatar.id);
 
 const IDS = new Set<string>(AVATARS.map((avatar) => avatar.id));
 

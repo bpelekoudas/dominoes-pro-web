@@ -263,6 +263,7 @@ function Badges({ item, owned, wearing }: { item: StoreItem; owned: boolean; wea
   const badges: Array<{ key: string; label: string; className?: string }> = [];
   if (wearing) badges.push({ key: "equipped", label: "Equipped", className: "equipped" });
   else if (owned) badges.push({ key: "owned", label: "Owned", className: "owned" });
+  if (item.id === "CHR-015") badges.push({ key: "starter", label: "Starter" });
   if (item.obtain === "season") badges.push({ key: "season", label: "Season" });
   if (item.obtain === "achievement" || item.obtain === "tournament") badges.push({ key: "earned", label: "Earned only" });
   if (item.limited) badges.push({ key: "limited", label: "Limited" });

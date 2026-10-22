@@ -872,7 +872,7 @@ export class BotLeague {
     this.store.insertUser({
       id,
       display_name: name,
-      avatar_id: "homescreen",
+      avatar_id: "2hot4tv",
       created_at: now,
       updated_at: now,
       is_guest: 1,

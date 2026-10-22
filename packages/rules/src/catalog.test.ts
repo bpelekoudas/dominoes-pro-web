@@ -2,13 +2,21 @@ import { describe, expect, it } from "vitest";
 import { CATALOG, canBuy, isWithheldId, itemById } from "./catalog.js";
 
 describe("store catalog", () => {
-  it("ships the sheet without the withheld character", () => {
-    expect(CATALOG).toHaveLength(91);
-    expect(CATALOG.some((item) => item.id === "CHR-015")).toBe(false);
-    expect(JSON.stringify(CATALOG).includes("2 Hot")).toBe(false);
-    expect(isWithheldId("CHR-015")).toBe(true);
-    expect(isWithheldId("2hot4tv")).toBe(true);
-    expect(itemById("CHR-015")).toBeNull();
+  it("ships the sheet with 2 Hot 4 TV as the unsold starter", () => {
+    expect(CATALOG).toHaveLength(92);
+    const starter = itemById("CHR-015");
+    expect(starter).toMatchObject({
+      name: "2 Hot 4 TV",
+      avatarId: "2hot4tv",
+      obtain: "free",
+      bones: null,
+      gold: null,
+      unlock: "Starter",
+    });
+    expect(canBuy(starter!, "bones")).toBe(false);
+    expect(canBuy(starter!, "gold")).toBe(false);
+    expect(isWithheldId("CHR-015")).toBe(false);
+    expect(isWithheldId("2hot4tv")).toBe(false);
   });
 
   it("keeps the sheet prices and locks earned and limited items", () => {

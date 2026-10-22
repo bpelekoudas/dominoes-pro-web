@@ -25,13 +25,13 @@ function welcomeCode(messages: ServerMessage[]): string {
 }
 
 describe("accounts", () => {
-  it("starts on the house portrait and keeps a chosen look", () => {
+  it("starts on 2 Hot 4 TV and keeps a chosen look", () => {
     const store = new Store(":memory:");
     const accounts = accountsFor(store);
     const created = accounts.createGuest("Ada", null);
     expect(created.outcome).toBe("ok");
     if (created.outcome !== "ok" || !created.token) throw new Error("Guest was not created.");
-    expect(created.user.avatarId).toBe("homescreen");
+    expect(created.user.avatarId).toBe("2hot4tv");
     const saved = accounts.setAvatar(created.user.id, "golfer");
     expect(saved.outcome).toBe("ok");
     if (saved.outcome !== "ok") throw new Error("Look was not saved.");

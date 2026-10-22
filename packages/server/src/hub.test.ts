@@ -880,7 +880,7 @@ describe("quick match", () => {
     const waiting = latestView(ada.messages);
     expect(waiting?.status).toBe("lobby");
     expect(waiting?.quick?.canFill).toBe(false);
-    expect(waiting?.players[0]?.avatarId).toBe("homescreen");
+    expect(waiting?.players[0]?.avatarId).toBe("2hot4tv");
     expect(hub.openTables()).toHaveLength(1);
 
     const bo = connect({ type: "quick", name: "Bo", size: 2 });
@@ -929,7 +929,7 @@ describe("quick match", () => {
     expect(view?.players.filter((player) => player.bot)).toHaveLength(1);
     const portraits = view?.players.map((player) => player.avatarId) ?? [];
     expect(new Set(portraits).size).toBe(portraits.length);
-    expect(portraits.filter((id) => id !== "homescreen").length).toBe(1);
+    expect(portraits.filter((id) => id !== "2hot4tv").length).toBe(1);
   });
 
   it("drops a waiting seat on cancel and keeps a private room off the list", () => {
@@ -1296,7 +1296,7 @@ describe("quick match", () => {
     const again = new Hub(store, 30);
     const tables = again.openTables();
     expect(tables.map((table) => table.code)).toContain(code);
-    expect(tables[0]?.players[0]?.avatarId).toBe("homescreen");
+    expect(tables[0]?.players[0]?.avatarId).toBe("2hot4tv");
   });
 });
 

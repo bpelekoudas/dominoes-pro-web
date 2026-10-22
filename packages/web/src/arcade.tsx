@@ -646,7 +646,7 @@ const demoHome = {
   user: {
     id: "demo",
     displayName: "Bryan",
-    avatarId: "homescreen",
+    avatarId: "2hot4tv",
     guest: true,
     providers: [],
     rating: 1544,
@@ -699,7 +699,7 @@ function DemoQuick() {
             name: "Bryan",
             isYou: true,
             bot: false,
-            avatarId: "homescreen",
+            avatarId: "2hot4tv",
             rank: { tierId: "hustler", tierName: "Hustler", step: "II", rating: 1544, provisional: false },
           },
           {
@@ -718,7 +718,7 @@ function DemoQuick() {
 
 function DemoTable() {
   const seats = [
-    { name: "You", avatar: "homescreen", score: 95, tier: "rookie", rating: 1212, provisional: true, you: true, timer: 0.62 },
+    { name: "You", avatar: "2hot4tv", score: 95, tier: "rookie", rating: 1212, provisional: true, you: true, timer: 0.62 },
     { name: "Sam", avatar: "golfer", score: 70, tier: "hustler", rating: 1540, provisional: false, you: false, timer: null },
     { name: "Ada", avatar: "barista", score: 40, tier: "shark", rating: 2210, provisional: false, you: false, timer: null },
     { name: "Jo", avatar: "gaperilla", score: 20, tier: "legend", rating: 6120, provisional: false, you: false, timer: null },

@@ -159,7 +159,7 @@ export function uhOhWaitMs(
 }
 
 export interface CelebrationStep {
-  stage: "uhoh" | "reveal" | "banner" | "sheet";
+  stage: "uhoh" | "reveal" | "banner" | "lineup" | "sheet";
   ms: number;
   banner?: "game" | "match";
 }
@@ -177,8 +177,11 @@ export function celebrationTimeline(input: {
   const wait = uhOhWaitMs(input.reason, input.awarded, input.reduced);
   if (wait > 0) steps.push({ stage: "uhoh", ms: wait });
   steps.push({ stage: "reveal", ms: input.plan.holdMs });
-  if (input.seriesWinner) steps.push({ stage: "banner", ms: MATCH_BANNER_MS, banner: "match" });
-  else if (input.gameWinner) steps.push({ stage: "banner", ms: GAME_BANNER_MS, banner: "game" });
+  if (input.seriesWinner) {
+    steps.push({ stage: "banner", ms: MATCH_BANNER_MS, banner: "match" });
+    // Tap moves the lineup on. It does not eat the continue clock.
+    steps.push({ stage: "lineup", ms: 0 });
+  } else if (input.gameWinner) steps.push({ stage: "banner", ms: GAME_BANNER_MS, banner: "game" });
   steps.push({ stage: "sheet", ms: 0 });
   const untilSheet = steps.reduce((sum, step) => sum + step.ms, 0);
   return { steps, untilSheet };

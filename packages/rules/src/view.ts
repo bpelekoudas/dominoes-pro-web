@@ -1,3 +1,4 @@
+import { DEFAULT_AVATAR } from "./avatars.js";
 import { openEnds, openScore, type BoardState } from "./board.js";
 import { winsNeeded } from "./score.js";
 import { tauntsForPlayer, type AvailableTaunt } from "./taunts.js";
@@ -260,7 +261,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       accountBot: seat.accountBot === true,
       difficulty: seat.difficulty,
       rank: seat.rank ?? null,
-      avatarId: seat.avatarId || "homescreen",
+      avatarId: seat.avatarId || DEFAULT_AVATAR,
       frameId: seat.frameId ?? null,
       effectId: seat.effectId || "glass",
       effectItemId: seat.effectItemId ?? null,

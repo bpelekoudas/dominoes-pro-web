@@ -19,8 +19,10 @@ describe("store cosmetics", () => {
     expect(first.bones).toBe(100_000);
     expect(first.goldBones).toBe(5_000);
     expect(first.owned).toContain("FX-001");
+    expect(first.owned).toContain("CHR-015");
     expect(first.owned).not.toContain("FX-002");
-    expect(first.items.some((item) => item.id === "CHR-015")).toBe(false);
+    expect(first.loadout.characterId).toBe("CHR-015");
+    expect(first.items.some((item) => item.id === "CHR-015")).toBe(true);
 
     const bought = cosmetics.buy(user.id, "FX-002", "bones");
     expect(bought.ok).toBe(true);
@@ -34,14 +36,14 @@ describe("store cosmetics", () => {
     expect(worn.snapshot.loadout.effectId).toBe("FX-002");
   });
 
-  it("rejects the withheld character, earned items, limited items, and a short balance", () => {
+  it("does not sell the starter, earned items, limited items, or a short balance", () => {
     const { cosmetics, user, accounts } = guest();
     expect(cosmetics.buy(user.id, "CHR-015", "bones").ok).toBe(false);
-    expect(cosmetics.equip(user.id, "CHR-015").ok).toBe(false);
+    expect(cosmetics.equip(user.id, "CHR-015").ok).toBe(true);
     expect(cosmetics.buy(user.id, "2hot4tv", "gold").ok).toBe(false);
     expect(cosmetics.buy(user.id, "CHR-006", "bones").ok).toBe(false);
     expect(cosmetics.buy(user.id, "FRM-011", "gold").ok).toBe(false);
-    expect(accounts.setAvatar(user.id, "2hot4tv").outcome).toBe("invalid");
+    expect(accounts.setAvatar(user.id, "2hot4tv").outcome).toBe("ok");
     expect(accounts.setAvatar(user.id, "CHR-015").outcome).toBe("invalid");
     expect(accounts.setAvatar(user.id, "floridaman").outcome).toBe("invalid");
     const gold = cosmetics.buy(user.id, "CHR-011", "gold");

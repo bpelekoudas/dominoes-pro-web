@@ -1,6 +1,6 @@
 /**
  * Store catalog generated from the Master List.
- * CHR-015 is withheld. It is not sold, equipped, or granted.
+ * CHR-015, 2 Hot 4 TV, is the starter everyone owns. He is not sold.
  */
 export const TEST_BONES = 100_000;
 export const TEST_GOLD = 5_000;
@@ -278,6 +278,24 @@ export const CATALOG: readonly StoreItem[] = [
     "availableUntil": null,
     "description": "Hoodie-wearing tech billionaire with a smartwatch and a smirk",
     "avatarId": "techmogul",
+    "fxId": null,
+    "skin": null,
+    "art": true
+  },
+  {
+    "id": "CHR-015",
+    "name": "2 Hot 4 TV",
+    "category": "character",
+    "rarity": "Common",
+    "obtain": "free",
+    "bones": null,
+    "gold": null,
+    "unlock": "Starter",
+    "limited": false,
+    "availableFrom": null,
+    "availableUntil": null,
+    "description": "Late-night host in sunglasses and a gold chain. Everyone starts with him.",
+    "avatarId": "2hot4tv",
     "fxId": null,
     "skin": null,
     "art": true
@@ -1673,8 +1691,8 @@ export const CATALOG: readonly StoreItem[] = [
 const BY_ID = new Map(CATALOG.map((item) => [item.id, item]));
 const BY_AVATAR = new Map(CATALOG.filter((item) => item.avatarId).map((item) => [item.avatarId as string, item]));
 
-/** Ids that must never be sold, equipped, or granted. */
-const WITHHELD = new Set(["CHR-015", "2hot4tv"]);
+/** No character is held back. The gate stays so a future one can be. */
+const WITHHELD = new Set<string>();
 
 export function isWithheldId(value: string | null | undefined): boolean {
   if (!value) return false;

@@ -530,10 +530,9 @@ function loadScript(src: string): Promise<void> {
 }
 
 function LookPicker({ selected, onPick }: { selected: string | null; onPick: (id: string) => void }) {
-  const starter = [
-    "homescreen",
-    ...CATALOG.filter((item) => item.category === "character" && item.obtain === "free" && item.avatarId).map((item) => item.avatarId as string),
-  ];
+  const starter = CATALOG.filter((item) => item.category === "character" && item.obtain === "free" && item.avatarId).map(
+    (item) => item.avatarId as string,
+  );
   const [allowed, setAllowed] = useState<string[]>(selected ? [...new Set([...starter, selected])] : starter);
   useEffect(() => {
     let stopped = false;
