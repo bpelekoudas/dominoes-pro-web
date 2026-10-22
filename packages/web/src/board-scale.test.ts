@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { emptyBoard, placeTile } from "../../rules/src/board.js";
-import { FIT_MARGIN, layoutBoard, TILE_SHORT } from "../../rules/src/layout.js";
+import { emptyBoard, placeTile, type BoardState } from "../../rules/src/board.js";
+import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } from "../../rules/src/engine.js";
+import { boxesOverlap, FIT_MARGIN, layoutBoard, TILE_SHORT } from "../../rules/src/layout.js";
+import { shuffleWithSeed } from "../../rules/src/rng.js";
 import { tileById } from "../../rules/src/tiles.js";
 import {
   boardShift,
@@ -9,6 +11,7 @@ import {
   chainBounds,
   clearanceInsets,
   FELT_PAD_Y,
+  fitInsets,
   fitScale,
   followCamera,
   handOverPlacement,
@@ -21,7 +24,9 @@ import {
   PHONE_SCALE_CAP,
   scaleForTiles,
   screenBox,
+  tilesClear,
   zoneInsets,
+  type ZoneRect,
 } from "./board-scale.js";
 
 const felt = { w: 412, h: 560 };
@@ -266,7 +271,7 @@ describe("board scale", () => {
     }
   });
 
-  it("drops interior tiles once the open ends no longer fit at the floor, and keeps a playable end", () => {
+  it("shrinks below the readable floor instead of clipping a chain that cannot fit", () => {
     const ends = [
       { id: "north", x: -18, y: -900, w: 36, h: 72 },
       { id: "south", x: -18, y: 860, w: 36, h: 72 },
@@ -279,80 +284,135 @@ describe("board scale", () => {
     const phone = followCamera({
       frame,
       ends,
+      tiles: ends,
       playableIds: ["north"],
       felt,
       screenWidth: 390,
       reserve,
     });
-    expect(phone.mode).toBe("follow");
-    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
-    expect(phone.scale * TILE_SHORT).toBeLessThanOrEqual(READABLE_PHONE_PX + 0.5);
-    const insets = clearanceInsets(reserve);
-    const north = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, ends[0]!);
-    expect(north.top).toBeGreaterThanOrEqual(insets.top - 0.5);
-    expect(north.bottom).toBeLessThanOrEqual(felt.h - insets.bottom + 0.5);
-    const south = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, ends[1]!);
-    const southInside = south.top >= insets.top - 0.5 && south.bottom <= felt.h - insets.bottom + 0.5;
-    expect(southInside).toBe(false);
-    expect(phone.off.top || phone.off.bottom || phone.off.left || phone.off.right).toBe(true);
+    expect(phone.mode).toBe("fit");
+    expect(phone.scale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
+    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    expect(tilesClear(ends, frame, felt, phone.scale, phone.shiftX, phone.shiftY, [], 1)).toBe(true);
+    const insets = fitInsets(felt, [], reserve);
+    const box = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, frame);
+    const safeCx = insets.left + (felt.w - insets.left - insets.right) / 2;
+    const safeCy = insets.top + (felt.h - insets.top - insets.bottom) / 2;
+    expect(Math.abs((box.left + box.right) / 2 - safeCx)).toBeLessThan(2);
+    expect(Math.abs((box.top + box.bottom) / 2 - safeCy)).toBeLessThan(2);
   });
 
-  it("frames every open end of the 17-tile chain clear of the seat badges", () => {
-    const layout = laid(CROWD);
-    const frame = chainBounds(layout.tiles, 0);
+  it("keeps every tile of a crowded chain clear of the seat badges", () => {
+    const phoneFelt = { w: 390, h: 644 };
+    const phoneLayout = layoutFor(CROWD, phoneFelt, 390, PHONE_ZONES, PHONE_RESERVE);
+    const phoneFrame = chainBounds(phoneLayout.tiles, 0);
     const phone = followCamera({
-      frame,
-      ends: layout.ends,
-      felt: { w: 390, h: 644 },
+      frame: phoneFrame,
+      ends: phoneLayout.ends,
+      tiles: phoneLayout.tiles,
+      felt: phoneFelt,
       screenWidth: 390,
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
     });
-    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
-    expect(phone.scale * TILE_SHORT).toBeLessThan(52);
-    expect(endsClear(layout.ends, frame, phone, { w: 390, h: 644 }, PHONE_ZONES)).toBe(true);
+    expect(tilesClear(phoneLayout.tiles, phoneFrame, phoneFelt, phone.scale, phone.shiftX, phone.shiftY, PHONE_ZONES, 1)).toBe(true);
+    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    const foldFelt = { w: 920, h: 776 };
+    const foldLayout = layoutFor(CROWD, foldFelt, 920, FOLD_ZONES, PHONE_RESERVE);
+    const foldFrame = chainBounds(foldLayout.tiles, 0);
     const fold = followCamera({
-      frame,
-      ends: layout.ends,
-      felt: { w: 920, h: 776 },
+      frame: foldFrame,
+      ends: foldLayout.ends,
+      tiles: foldLayout.tiles,
+      felt: foldFelt,
       screenWidth: 920,
       reserve: PHONE_RESERVE,
       zones: FOLD_ZONES,
     });
+    expect(tilesClear(foldLayout.tiles, foldFrame, foldFelt, fold.scale, fold.shiftX, fold.shiftY, FOLD_ZONES, 1)).toBe(true);
     expect(fold.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_WIDE_PX - 0.5);
-    expect(fold.scale * TILE_SHORT).toBeLessThan(60);
-    expect(endsClear(layout.ends, frame, fold, { w: 920, h: 776 }, FOLD_ZONES)).toBe(true);
   });
 
-  it("drops an arm of a chain whose ends cannot fit at the floor and keeps the playable end", () => {
-    const layout = laid(LONG);
+  it("fits a long chain on the felt instead of dropping an arm", () => {
+    const felt = { w: 390, h: 644 };
+    const layout = layoutFor(LONG, felt, 390, PHONE_ZONES, PHONE_RESERVE);
     const frame = chainBounds(layout.tiles, 0);
     const phone = followCamera({
       frame,
       ends: layout.ends,
+      tiles: layout.tiles,
       playableIds: ["north"],
-      felt: { w: 390, h: 644 },
+      felt,
       screenWidth: 390,
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
     });
-    expect(phone.mode).toBe("follow");
-    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
-    expect(phone.scale * TILE_SHORT).toBeLessThanOrEqual(READABLE_PHONE_PX + 0.5);
-    const north = layout.ends.find((end) => end.id === "north")!;
-    const seen = screenBox({ w: 390, h: 644 }, frame, phone.scale, phone.shiftX, phone.shiftY, north);
-    const insets = clearanceInsets(PHONE_RESERVE);
-    expect(seen.top).toBeGreaterThanOrEqual(insets.top - 0.5);
-    expect(seen.bottom).toBeLessThanOrEqual(644 - insets.bottom + 0.5);
-    expect(seen.left).toBeGreaterThanOrEqual(insets.left - 0.5);
-    expect(seen.right).toBeLessThanOrEqual(390 - insets.right + 0.5);
-    const outside = layout.ends.some((end) => {
-      const box = screenBox({ w: 390, h: 644 }, frame, phone.scale, phone.shiftX, phone.shiftY, end);
-      return box.top < -1 || box.bottom > 645 || box.left < -1 || box.right > 391;
+    expect(phone.mode).toBe("fit");
+    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    expect(tilesClear(layout.tiles, frame, felt, phone.scale, phone.shiftX, phone.shiftY, PHONE_ZONES, 1)).toBe(true);
+    const loose = laid(LONG);
+    const looseFrame = chainBounds(loose.tiles, 0);
+    const shrunk = followCamera({
+      frame: looseFrame,
+      ends: loose.ends,
+      tiles: loose.tiles,
+      felt,
+      screenWidth: 390,
+      reserve: PHONE_RESERVE,
+      zones: PHONE_ZONES,
     });
-    expect(outside).toBe(true);
-    expect(phone.off.top || phone.off.bottom || phone.off.left || phone.off.right).toBe(true);
+    expect(tilesClear(loose.tiles, looseFrame, felt, shrunk.scale, shrunk.shiftX, shrunk.shiftY, PHONE_ZONES, 1)).toBe(true);
+    expect(phone.scale).toBeGreaterThanOrEqual(shrunk.scale - 0.001);
   });
+
+  it("keeps every tile inside the safe rect for real bot hands", () => {
+    const tables = [
+      { name: "phone", felt: { w: 390, h: 644 }, screen: 390, seats: 4 as const },
+      { name: "fold", felt: { w: 920, h: 776 }, screen: 920, seats: 4 as const },
+      { name: "fold-land", felt: { w: 1024, h: 700 }, screen: 1024, seats: 4 as const },
+      { name: "desk-chat", felt: { w: 760, h: 560 }, screen: 760, seats: 4 as const },
+    ];
+    let checked = 0;
+    for (const seats of [2, 3, 4] as const) {
+      for (const seed of seats === 4 ? [1, 4, 9] : [2]) {
+        for (const board of playHands(seats, seed)) {
+          const count = board.center ? 1 + board.arms.west.length + board.arms.east.length + board.arms.north.length + board.arms.south.length : 0;
+          if (count < 8) continue;
+          for (const table of tables) {
+            const zones = seatZones(table.felt, seats);
+            const layout = layoutForBoard(board, table.felt, table.screen, zones);
+            const frame = chainBounds(layout.tiles, 0);
+            const shot = followCamera({
+              frame,
+              ends: layout.ends,
+              tiles: layout.tiles,
+              felt: table.felt,
+              screenWidth: table.screen,
+              zones,
+            });
+            expect(
+              tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
+              `${table.name} seed ${seed} ${seats}p ${count} tiles`,
+            ).toBe(true);
+            expect(shot.off, table.name).toEqual({ top: false, right: false, bottom: false, left: false });
+            for (let i = 0; i < layout.tiles.length; i += 1) {
+              for (let j = i + 1; j < layout.tiles.length; j += 1) {
+                expect(boxesOverlap(layout.tiles[i]!, layout.tiles[j]!), `${table.name} overlap`).toBe(false);
+              }
+            }
+            const insets = fitInsets(table.felt, zones);
+            const box = screenBox(table.felt, frame, shot.scale, shot.shiftX, shot.shiftY, frame);
+            const safeCx = insets.left + (table.felt.w - insets.left - insets.right) / 2;
+            const safeCy = insets.top + (table.felt.h - insets.top - insets.bottom) / 2;
+            expect(Math.abs((box.left + box.right) / 2 - safeCx)).toBeLessThan(3);
+            expect(Math.abs((box.top + box.bottom) / 2 - safeCy)).toBeLessThan(3);
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(40);
+  }, 40_000);
 });
 
 const PHONE_RESERVE = { top: 62, right: 63, bottom: 30, left: 63 };
@@ -427,16 +487,90 @@ function laid(steps: Array<[string, string]>) {
   return layoutBoard(board);
 }
 
-function endsClear(
-  ends: readonly { x: number; y: number; w: number; h: number; id: string }[],
-  frame: { x: number; y: number; w: number; h: number },
-  shot: { scale: number; shiftX: number; shiftY: number },
+function layoutFor(
+  steps: Array<[string, string]>,
   felt: { w: number; h: number },
-  zones: readonly { left: number; top: number; right: number; bottom: number }[],
-): boolean {
-  return ends.every((end) => {
-    const box = screenBox(felt, frame, shot.scale, shot.shiftX, shot.shiftY, end);
-    if (box.left < 3 || box.top < 3 || box.right > felt.w - 3 || box.bottom > felt.h - 3) return false;
-    return zones.every((zone) => box.right <= zone.left + 1 || box.left >= zone.right - 1 || box.bottom <= zone.top + 1 || box.top >= zone.bottom - 1);
+  screen: number,
+  zones: readonly ZoneRect[],
+  reserve?: { top: number; right: number; bottom: number; left: number },
+) {
+  let board = emptyBoard();
+  for (const [end, id] of steps) board = placeTile(board, end, tileById(id));
+  return layoutForBoard(board, felt, screen, zones, reserve);
+}
+
+function layoutForBoard(
+  board: BoardState,
+  felt: { w: number; h: number },
+  screen: number,
+  zones: readonly ZoneRect[],
+  reserve?: { top: number; right: number; bottom: number; left: number },
+) {
+  const readable = screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+  const room = fitInsets(felt, zones, reserve);
+  return layoutBoard(board, {
+    width: Math.max(160, ((felt.w - room.left - room.right) * TILE_SHORT) / readable),
+    height: Math.max(160, ((felt.h - room.top - room.bottom) * TILE_SHORT) / readable),
   });
+}
+
+function seatZones(felt: { w: number; h: number }, seats: 2 | 3 | 4): ZoneRect[] {
+  const zones: ZoneRect[] = [];
+  const badgeW = 54;
+  const badgeH = 28;
+  if (seats === 2 || seats === 4) {
+    zones.push({ left: 16, top: 0, right: felt.w - 16, bottom: 20 });
+    zones.push({ left: felt.w / 2 - badgeW / 2, top: 24, right: felt.w / 2 + badgeW / 2, bottom: 24 + badgeH });
+  }
+  if (seats >= 3) {
+    const badgeTop = felt.h * 0.38;
+    zones.push({ left: 0, top: badgeTop, right: badgeW, bottom: badgeTop + badgeH });
+    zones.push({ left: 0, top: badgeTop + badgeH + 4, right: 22, bottom: badgeTop + badgeH + 130 });
+    zones.push({ left: felt.w - badgeW, top: badgeTop, right: felt.w, bottom: badgeTop + badgeH });
+    zones.push({ left: felt.w - 22, top: badgeTop + badgeH + 4, right: felt.w, bottom: badgeTop + badgeH + 130 });
+  }
+  return zones;
+}
+
+const HAND_PLAYERS = {
+  2: [
+    { id: "a", name: "Alex" },
+    { id: "b", name: "Sam" },
+  ],
+  3: [
+    { id: "a", name: "Alex" },
+    { id: "b", name: "Sam" },
+    { id: "c", name: "Jo" },
+  ],
+  4: [
+    { id: "a", name: "Alex" },
+    { id: "b", name: "Sam" },
+    { id: "c", name: "Jo" },
+    { id: "d", name: "Rio" },
+  ],
+} as const;
+
+function playHands(players: 2 | 3 | 4, seed: number): BoardState[] {
+  const bytes = Buffer.alloc(32);
+  bytes.writeUInt32BE(seed + 1, 0);
+  bytes.writeUInt32BE(0x534f414b, 4);
+  let match = createMatch([...HAND_PLAYERS[players]], {
+    boneyardMode: "draw_until",
+    seriesLength: 3,
+    targetScore: 500,
+  });
+  match = beginHand(match, shuffleWithSeed(bytes));
+  const boards: BoardState[] = [];
+  for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+    const playerId = currentPlayerId(match);
+    if (!playerId) break;
+    const intents = legalIntents(match, playerId);
+    if (intents.length === 0) break;
+    const intent = intents[(seed + guard) % intents.length]!;
+    const result = applyIntent(match, playerId, intent);
+    if (!result.ok) break;
+    match = result.match;
+    if (intent.type === "play" && match.hand) boards.push(structuredClone(match.hand.board));
+  }
+  return boards;
 }

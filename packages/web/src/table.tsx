@@ -5,7 +5,10 @@ import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox,
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   chainBounds,
+  fitInsets,
   followCamera,
+  READABLE_PHONE_PX,
+  READABLE_WIDE_PX,
   handOverPlacement,
   landedTileBox,
   zoneInsets,
@@ -95,7 +98,9 @@ export function Table({
   replayToken?: number;
 }) {
   const board = view.board;
-  const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
+  // The felt the chain should fold into, in design pixels, at the readable floor.
+  const [limits, setLimits] = useState<{ width: number; height: number } | null>(null);
+  const layout = useMemo(() => (board?.center ? layoutBoard(board, limits ?? undefined) : null), [board, limits]);
   const frame = useMemo(() => (layout ? chainBounds(layout.tiles, 0) : null), [layout]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -147,14 +152,25 @@ export function Table({
       const bounds = chainBounds(layout.tiles, 0);
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
+      const zones = measureZones(viewport);
+      const felt = { w: width, h: height };
+      const readablePx = screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+      const room = fitInsets(felt, zones, nextReserve);
+      const designW = Math.max(160, ((width - room.left - room.right) * TILE_SHORT) / readablePx);
+      const designH = Math.max(160, ((height - room.top - room.bottom) * TILE_SHORT) / readablePx);
+      setLimits((current) => {
+        if (current && Math.abs(current.width - designW) < 12 && Math.abs(current.height - designH) < 12) return current;
+        return { width: designW, height: designH };
+      });
       const shot = followCamera({
         frame: bounds,
         ends: layout.ends,
+        tiles: layout.tiles,
         playableIds: view.legalPlays.map((play) => play.endId),
-        felt: { w: width, h: height },
+        felt,
         screenWidth,
         reserve: nextReserve,
-        zones: measureZones(viewport),
+        zones,
         overview: handOver || overview,
         punch,
       });

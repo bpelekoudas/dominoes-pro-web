@@ -112,7 +112,68 @@ interface Cursor {
   run: number;
 }
 
-export function layoutBoard(board: BoardState): BoardLayout {
+/**
+ * Design-pixel box the chain should turn to stay inside.
+ * Omit it and the chain uses the phone felt. A narrow table passes a
+ * smaller box so arms fold into open felt before the picture has to shrink
+ * past a readable tile.
+ */
+export interface LayoutLimits {
+  width: number;
+  height: number;
+}
+
+const DEFAULT_LIMIT: LayoutLimits = { width: PHONE_WIDTH, height: PHONE_HEIGHT };
+let activeLimit: LayoutLimits = DEFAULT_LIMIT;
+
+function insideActive(box: LayoutBox): boolean {
+  return insideRect(box, activeLimit.width, activeLimit.height);
+}
+
+function withLimit<T>(limit: LayoutLimits, run: () => T): T {
+  const previous = activeLimit;
+  activeLimit = limit;
+  try {
+    return run();
+  } finally {
+    activeLimit = previous;
+  }
+}
+
+function tileSpan(tiles: readonly LayoutBox[]): { w: number; h: number } {
+  if (tiles.length === 0) return { w: 1, h: 1 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const tile of tiles) {
+    minX = Math.min(minX, tile.x);
+    minY = Math.min(minY, tile.y);
+    maxX = Math.max(maxX, tile.x + tile.w);
+    maxY = Math.max(maxY, tile.y + tile.h);
+  }
+  return { w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+}
+
+function fitIn(span: { w: number; h: number }, limits: LayoutLimits): number {
+  return Math.min(limits.width / span.w, limits.height / span.h);
+}
+
+export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
+  const phone = withLimit(DEFAULT_LIMIT, () => layoutBoardNow(board));
+  if (!limits || !Number.isFinite(limits.width) || !Number.isFinite(limits.height) || limits.width < 72 || limits.height < 72) {
+    return phone;
+  }
+  const phoneBox = tileSpan(phone.tiles);
+  // Already readable on this table. Keep the phone picture.
+  if (phoneBox.w <= limits.width + 1 && phoneBox.h <= limits.height + 1) return phone;
+  const folded = withLimit(limits, () => layoutBoardNow(board));
+  // Fold only when it actually leaves a larger tile. A turn that grows the
+  // other side is worse than shrinking the straight chain a little.
+  return fitIn(tileSpan(folded.tiles), limits) > fitIn(phoneBox, limits) + 0.02 ? folded : phone;
+}
+
+function layoutBoardNow(board: BoardState): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
   }
@@ -376,7 +437,7 @@ function layoutScale(boxes: readonly LayoutBox[]): number {
     maxX = Math.max(maxX, box.x + box.w);
     maxY = Math.max(maxY, box.y + box.h);
   }
-  return Math.min(PHONE_WIDTH / Math.max(1, maxX - minX), PHONE_HEIGHT / Math.max(1, maxY - minY));
+  return Math.min(activeLimit.width / Math.max(1, maxX - minX), activeLimit.height / Math.max(1, maxY - minY));
 }
 
 /**
@@ -401,7 +462,7 @@ function escapeStep(
       const box = choices[slide]!;
       if (!isClear(box, occupants, centre, cursor.box)) continue;
       if (!runFits(upcoming, turn, box, home, occupants, centre)) continue;
-      const score = (insidePhone(box) ? 0 : 80_000)
+      const score = (insideActive(box) ? 0 : 80_000)
         + (inQuadrant(box, home) ? 0 : 8_000)
         + (pointsAway(box, turn) ? 0 : 2_000)
         + (turn === turns[0] ? 0 : 400)
@@ -523,7 +584,7 @@ function projectedImbalance(
   for (let index = 1; index < limit; index += 1) {
     const nextTile = upcoming[index]!;
     const next = straightBox(prev, dir, nextTile.low === nextTile.high);
-    if (!insidePhone(next) || overlapsAny(next, boxes) || intersectsBox(next, centre)) break;
+    if (!insideActive(next) || overlapsAny(next, boxes) || intersectsBox(next, centre)) break;
     let crowded = false;
     for (const other of boxes) {
       if (sameBox(other, prev)) continue;
@@ -661,7 +722,7 @@ function fits(
   quadrant = true,
 ): boolean {
   if (!insideHard(box) || (quadrant && !inQuadrant(box, home))) return false;
-  if (phone && !insidePhone(box)) return false;
+  if (phone && !insideActive(box)) return false;
   if (overlapsAny(box, placedBoxes(occupants))) return false;
   if (hitsHold(box, occupants)) return false;
   if (intersectsBox(box, centre)) return false;

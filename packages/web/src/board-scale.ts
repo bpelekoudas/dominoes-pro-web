@@ -93,9 +93,9 @@ export function clearanceInsets(reserve: AxisInsets, floor = CAMERA_EDGE): AxisI
 }
 
 /**
- * Smallest short side of a tile, in screen pixels. The camera zooms out
- * until every open end fits, and it stops here. Phone and Fold stay
- * readable instead of rising above the table.
+ * Smallest short side the layout tries to hold, in screen pixels.
+ * The camera may go smaller when a chain still will not fit. A clipped
+ * tile is worse than a small one.
  */
 export const READABLE_PHONE_PX = 34;
 export const READABLE_WIDE_PX = 44;
@@ -246,95 +246,127 @@ export interface OpenEndBox extends LayoutBox {
   id?: string;
 }
 
-/** Air around an end tile so a pip is not clipped by the badge inset. */
-const END_MARGIN = 6;
-
 /**
- * Every open end, zoomed out until they fit, but never smaller than the
- * readable floor. Seat badges are real rectangles: an end beside a badge
- * stays in frame. When the ends cannot all fit on the felt at that floor,
- * keep the floor and frame the largest set that does, preferring ends the
- * active player can play on. Interior tiles may leave. Overview shows the
- * chain. Punch scales up briefly, then the caller drops it and this framing
- * returns.
+ * The whole chain, centered in the felt that badges, racks, the header,
+ * and the bottom bar leave open. Nothing is clipped. When the chain cannot
+ * stay at the readable floor, the picture gets smaller. A clipped tile is
+ * worse than a small one. Punch grows the picture only while it still fits.
  */
 export function followCamera(input: {
   frame: LayoutBox;
   ends: readonly OpenEndBox[];
-  /** End ids the player to move can legally play on. Used only in the fallback. */
+  /** End ids the player to move can legally play on. The frame already holds every end. */
   playableIds?: readonly string[];
+  /** Every placed tile. The frame is their box; they are checked against the safe rect. */
+  tiles?: readonly LayoutBox[];
   felt: FeltSize;
   screenWidth: number;
   reserve?: AxisInsets;
-  /** Badge and rack rects in felt space. Empty keeps the rectangular gutter. */
+  /** Badge, rack, header, and bottom-bar rects in felt space. */
   zones?: readonly ZoneRect[];
   overview?: boolean;
   punch?: number;
 }): FollowResult {
-  const reserve = input.reserve ?? NO_INSET;
-  const badge = clearanceInsets(reserve);
-  const pad: AxisInsets = { top: FELT_EDGE, right: FELT_EDGE, bottom: FELT_EDGE, left: FELT_EDGE };
+  const zones = input.zones ?? [];
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
-  const readable = (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) / TILE_SHORT;
-  const ends = input.ends.length > 0 ? input.ends : [input.frame];
-  const tight = chainBounds(ends, 0);
-  const aired = chainBounds(ends, END_MARGIN);
-  const zones = input.zones ?? [];
-  const overview = input.overview === true;
-  const feltFit = scaleForAxis(tight, input.felt, pad);
-  let mode: "fit" | "follow" = "follow";
-  let scale: number;
-  let target: LayoutBox;
-  let insets: AxisInsets;
+  const insets = fitInsets(input.felt, zones, input.reserve);
+  const room = scaleForAxis(input.frame, input.felt, insets);
+  // A pixel of air so a rounded clip or the felt edge never shaves a pip.
+  const slack = scaleForAxis(input.frame, input.felt, inflate(insets, 1));
+  let scale = Math.min(open, room, slack);
+  if (!Number.isFinite(scale) || scale <= 0) scale = Math.min(open, room);
+  const punched = applyPunch(scale, open, input.punch, input.overview === true);
+  if (punched <= room + 1e-6) scale = punched;
+  const placed = placeTarget(input.frame, input.frame, input.felt, insets, scale);
+  return finish(input.frame, input.felt, scale, placed.ox, placed.oy, NO_INSET, "fit");
+}
 
-  if (overview) {
-    mode = "fit";
-    scale = Math.min(open, scaleForAxis(input.frame, input.felt, badge));
-    target = input.frame;
-    insets = badge;
-  } else {
-    const clear = zones.length > 0
-      ? fitEndsClear(ends, input.frame, input.felt, pad, zones, Math.min(open, feltFit), readable)
-      : null;
-    if (clear) {
-      scale = clear.scale;
-      target = tight;
-      insets = endsInside(ends, input.frame, scale, clear.ox, clear.oy, input.felt, badge) ? badge : pad;
-      mode = chainInside(input.frame, input.felt, insets, scale, clear.ox, clear.oy) ? "fit" : "follow";
-      const punched = applyPunch(scale, open, input.punch, overview);
-      if (punched === scale) return finish(input.frame, input.felt, scale, clear.ox, clear.oy, insets, mode);
-      const zoomed = placeTarget(tight, input.frame, input.felt, insets, punched);
-      return finish(input.frame, input.felt, punched, zoomed.ox, zoomed.oy, insets, mode);
-    }
-    const badgeFit = scaleForAxis(aired, input.felt, badge);
-    if (zones.length === 0 && badgeFit >= readable * 0.98) {
-      scale = Math.min(open, badgeFit);
-      target = aired;
-      insets = badge;
-      mode = scaleForAxis(input.frame, input.felt, badge) >= readable * 0.98 ? "fit" : "follow";
-    } else if (feltFit >= readable * 0.98) {
-      scale = Math.min(open, feltFit);
-      target = tight;
-      insets = pad;
-      mode = "follow";
-    } else {
-      scale = Math.min(open, readable);
-      const safeW = input.felt.w - badge.left - badge.right;
-      const safeH = input.felt.h - badge.top - badge.bottom;
-      target = endSubset(ends, input.playableIds ?? [], scale, safeW, safeH);
-      insets = badge;
-      mode = "follow";
-    }
+/**
+ * How far badges and racks reach in from each edge, plus a gap, and never
+ * less than the felt edge. The chain is centered in what remains.
+ */
+export function fitInsets(felt: FeltSize, zones: readonly ZoneRect[], reserve?: AxisInsets): AxisInsets {
+  const reach = zones.length > 0 ? zoneReach({ left: 0, top: 0, right: felt.w, bottom: felt.h }, zones) : NO_INSET;
+  const extra = reserve ?? NO_INSET;
+  const insets = {
+    top: Math.max(FELT_EDGE, reach.top, extra.top),
+    right: Math.max(FELT_EDGE, reach.right, extra.right),
+    bottom: Math.max(FELT_EDGE, reach.bottom, extra.bottom),
+    left: Math.max(FELT_EDGE, reach.left, extra.left),
+  };
+  // Leave a tile's worth of felt when the overlays would swallow the table.
+  const minRoom = TILE_SHORT;
+  if (insets.left + insets.right > felt.w - minRoom) {
+    const over = insets.left + insets.right - (felt.w - minRoom);
+    const sum = Math.max(1, insets.left + insets.right);
+    insets.left -= (over * insets.left) / sum;
+    insets.right -= (over * insets.right) / sum;
   }
+  if (insets.top + insets.bottom > felt.h - minRoom) {
+    const over = insets.top + insets.bottom - (felt.h - minRoom);
+    const sum = Math.max(1, insets.top + insets.bottom);
+    insets.top -= (over * insets.top) / sum;
+    insets.bottom -= (over * insets.bottom) / sum;
+  }
+  return insets;
+}
 
-  scale = applyPunch(scale, open, input.punch, overview);
-  const placed = placeTarget(target, input.frame, input.felt, insets, scale);
-  if (!overview && mode === "fit") {
-    const chain = placeTarget(input.frame, input.frame, input.felt, insets, scale);
-    return finish(input.frame, input.felt, scale, chain.ox, chain.oy, insets, mode);
+function inflate(insets: AxisInsets, by: number): AxisInsets {
+  return {
+    top: insets.top + by,
+    right: insets.right + by,
+    bottom: insets.bottom + by,
+    left: insets.left + by,
+  };
+}
+
+/** Same reach as `zoneInsets`, without the cap that let a tile hide under a deep badge. */
+function zoneReach(felt: ZoneRect, zones: readonly ZoneRect[]): AxisInsets {
+  const insets: AxisInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  for (const zone of zones) {
+    const left = Math.max(zone.left, felt.left);
+    const right = Math.min(zone.right, felt.right);
+    const top = Math.max(zone.top, felt.top);
+    const bottom = Math.min(zone.bottom, felt.bottom);
+    if (right - left < 1 || bottom - top < 1) continue;
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+    const dLeft = cx - felt.left;
+    const dRight = felt.right - cx;
+    const dTop = cy - felt.top;
+    const dBottom = felt.bottom - cy;
+    const nearest = Math.min(dLeft, dRight, dTop, dBottom);
+    if (nearest === dTop) insets.top = Math.max(insets.top, bottom - felt.top + BADGE_GAP);
+    else if (nearest === dBottom) insets.bottom = Math.max(insets.bottom, felt.bottom - top + BADGE_GAP);
+    else if (nearest === dLeft) insets.left = Math.max(insets.left, right - felt.left + BADGE_GAP);
+    else insets.right = Math.max(insets.right, felt.right - left + BADGE_GAP);
   }
-  return finish(input.frame, input.felt, scale, placed.ox, placed.oy, insets, mode);
+  return insets;
+}
+
+/**
+ * Every tile sits inside the felt and clear of badge, rack, header, and
+ * bottom-bar rectangles. `edge` is the felt padding the tile must keep.
+ */
+export function tilesClear(
+  tiles: readonly LayoutBox[],
+  frame: LayoutBox,
+  felt: FeltSize,
+  scale: number,
+  shiftX: number,
+  shiftY: number,
+  zones: readonly ZoneRect[],
+  edge = 0,
+): boolean {
+  return tiles.every((tile) => {
+    const box = screenBox(felt, frame, scale, shiftX, shiftY, tile);
+    if (box.left < edge - 0.6 || box.top < edge - 0.6) return false;
+    if (box.right > felt.w - edge + 0.6 || box.bottom > felt.h - edge + 0.6) return false;
+    return zones.every(
+      (zone) => box.right <= zone.left + 0.6 || box.left >= zone.right - 0.6 || box.bottom <= zone.top + 0.6 || box.top >= zone.bottom - 0.6,
+    );
+  });
 }
 
 /** How close an open end may sit to the felt edge when it has to leave the badge gutter. */
@@ -410,112 +442,6 @@ function finish(
   };
 }
 
-function chainInside(frame: LayoutBox, felt: FeltSize, insets: AxisInsets, scale: number, ox: number, oy: number): boolean {
-  const right = ox + frame.w * scale;
-  const bottom = oy + frame.h * scale;
-  return ox >= insets.left - 1 && oy >= insets.top - 1 && right <= felt.w - insets.right + 1 && bottom <= felt.h - insets.bottom + 1;
-}
-
-function endsInside(
-  ends: readonly OpenEndBox[],
-  frame: LayoutBox,
-  scale: number,
-  ox: number,
-  oy: number,
-  felt: FeltSize,
-  insets: AxisInsets,
-): boolean {
-  return endRects(ends, frame, scale, ox, oy).every(
-    (rect) => rect.left >= insets.left - 0.5 && rect.top >= insets.top - 0.5 && rect.right <= felt.w - insets.right + 0.5 && rect.bottom <= felt.h - insets.bottom + 0.5,
-  );
-}
-
-/**
- * Largest scale at or above the floor where every end sits on the felt
- * and clear of the seat rectangles. Null when the ends cannot all fit
- * even at the floor, ignoring seats.
- */
-function fitEndsClear(
-  ends: readonly OpenEndBox[],
-  frame: LayoutBox,
-  felt: FeltSize,
-  pad: AxisInsets,
-  zones: readonly ZoneRect[],
-  maxScale: number,
-  minScale: number,
-): { scale: number; ox: number; oy: number } | null {
-  if (!(maxScale >= minScale * 0.98)) return null;
-  const top = Math.max(minScale, maxScale);
-  for (let scale = top; scale >= minScale - 1e-6; scale -= 0.01) {
-    const pan = panClear(ends, frame, felt, pad, zones, Math.max(scale, minScale), 1) ?? panClear(ends, frame, felt, pad, zones, Math.max(scale, minScale), 0);
-    if (pan) return { scale: Math.max(scale, minScale), ...pan };
-    if (scale <= minScale) break;
-  }
-  return null;
-}
-
-function endRects(
-  ends: readonly LayoutBox[],
-  frame: LayoutBox,
-  scale: number,
-  ox: number,
-  oy: number,
-): Array<{ left: number; top: number; right: number; bottom: number }> {
-  return ends.map((end) => {
-    const left = ox + (end.x - frame.x) * scale;
-    const top = oy + (end.y - frame.y) * scale;
-    return { left, top, right: left + end.w * scale, bottom: top + end.h * scale };
-  });
-}
-
-function panClear(
-  ends: readonly OpenEndBox[],
-  frame: LayoutBox,
-  felt: FeltSize,
-  pad: AxisInsets,
-  zones: readonly ZoneRect[],
-  scale: number,
-  gap: number,
-): { ox: number; oy: number } | null {
-  const box = chainBounds(ends, 0);
-  const minOx = pad.left - (box.x - frame.x) * scale;
-  const maxOx = felt.w - pad.right - (box.x + box.w - frame.x) * scale;
-  const minOy = pad.top - (box.y - frame.y) * scale;
-  const maxOy = felt.h - pad.bottom - (box.y + box.h - frame.y) * scale;
-  if (maxOx < minOx - 0.5 || maxOy < minOy - 0.5) return null;
-  const step = 3;
-  const best = { ox: 0, oy: 0, dist: Number.POSITIVE_INFINITY, hit: false };
-  const cx = (minOx + maxOx) / 2;
-  const cy = (minOy + maxOy) / 2;
-  const consider = (ox: number, oy: number) => {
-    if (ox < minOx - 0.5 || ox > maxOx + 0.5 || oy < minOy - 0.5 || oy > maxOy + 0.5) return;
-    const rects = endRects(ends, frame, scale, ox, oy);
-    const onFelt = rects.every(
-      (rect) => rect.left >= pad.left - 0.5 && rect.top >= pad.top - 0.5 && rect.right <= felt.w - pad.right + 0.5 && rect.bottom <= felt.h - pad.bottom + 0.5,
-    );
-    if (!onFelt) return;
-    const blocked = rects.some((rect) => zones.some((zone) => rect.right > zone.left + gap && rect.left < zone.right - gap && rect.bottom > zone.top + gap && rect.top < zone.bottom - gap));
-    if (blocked) return;
-    const dist = Math.hypot(ox - cx, oy - cy);
-    if (dist < best.dist) {
-      best.ox = ox;
-      best.oy = oy;
-      best.dist = dist;
-      best.hit = true;
-    }
-  };
-  consider(cx, cy);
-  if (best.hit && best.dist < 0.5) return { ox: best.ox, oy: best.oy };
-  for (let ox = minOx; ox <= maxOx + 0.1; ox += step) {
-    for (let oy = minOy; oy <= maxOy + 0.1; oy += step) consider(ox, oy);
-  }
-  consider(minOx, minOy);
-  consider(maxOx, maxOy);
-  consider(minOx, maxOy);
-  consider(maxOx, minOy);
-  return best.hit ? { ox: best.ox, oy: best.oy } : null;
-}
-
 /** Where a chain-space box lands in the felt after the camera settles. */
 export function screenBox(
   felt: FeltSize,
@@ -530,46 +456,6 @@ export function screenBox(
   const left = ox + (box.x - frame.x) * scale;
   const top = oy + (box.y - frame.y) * scale;
   return { left, top, right: left + box.w * scale, bottom: top + box.h * scale };
-}
-
-/**
- * Largest set of open ends that fits at `scale`. Playable ends win ties
- * against a larger group that the player cannot use.
- */
-function endSubset(
-  ends: readonly OpenEndBox[],
-  playableIds: readonly string[],
-  scale: number,
-  safeW: number,
-  safeH: number,
-): LayoutBox {
-  const playable = new Set(playableIds);
-  const prefer = ends.filter((end) => end.id != null && playable.has(end.id));
-  const anchor = chainBounds(prefer.length > 0 ? prefer : ends, 0);
-  const ax = anchor.x + anchor.w / 2;
-  const ay = anchor.y + anchor.h / 2;
-  let best: { box: LayoutBox; play: number; count: number; dist: number } | null = null;
-  const limit = 1 << ends.length;
-  for (let mask = 1; mask < limit; mask += 1) {
-    const picked: OpenEndBox[] = [];
-    let play = 0;
-    for (let index = 0; index < ends.length; index += 1) {
-      if ((mask & (1 << index)) === 0) continue;
-      const end = ends[index]!;
-      picked.push(end);
-      if (end.id != null && playable.has(end.id)) play += 1;
-    }
-    const box = chainBounds(picked, END_MARGIN);
-    if (box.w * scale > safeW + 0.5 || box.h * scale > safeH + 0.5) continue;
-    const dist = Math.hypot(box.x + box.w / 2 - ax, box.y + box.h / 2 - ay);
-    const better =
-      best == null ||
-      play > best.play ||
-      (play === best.play && picked.length > best.count) ||
-      (play === best.play && picked.length === best.count && dist < best.dist);
-    if (better) best = { box, play, count: picked.length, dist };
-  }
-  return best?.box ?? chainBounds([ends[0]!], END_MARGIN);
 }
 
 /** Gold ring clearance between the last tile and the hand-over sheet. */
