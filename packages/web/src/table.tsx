@@ -204,6 +204,7 @@ export function Table({
       data-board-scale={scale.toFixed(2)}
       data-board-lift={String(lift)}
       data-board-frozen={handOver ? "true" : "false"}
+      data-win-board="true"
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >

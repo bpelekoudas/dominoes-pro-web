@@ -13,6 +13,7 @@ import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
 import { AvatarFace, BotBadge } from "./avatars";
 import { useMatchCosmetics } from "./store";
+import { useHandCelebration, useWinScore, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 
 interface ChatLine {
   id: number;
@@ -213,6 +214,11 @@ export function App() {
     sessionStorage.setItem("uhoh.splash", "1");
     setSplash(false);
   };
+
+  const winMode = winPreviewRequested();
+  if (winMode && !view) {
+    return <WinPreview mode={winMode} />;
+  }
 
   if (fxGalleryRequested() && !view) {
     return <FxGallery />;
@@ -419,14 +425,15 @@ function Game({
   }, [yourTurn, view.turnPlayerId, view.handNumber]);
 
   const playing = view.status !== "lobby";
-  const showingResult = Boolean(
-    view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended,
-  );
+  const win = useHandCelebration(view);
+  const showingResult = win.sheet;
   return (
+    <WinScoreContext.Provider value={win.scores}>
     <main
       className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`}
       data-skin="ivory"
       data-tile-skin={tileSkin}
+      data-win-stage={win.stage}
     >
       <div className="felt-column">
       <header className="playbar">
@@ -497,7 +504,7 @@ function Game({
           </div>
         </section>
       ) : null}
-      {view.lastHand && (view.betweenHands || view.phase === "over" || view.phase === "between") && !view.ended ? (
+      {win.sheet && view.lastHand && !view.ended ? (
         <HandSummary
           view={view}
           onContinue={() => onSend({ type: "continue" })}
@@ -591,7 +598,21 @@ function Game({
         onClose={onToggleChat}
         onPreset={(packId, tauntId) => onSend({ type: "chat", kind: "preset", packId, tauntId })}
       />
+      {win.plan && (win.stage === "pips" || win.stage === "banner") ? (
+        <WinShow
+          stage={win.stage}
+          plan={win.plan}
+          banner={win.banner}
+          reveals={win.reveals}
+          yourId={view.yourId}
+          reduced={win.reduced}
+          frozenAt={win.frozenAt}
+          onSkip={win.skip}
+          onLand={win.onLand}
+        />
+      ) : null}
     </main>
+    </WinScoreContext.Provider>
   );
 }
 
@@ -747,11 +768,12 @@ function SeatRail({
 
 function SeatChip({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
   const clock = useServerNow(view.serverNow);
+  const live = useWinScore(player.id, player.score);
   const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div
-      className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}`}
+      className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}${live.hot ? " win-hot" : ""}`}
       data-account-bot={player.accountBot ? "true" : "false"}
       data-player-id={player.id}
       data-turn={player.isTurn ? "true" : "false"}
@@ -770,7 +792,9 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
           {!player.connected && !player.bot ? <em className="away"> away</em> : null}
         </span>
         <span className="chip-meta">
-          <strong>{player.score}</strong>
+          <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id}>
+            {live.score}
+          </strong>
           {player.rank ? (
             <RankLine
               tierId={player.rank.tierId}

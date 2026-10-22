@@ -137,6 +137,37 @@ export function playUhOh(): void {
   if (typeof navigator.vibrate === "function") navigator.vibrate([24, 30, 48, 24, 90, 36, 130]);
 }
 
+/**
+ * A short win sting at the SFX volume. It shares the mute switch and the
+ * unlocked audio context, and it does not stop or duck anything already playing.
+ */
+export function playWinSting(kind: "hand" | "game" | "match"): void {
+  const ctx = audio();
+  if (!ctx) return;
+  const notes = kind === "match" ? [392, 523.25, 659.25, 783.99] : kind === "game" ? [523.25, 659.25, 783.99] : [587.33, 880];
+  const peak = kind === "match" ? 0.2 : kind === "game" ? 0.16 : 0.12;
+  const step = kind === "hand" ? 0.07 : 0.09;
+  try {
+    const start = ctx.currentTime;
+    for (let index = 0; index < notes.length; index += 1) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = notes[index]!;
+      const at = start + index * step;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(peak, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.22);
+    }
+  } catch {
+    return;
+  }
+}
+
 function reducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
