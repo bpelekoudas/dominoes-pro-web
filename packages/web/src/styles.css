@@ -1762,7 +1762,20 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 
 .table-scroll { background-position: center; background-size: cover; background-repeat: no-repeat; }
-.hero-portrait { position: relative; z-index: 1; display: grid; }
+.hero-portrait {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: end center;
+  width: min(74%, 380px);
+  justify-self: center;
+  align-self: end;
+}
+.hero-portrait > .portrait-hero {
+  width: 100%;
+  max-width: 100%;
+  justify-self: center;
+}
 .hero-frame, .avatar-frame {
   position: absolute;
   inset: -14%;
@@ -1770,6 +1783,18 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   height: 128%;
   object-fit: contain;
   pointer-events: none;
+}
+/* The ring is sized to the portrait, centered on him, and painted behind the cutout. */
+.hero-portrait > .hero-frame {
+  z-index: 0;
+  inset: auto;
+  left: 50%;
+  bottom: -2%;
+  width: 168%;
+  height: 124%;
+  transform: translateX(-50%);
+  object-fit: contain;
+  object-position: center bottom;
 }
 .avatar-frame { z-index: 2; }
 

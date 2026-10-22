@@ -113,6 +113,7 @@ export function ArcadeHome({
   const readyName = name.trim();
   const [wearTick, setWearTick] = useState(0);
   const [frameId, setFrameId] = useState<string | null>(null);
+  const heroFrame = frameId ?? (user?.avatarId === "pitmaster" ? "FRM-015" : null);
   useEffect(() => {
     if (!user) return;
     let stopped = false;
@@ -180,7 +181,7 @@ export function ArcadeHome({
       <div className="hero-stage">
         <span className="hero-portrait">
           <Portrait id={user?.avatarId} size="hero" />
-          {frameId ? <img className="hero-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
+          {heroFrame ? <img className="hero-frame" src={`/store/${heroFrame}.webp`} alt="" draggable={false} /> : null}
         </span>
         <button
           type="button"
@@ -632,7 +633,9 @@ export function MenuDemo() {
   }
   if (shot === "quick") return <DemoQuick />;
   if (shot === "table") return <DemoTable />;
-  return <ArcadeHome {...demoHome} />;
+  const avatar = new URLSearchParams(location.search).get("avatar");
+  const user = avatar ? { ...demoHome.user, avatarId: avatar } : demoHome.user;
+  return <ArcadeHome {...demoHome} user={user} />;
 }
 
 const demoHome = {
