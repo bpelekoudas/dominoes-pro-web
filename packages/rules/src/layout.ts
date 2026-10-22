@@ -9,21 +9,21 @@ import { ARM_IDS, openEnds } from "./board.js";
  * The view scales the picture into the felt.
  *
  * The felt is tall, matching the board area on a phone once the header is
- * slim. Left and right arms run out of horizontal room first and bend.
- * Up and down arms can travel a long way before they bend.
+ * slim. An arm leaves the spinner straight, in its own quadrant. It keeps
+ * that direction for a short run, then turns while there is still open
+ * felt beside it. A straight run is capped at about six tiles, which is
+ * the shorter side of the phone in tile-lengths. The turn goes to the
+ * side whose snake keeps the board's box smaller, so the view can stay
+ * zoomed in. A side that only ties on scale stays in the arm's quadrant.
  * Width is 416 so the tile forced straight off an early double still
  * lands inside: spinner, one tile, a double, then a full tile.
  *
- * An arm leaves the spinner in its own quadrant. It runs straight, then
- * bends at the edge of the phone. The first bend prefers the clockwise
+ * The first bend at the edge of the phone still prefers the clockwise
  * side (up turns right, right turns down, down turns left, left turns
- * up) unless the other side is clearly emptier. A second bend prefers
- * to keep going outward, but turns back across the open felt when that
- * uses the empty half of the table and still keeps a full tile of
- * clearance. The chain does not fold onto another arm or onto itself.
- * When the next straight step would overlap another arm or the spinner
- * row, the chain bends again and wraps away. A clear step just outside
- * the phone is allowed, and the view scales that picture down.
+ * up) unless the other side is clearly emptier. The chain does not fold
+ * onto another arm or onto itself. When the next straight step would
+ * overlap another arm or the spinner row, the chain bends again and
+ * wraps away. A double, and the tile centred on it, never bend.
  *
  * A double sits crosswise to the chain. The next tile continues in the
  * same direction, its short end centred on the double's long side.
@@ -45,6 +45,11 @@ export const FIT_MARGIN = 14;
  */
 export const PHONE_WIDTH = 416;
 export const PHONE_HEIGHT = 700;
+/**
+ * Longest straight run before the chain turns into open felt.
+ * About the shorter phone side: 416 / (72 + 2) is a little over five tiles.
+ */
+export const STRAIGHT_CAP = 6;
 /**
  * A double and the centred tile after it cannot turn, so a run of
  * double, tile, double, tile may pass the bend edge. It still has to
@@ -103,6 +108,8 @@ interface Cursor {
   dir: LayoutDir;
   prevDouble: boolean;
   bends: number;
+  /** Tiles already placed in `dir`, including this one. */
+  run: number;
 }
 
 export function layoutBoard(board: BoardState): BoardLayout {
@@ -123,7 +130,7 @@ export function layoutBoard(board: BoardState): BoardLayout {
     const placed = toTile(first, box, arm, arm);
     tiles.push(placed);
     occupants.push({ box: placed, arm });
-    cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high, bends: 0 });
+    cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high, bends: 0, run: 1 });
   }
 
   // Grow the arms together. A finished arm must not cross a lane another
@@ -155,6 +162,7 @@ export function layoutBoard(board: BoardState): BoardLayout {
         dir: choice.dir,
         prevDouble: tile.low === tile.high,
         bends: choice.bends,
+        run: choice.dir === cursor.dir ? cursor.run + 1 : 1,
       };
       cursors.set(arm, nextCursor);
       nextIndex.set(arm, index + 1);
@@ -189,11 +197,10 @@ export function layoutBoard(board: BoardState): BoardLayout {
 const TURN_BIAS = 72;
 
 /**
- * Go straight while the next tile fits on the phone. Bend when it would
- * leave the felt or crowd another run. The clockwise / outward turn is
- * preferred, and the other perpendicular is used when the rest of that
- * run would sit in the empty half of the table. A double, and the tile
- * centred on it, never bend.
+ * Go straight while the run is short and the next tile fits on the phone.
+ * At the straight-run cap, or once the straight step leaves the felt, turn
+ * into the side whose snake keeps the board larger on screen. A double,
+ * and the tile centred on it, never bend.
  */
 function chooseStep(
   tile: OrientedTile,
@@ -210,9 +217,18 @@ function chooseStep(
 
   if (lock) return keep;
 
+  const mustTurn = cursor.run >= STRAIGHT_CAP;
   const straightOk = fits(straight, home, occupants, centre, true, cursor.box)
     && roomForDouble(upcoming, cursor.dir, straight, home, occupants, centre, true);
-  if (straightOk) return keep;
+  if (straightOk && !mustTurn) return keep;
+
+  // The straight run has hit the cap. Turn into open felt, picking the
+  // side whose snake leaves the bigger tile on screen. A blocked side
+  // stays straight and the edge bend below can still fire.
+  if (mustTurn) {
+    const turned = bestOpenTurn(tile, upcoming, cursor, home, occupants, centre);
+    if (turned) return { box: turned.box, dir: turned.dir, bends: turned.bends };
+  }
 
   // First bend: clockwise, or the other way when that side is open.
   // Second bend: further outward, or back across the empty felt.
@@ -243,8 +259,8 @@ function chooseStep(
     if (best) return { box: best.box, dir: best.dir, bends: cursor.bends + 1 };
   }
 
-  // Straight is off the phone, but it still clears every other tile.
-  // The view scales down. Wrapping is only for a real collision.
+  // No open side. A clear straight step is allowed to leave the phone,
+  // and the view scales down. Wrapping is only for a real collision.
   if (isClear(straight, occupants, centre, cursor.box) && runFits(upcoming, cursor.dir, straight, home, occupants, centre)) {
     return keep;
   }
@@ -252,6 +268,115 @@ function chooseStep(
   const escaped = escapeStep(tile, upcoming, cursor, home, occupants, centre);
   if (escaped) return escaped;
   return keep;
+}
+
+/**
+ * Both perpendiculars, scored by the scale of the snake that would follow.
+ * A near tie stays in the arm's quadrant so a short arm does not fold back
+ * across a neighbour.
+ */
+function bestOpenTurn(
+  tile: OrientedTile,
+  upcoming: readonly OrientedTile[],
+  cursor: Cursor,
+  home: ArmId,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+): { box: LayoutBox; dir: LayoutDir; bends: number; scale: number } | null {
+  const isDouble = tile.low === tile.high;
+  const options: Array<{ box: LayoutBox; dir: LayoutDir; scale: number; quadrant: boolean }> = [];
+  for (const turn of sideTurns(cursor.dir)) {
+    for (const box of bendChoices(cursor.box, cursor.dir, turn, isDouble)) {
+      if (!isClear(box, occupants, centre, cursor.box)) continue;
+      if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false, false)) continue;
+      options.push({
+        box,
+        dir: turn,
+        scale: snakeScale(box, turn, 1, upcoming, occupants, centre, home),
+        quadrant: inQuadrant(box, home),
+      });
+      break;
+    }
+  }
+  if (options.length === 0) return null;
+  let picked = options[0]!;
+  for (const option of options) {
+    if (option.scale > picked.scale + 1e-6) picked = option;
+  }
+  const homeSide = options.find((option) => option.quadrant);
+  if (homeSide && homeSide !== picked && homeSide.scale >= picked.scale * 0.96) picked = homeSide;
+  return { box: picked.box, dir: picked.dir, bends: cursor.bends + 1, scale: picked.scale };
+}
+
+/** Scale of the board if the rest of the arm snakes from this tile, turning at the cap. */
+function snakeScale(
+  start: LayoutBox,
+  dir: LayoutDir,
+  initialRun: number,
+  upcoming: readonly OrientedTile[],
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+  home: ArmId,
+): number {
+  const owned: Occupant[] = occupants.map((item) => ({ ...item }));
+  owned.push({ box: start, arm: home });
+  let prev = start;
+  let dirNow = dir;
+  let run = initialRun;
+  let prevDouble = upcoming[0]!.low === upcoming[0]!.high;
+  for (let index = 1; index < upcoming.length; index += 1) {
+    const nextTile = upcoming[index]!;
+    const nextDouble = nextTile.low === nextTile.high;
+    const locked = prevDouble || nextDouble;
+    let nextDir = dirNow;
+    if (!locked && run >= STRAIGHT_CAP) nextDir = towardCenter(prev, dirNow);
+    let box = nextDir === dirNow
+      ? straightBox(prev, dirNow, nextDouble)
+      : bendBox(prev, dirNow, nextDir, nextDouble);
+    if (!isClear(box, owned, centre, prev)) {
+      if (nextDir === dirNow) break;
+      box = straightBox(prev, dirNow, nextDouble);
+      nextDir = dirNow;
+      if (!isClear(box, owned, centre, prev)) break;
+    }
+    owned.push({ box, arm: home });
+    prev = box;
+    run = nextDir === dirNow ? run + 1 : 1;
+    dirNow = nextDir;
+    prevDouble = nextDouble;
+  }
+  return layoutScale(owned.map((item) => item.box));
+}
+
+/** Perpendicular that heads back toward the spinner. */
+function towardCenter(box: LayoutBox, dir: LayoutDir): LayoutDir {
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const [clockwiseTurn, other] = sideTurns(dir);
+  const pull = (turn: LayoutDir) => {
+    if (turn === "west") return cx;
+    if (turn === "east") return -cx;
+    if (turn === "north") return cy;
+    return -cy;
+  };
+  const clockwisePull = pull(clockwiseTurn);
+  const otherPull = pull(other);
+  if (otherPull > clockwisePull) return other;
+  return clockwiseTurn;
+}
+
+function layoutScale(boxes: readonly LayoutBox[]): number {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + box.w);
+    maxY = Math.max(maxY, box.y + box.h);
+  }
+  return Math.min(PHONE_WIDTH / Math.max(1, maxX - minX), PHONE_HEIGHT / Math.max(1, maxY - minY));
 }
 
 /**
@@ -315,7 +440,7 @@ function holdAhead(arm: ArmId, cursor: Cursor, occupants: Occupant[], centre: La
     const follower = straightBox(cursor.box, cursor.dir, false);
     if (!isClear(follower, occupants, centre, cursor.box)) return;
     occupants.push({ box: follower, arm, reserved: true });
-    const beyond: Cursor = { box: follower, dir: cursor.dir, prevDouble: false, bends: cursor.bends };
+    const beyond: Cursor = { box: follower, dir: cursor.dir, prevDouble: false, bends: cursor.bends, run: cursor.run + 1 };
     const exit = chooseStep(PREVIEW_TILE, [PREVIEW_TILE], beyond, arm, occupants, centre).box;
     if (isClear(exit, occupants, centre, follower)) occupants.push({ box: exit, arm, reserved: true });
     return;

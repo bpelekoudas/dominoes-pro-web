@@ -20,6 +20,7 @@ import {
   layoutBoard,
   PHONE_HEIGHT,
   PHONE_WIDTH,
+  STRAIGHT_CAP,
   TILE_GAP,
   TILE_LONG,
   TILE_SHORT,
@@ -637,6 +638,76 @@ describe("board layout", () => {
     }
     expect(crowded).toBeGreaterThan(10);
   }, 20_000);
+
+  it("turns a long column into the open side and keeps a larger tile", () => {
+    const played = playHand(4, "draw_until", 28);
+    const board = played.find(
+      (item) =>
+        item.arms.west.length === 3
+        && item.arms.east.length === 14
+        && item.arms.north.length === 4
+        && item.arms.south.length === 3,
+    );
+    expect(board, "column board").toBeTruthy();
+    if (!board) return;
+    const layout = layoutBoard(board);
+    assertLaidOut(board, "long column", false);
+    const dirs = board.arms.east.map(
+      (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
+    );
+    // The short neighbours leave the left side open, so the south run turns west.
+    expect(dirs).toContain("west");
+    let run = 0;
+    let prev = "";
+    let longest = 0;
+    for (const dir of dirs) {
+      run = dir === prev ? run + 1 : 1;
+      prev = dir;
+      longest = Math.max(longest, run);
+    }
+    expect(longest).toBeLessThanOrEqual(STRAIGHT_CAP);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const tile of layout.tiles) {
+      minX = Math.min(minX, tile.x);
+      minY = Math.min(minY, tile.y);
+      maxX = Math.max(maxX, tile.x + tile.w);
+      maxY = Math.max(maxY, tile.y + tile.h);
+    }
+    // The previous router kept one south column. On a 390×649 felt, with the
+    // 18px sliver inset, that picture scaled to 0.542.
+    const feltW = 390 - 18 * 2;
+    const feltH = 649 - 18 * 2;
+    const scale = Math.min(feltW / (maxX - minX), feltH / (maxY - minY));
+    expect(scale).toBeGreaterThan(0.542);
+
+    // While the other arms are still short, there is room to turn, so no
+    // straight run grows past the cap.
+    for (const seed of [9, 27, 28]) {
+      for (const sample of playHand(4, "draw_until", seed)) {
+        const sampleLayout = layoutBoard(sample);
+        for (const arm of ARM_IDS) {
+          const others = ARM_IDS.filter((id) => id !== arm).map((id) => sample.arms[id].length);
+          const longestOther = Math.max(...others);
+          if (longestOther > 4 || sample.arms[arm].length <= STRAIGHT_CAP) continue;
+          const armDirs = sample.arms[arm].map(
+            (tile) => sampleLayout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
+          );
+          let sampleRun = 0;
+          let samplePrev = "";
+          let sampleLongest = 0;
+          for (const dir of armDirs) {
+            sampleRun = dir === samplePrev ? sampleRun + 1 : 1;
+            samplePrev = dir;
+            sampleLongest = Math.max(sampleLongest, sampleRun);
+          }
+          expect(sampleLongest, `seed ${seed} ${arm}`).toBeLessThanOrEqual(STRAIGHT_CAP);
+        }
+      }
+    }
+  });
 
   it("reports a fit box with a margin around the tiles", () => {
     const board = boardFromChain(chainFrom(tileById("3-3"), 4), "west");
