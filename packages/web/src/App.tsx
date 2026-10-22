@@ -404,9 +404,10 @@ function Game({
   const unread = useUnread(chat, chatOpen);
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
   const around = seatAround(view.players);
-  const left = around.find((seat) => seat.edge === "left") ?? null;
-  const top = around.find((seat) => seat.edge === "top") ?? null;
-  const right = around.find((seat) => seat.edge === "right") ?? null;
+  const opponents = (["left", "top", "right"] as const).flatMap((edge) => {
+    const seat = around.find((item) => item.edge === edge);
+    return seat ? [{ player: seat.player, edge }] : [];
+  });
   const you = around.find((seat) => seat.edge === "bottom") ?? null;
   const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby" && view.phase !== "between";
   const notice = useFleetingNotice(view);
@@ -531,26 +532,22 @@ function Game({
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
-          <div className="table-frame" data-opponents={around.length - 1}>
-            {top ? (
-              <SeatRail
-                edge="top"
-                player={top.player}
-                bubble={bubbleText(bubble, top.player.id)}
-                notice={notice?.playerId === top.player.id ? notice.text : null}
-                view={view}
-              />
+          <div className="table-frame" data-opponents={opponents.length}>
+            {opponents.length > 0 ? (
+              <div className="opponent-rail" data-count={opponents.length}>
+                {opponents.map((seat) => (
+                  <SeatRail
+                    key={seat.player.id}
+                    edge={seat.edge}
+                    player={seat.player}
+                    bubble={bubbleText(bubble, seat.player.id)}
+                    notice={notice?.playerId === seat.player.id ? notice.text : null}
+                    view={view}
+                  />
+                ))}
+              </div>
             ) : null}
             <div className="table-middle">
-              {left ? (
-                <SeatRail
-                  edge="left"
-                  player={left.player}
-                  bubble={bubbleText(bubble, left.player.id)}
-                  notice={notice?.playerId === left.player.id ? notice.text : null}
-                  view={view}
-                />
-              ) : null}
               <Table
                 view={view}
                 selectedTile={selectedTile}
@@ -561,15 +558,6 @@ function Game({
                 replayToken={replayToken}
                 tableArt={tableArt}
               />
-              {right ? (
-                <SeatRail
-                  edge="right"
-                  player={right.player}
-                  bubble={bubbleText(bubble, right.player.id)}
-                  notice={notice?.playerId === right.player.id ? notice.text : null}
-                  view={view}
-                />
-              ) : null}
             </div>
           </div>
           <div className="hand-tray">
@@ -778,11 +766,9 @@ function SeatRail({
       data-tiles={player.tileCount}
     >
       <SeatChip player={player} view={view} />
-      <div className={`backs backs-${edge}`} aria-hidden="true">
-        {Array.from({ length: player.tileCount }, (_, index) => (
-          <i key={index} className="tile-back" />
-        ))}
-      </div>
+      <span className="count-badge" aria-label={`${player.tileCount} tiles`}>
+        {player.tileCount}
+      </span>
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
       {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
     </div>
@@ -828,7 +814,7 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
               compact
             />
           ) : null}
-          {player.isYou ? null : <span className="tile-label">{player.tileCount} tiles</span>}
+          {player.isYou ? null : <span className="sr-only">{player.tileCount} tiles</span>}
         </span>
       </span>
     </div>

@@ -309,7 +309,12 @@ export function Table({
       <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
       {pop && popAt
         ? createPortal(
-            <p className="score-pop" style={{ left: popAt.left, top: popAt.top }} data-awarded={pop.awarded}>
+            <p
+              className="score-pop"
+              style={{ left: popAt.left, top: popAt.top }}
+              data-awarded={pop.awarded}
+              data-place={popAt.place}
+            >
               +{pop.awarded}
             </p>,
             document.body,
@@ -359,6 +364,8 @@ function Arrival({
   const awarded = lastPlay?.awarded ?? 0;
   const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [face, setFace] = useState<{ a: number; b: number; orientation: "horizontal" | "vertical" } | null>(null);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const skip = playerId === yourId || !tileId || bigMomentLevel(awarded) !== null || prefersReducedMotion();
 
   useLayoutEffect(() => {
@@ -366,38 +373,49 @@ function Arrival({
       setBox(null);
       return;
     }
-    const tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
-    const seat = document.querySelector<HTMLElement>(`[data-player-id="${CSS.escape(playerId)}"] .avatar`);
-    if (!tile || !seat) {
-      setBox(null);
-      return;
-    }
-    const placed = layout?.tiles.find((item) => item.tileId === tileId);
-    const to = tile.getBoundingClientRect();
-    const from = seat.getBoundingClientRect();
-    tile.classList.add("is-arriving");
-    setFace(
-      placed
-        ? { a: placed.a, b: placed.b, orientation: placed.orientation }
-        : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
-    );
-    setBox({ left: from.left, top: from.top, width: Math.max(18, from.width), height: Math.max(18, from.height) });
+    let tile: HTMLElement | null = null;
     let frame = 0;
-    const timer = window.setTimeout(() => {
-      tile.classList.remove("is-arriving");
-      setBox(null);
-    }, 420);
-    frame = window.requestAnimationFrame(() => {
+    let timer = 0;
+    let cancelled = false;
+    const start = () => {
+      tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
+      const seat = document.querySelector<HTMLElement>(`.rail[data-player-id="${CSS.escape(playerId)}"] .avatar`);
+      if (!tile || !seat) return false;
+      const to = tile.getBoundingClientRect();
+      if (to.width < 2 || to.height < 2) return false;
+      const from = seat.getBoundingClientRect();
+      const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
+      tile.classList.add("is-arriving");
+      setFace(
+        placed
+          ? { a: placed.a, b: placed.b, orientation: placed.orientation }
+          : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
+      );
+      setBox({ left: from.left, top: from.top, width: Math.max(18, from.width), height: Math.max(18, from.height) });
+      timer = window.setTimeout(() => {
+        tile?.classList.remove("is-arriving");
+        if (!cancelled) setBox(null);
+      }, 420);
       frame = window.requestAnimationFrame(() => {
-        setBox({ left: to.left, top: to.top, width: to.width, height: to.height });
+        frame = window.requestAnimationFrame(() => {
+          if (cancelled || !tile) return;
+          const landed = tile.getBoundingClientRect();
+          setBox({ left: landed.left, top: landed.top, width: landed.width, height: landed.height });
+        });
       });
+      return true;
+    };
+    if (!start()) frame = window.requestAnimationFrame(() => {
+      if (!cancelled) start();
     });
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
-      tile.classList.remove("is-arriving");
+      tile?.classList.remove("is-arriving");
+      setBox(null);
     };
-  }, [seq, tileId, playerId, skip, layout]);
+  }, [seq, tileId, playerId, skip]);
 
   if (!box || !face) return null;
   return createPortal(
@@ -530,9 +548,14 @@ function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: 
       setPop(null);
       return;
     }
-    setPop({ seq, awarded, tileId, endId });
-    const timer = window.setTimeout(() => setPop(null), 1200);
-    return () => window.clearTimeout(timer);
+    // The camera eases for 240ms and an opponent tile is in flight for 420ms.
+    // Wait until that tile has landed, then show the award beside it.
+    const show = window.setTimeout(() => setPop({ seq, awarded, tileId, endId }), 460);
+    const hide = window.setTimeout(() => setPop(null), 1100);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+    };
   }, [seq, awarded, tileId, endId]);
   return pop;
 }
@@ -544,8 +567,8 @@ function useAnchor(
   scale: number,
   tileId: string | null,
   endId: string | null,
-): { left: number; top: number } | null {
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+): { left: number; top: number; place: "above" | "beside" } | null {
+  const [at, setAt] = useState<{ left: number; top: number; place: "above" | "beside" } | null>(null);
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage || !layout || !fit || !tileId) {
@@ -559,12 +582,24 @@ function useAnchor(
       setAt(null);
       return;
     }
+    const felt = stage.closest(".table-scroll")?.getBoundingClientRect() ?? stage.getBoundingClientRect();
     const origin = stage.getBoundingClientRect();
     const local = place(box, fit);
-    setAt({
-      left: origin.left + (local.left + local.width / 2) * scale,
-      top: origin.top + local.top * scale,
-    });
+    const node = stage.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
+    const rect = node?.getBoundingClientRect();
+    const width = rect && rect.width > 1 ? rect.width : local.width * scale;
+    const tileLeft = rect && rect.width > 1 ? rect.left : origin.left + local.left * scale;
+    const tileTop = rect && rect.height > 1 ? rect.top : origin.top + local.top * scale;
+    // The award sits fully above the tile, or just outside it. The top edge
+    // is already clear of the tile, so a fade cannot slide the number onto it.
+    if (tileTop - 46 >= felt.top + 2) {
+      setAt({ left: tileLeft + width / 2, top: tileTop - 46, place: "above" });
+      return;
+    }
+    const roomRight = felt.right - (tileLeft + width);
+    const roomLeft = tileLeft - felt.left;
+    const beside = roomRight >= roomLeft ? tileLeft + width + 10 : Math.max(felt.left + 2, tileLeft - 58);
+    setAt({ left: beside, top: Math.max(felt.top + 2, tileTop), place: "beside" });
   }, [stageRef, layout, fit, scale, tileId, endId]);
   return at;
 }
