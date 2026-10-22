@@ -17,6 +17,8 @@ export interface RoomRow {
   casual?: number | null;
   /** 1 when the room is a public quick-match table. Older rows are private. */
   listed?: number | null;
+  /** 1 when every seat is a soak test. Those rooms are not ranked and are deleted after the run. */
+  soak?: number | null;
 }
 
 export interface PlayerRow {
@@ -58,6 +60,8 @@ export interface UserRow {
   peak_step?: string | null;
   /** 1 for a server-owned practice account. Humans stay 0. */
   is_bot?: number;
+  /** 1 for a post-deploy soak account. Hidden from leaderboards and stats. */
+  is_soak?: number;
 }
 
 export interface StandingUpdate {
@@ -368,6 +372,9 @@ export class Store {
     if (!roomsNow.some((column) => column.name === "listed")) {
       this.db.exec(`ALTER TABLE rooms ADD COLUMN listed INTEGER NOT NULL DEFAULT 0`);
     }
+    if (!roomsNow.some((column) => column.name === "soak")) {
+      this.db.exec(`ALTER TABLE rooms ADD COLUMN soak INTEGER NOT NULL DEFAULT 0`);
+    }
     const playersNow = this.db.prepare(`PRAGMA table_info(players)`).all() as Array<{ name: string }>;
     if (!playersNow.some((column) => column.name === "avatar_id")) {
       this.db.exec(`ALTER TABLE players ADD COLUMN avatar_id TEXT`);
@@ -392,6 +399,7 @@ export class Store {
     addUser("peak_tier", "peak_tier TEXT NOT NULL DEFAULT 'rookie'");
     addUser("peak_step", "peak_step TEXT");
     addUser("is_bot", "is_bot INTEGER NOT NULL DEFAULT 0");
+    addUser("is_soak", "is_soak INTEGER NOT NULL DEFAULT 0");
     const walletCols = this.db.prepare(`PRAGMA table_info(wallets)`).all() as Array<{ name: string }>;
     const walletNames = new Set(walletCols.map((column) => column.name));
     if (!walletNames.has("earned_day")) this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_day TEXT`);
@@ -423,8 +431,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO rooms (
-          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual, listed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual, listed, soak
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         room.id,
@@ -439,6 +447,7 @@ export class Store {
         room.rules_version,
         room.casual ? 1 : 0,
         room.listed ? 1 : 0,
+        room.soak ? 1 : 0,
       );
   }
 
@@ -599,9 +608,17 @@ export class Store {
   insertUser(user: UserRow): void {
     this.db
       .prepare(
-        `INSERT INTO users (id, display_name, avatar_id, created_at, updated_at, is_guest) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (id, display_name, avatar_id, created_at, updated_at, is_guest, is_soak) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(user.id, user.display_name, user.avatar_id, user.created_at, user.updated_at, user.is_guest);
+      .run(
+        user.id,
+        user.display_name,
+        user.avatar_id,
+        user.created_at,
+        user.updated_at,
+        user.is_guest,
+        user.is_soak ? 1 : 0,
+      );
   }
 
   user(id: string): UserRow | null {
@@ -730,16 +747,20 @@ export class Store {
 
   topBySeason(limit: number, includeBots = true): UserRow[] {
     const sql = includeBots
-      ? `SELECT * FROM users ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`
-      : `SELECT * FROM users WHERE is_bot = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`;
+      ? `SELECT * FROM users WHERE COALESCE(is_soak, 0) = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`
+      : `SELECT * FROM users WHERE is_bot = 0 AND COALESCE(is_soak, 0) = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`;
     return this.db.prepare(sql).all(limit) as unknown as UserRow[];
   }
 
   topByRating(limit: number, includeBots = true): UserRow[] {
     const sql = includeBots
-      ? `SELECT * FROM users ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`
-      : `SELECT * FROM users WHERE is_bot = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`;
+      ? `SELECT * FROM users WHERE COALESCE(is_soak, 0) = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`
+      : `SELECT * FROM users WHERE is_bot = 0 AND COALESCE(is_soak, 0) = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`;
     return this.db.prepare(sql).all(limit) as unknown as UserRow[];
+  }
+
+  markSoak(id: string): void {
+    this.db.prepare(`UPDATE users SET is_soak = 1 WHERE id = ?`).run(id);
   }
 
   markBot(id: string): void {
@@ -774,6 +795,42 @@ export class Store {
     this.db.prepare(`DELETE FROM bot_events`).run();
     this.db.prepare(`DELETE FROM app_meta WHERE key LIKE 'bot_%'`).run();
     return rows.length;
+  }
+
+  /** Deletes one room and the hands, actions, chat, and moments that belong to it. */
+  purgeRoom(id: string): void {
+    const hands = this.db.prepare(`SELECT id FROM hands WHERE room_id = ?`).all(id) as Array<{ id: string }>;
+    for (const hand of hands) this.db.prepare(`DELETE FROM actions WHERE hand_id = ?`).run(hand.id);
+    this.db.prepare(`DELETE FROM hands WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM chat WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM game_moments WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM rating_history WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM bone_grants WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM players WHERE room_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM rooms WHERE id = ?`).run(id);
+  }
+
+  /**
+   * Deletes soak accounts and soak tables. Real players and their games stay.
+   * Call after the live soak rooms have been dropped, so a deleted row is not still in memory.
+   */
+  purgeSoak(): { users: number; rooms: number } {
+    const rooms = this.db.prepare(`SELECT id FROM rooms WHERE COALESCE(soak, 0) = 1`).all() as Array<{ id: string }>;
+    for (const room of rooms) this.purgeRoom(room.id);
+    const users = this.db.prepare(`SELECT id FROM users WHERE COALESCE(is_soak, 0) = 1`).all() as Array<{ id: string }>;
+    for (const row of users) {
+      this.db.prepare(`DELETE FROM wallets WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM owned_items WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM loadouts WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM rating_history WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM identities WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM season_peaks WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM bone_grants WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM players WHERE user_id = ?`).run(row.id);
+      this.db.prepare(`DELETE FROM users WHERE id = ?`).run(row.id);
+    }
+    return { users: users.length, rooms: rooms.length };
   }
 
   ratingEvent(userId: string, roomId: string, seriesId: string, gameNumber: number): RatingEventRow | null {

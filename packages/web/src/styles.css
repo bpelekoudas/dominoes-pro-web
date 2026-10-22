@@ -356,7 +356,19 @@ input {
 }
 .edge-left .talk-bubble { left: calc(100% + 6px); top: 0; }
 .edge-right .talk-bubble { right: calc(100% + 6px); left: auto; top: 0; }
-.edge-top .talk-bubble { left: 50%; top: calc(100% + 4px); transform: translateX(-50%); }
+/* Stay in the badge row. A bubble hung under the rail lands on the top tiles. */
+.edge-top .talk-bubble {
+  left: calc(50% + 48px);
+  right: auto;
+  top: auto;
+  bottom: 0;
+  transform: none;
+  max-width: min(132px, 32vw);
+  max-height: 32px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .rail-top {
   min-height: 44px;
   max-height: 48px;
@@ -486,6 +498,16 @@ input {
   font-size: 0.78rem;
   line-height: 1.25;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+}
+.talk-bubble.talk-reaction { animation: reaction-fade 1.1s ease forwards; }
+@keyframes reaction-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  68% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .talk-bubble.talk-reaction { animation: none; }
 }
 .rail-top .talk-bubble { left: 8px; top: 46px; }
 .you-float { position: relative; z-index: 4; flex: none; }

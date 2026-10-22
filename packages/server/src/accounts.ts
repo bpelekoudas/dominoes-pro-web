@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
-import { cleanName } from "./hub.js";
+import { cleanName, isSoakName } from "./hub.js";
 import { isAvatarId, isWithheldId, resolveAvatar } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
 import { describePlayer, type PublicStanding } from "./ranking.js";
@@ -207,6 +207,7 @@ export class Accounts {
     const user = this.store.user(userId);
     if (!user) return { outcome: "invalid", error: "That profile is gone." };
     this.store.updateUser(userId, { display_name: name, updated_at: this.stamp() });
+    if (isSoakName(name)) this.store.markSoak(userId);
     return { outcome: "ok", user: this.present(userId)!, token: null };
   }
 
@@ -397,6 +398,7 @@ export class Accounts {
       created_at: stamp,
       updated_at: stamp,
       is_guest: guest ? 1 : 0,
+      is_soak: isSoakName(displayName) ? 1 : 0,
     });
     return { id };
   }

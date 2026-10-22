@@ -663,7 +663,9 @@ export function Game({
                   />
                 ) : null}
                 {you && bubbleText(bubble, you.player.id) ? (
-                  <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p>
+                  <p className={`talk-bubble${isReaction(bubbleText(bubble, you.player.id) ?? "") ? " talk-reaction" : ""}`}>
+                    {bubbleText(bubble, you.player.id)}
+                  </p>
                 ) : null}
               </div>
               {yourTurn ? <p className="your-turn">Your turn</p> : null}
@@ -931,7 +933,7 @@ function EdgeSeat({
         ))}
       </div>
       {edge === "top" ? <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} /> : null}
-      {bubble ? <p className="talk-bubble">{bubble}</p> : null}
+      {bubble ? <p className={`talk-bubble${isReaction(bubble) ? " talk-reaction" : ""}`}>{bubble}</p> : null}
       {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
       <span className="sr-only">
         {player.name}, {count} tiles
@@ -1386,7 +1388,7 @@ function useTalkBubble(chat: ChatLine[]): ChatLine | null {
     setBubble(last);
     const timer = window.setTimeout(() => {
       setBubble((current) => (current?.id === last.id ? null : current));
-    }, 3_000);
+    }, isReaction(last.text) ? 1_100 : 3_000);
     return () => window.clearTimeout(timer);
   }, [chat]);
   return bubble;
@@ -1404,6 +1406,12 @@ function useUnread(chat: ChatLine[], chatOpen: boolean): boolean {
     setUnread(chat.length > seen.current);
   }, [chat, chatOpen]);
   return unread;
+}
+
+/** Emoji reactions are short and have no letters, so they can leave the tile alone quickly. */
+function isReaction(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length > 0 && trimmed.length <= 8 && !/[0-9A-Za-z]/.test(trimmed);
 }
 
 function bubbleText(bubble: ChatLine | null, playerId: string): string | null {

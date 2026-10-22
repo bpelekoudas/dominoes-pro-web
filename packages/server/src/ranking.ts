@@ -334,6 +334,7 @@ export function seatRankOf(standing: PublicStanding): SeatRank {
 export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50, includeBots = true) {
   const season = currentSeason(store, now);
   for (const user of store.allUsers()) {
+    if ((user.is_soak ?? 0) === 1) continue;
     if ((user.season_id ?? 0) !== season.id) alignSeason(store, user.id, season, now);
   }
   const rows = board === "season" ? store.topBySeason(limit, includeBots) : store.topByRating(limit, includeBots);

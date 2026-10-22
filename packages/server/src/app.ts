@@ -106,6 +106,13 @@ export async function createApp(options: AppOptions = {}) {
 
   app.get("/api/auth/config", async () => accounts.config());
 
+  app.post("/api/soak/cleanup", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const dropped = hub.dropSoakRooms();
+    const purged = store.purgeSoak();
+    return { dropped, ...purged };
+  });
+
   app.post("/api/guest", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
     const body = request.body as { displayName?: string };

@@ -45,7 +45,7 @@ TypeScript, in three pieces:
 | `packages/server` | Node, Fastify, WebSockets, SQLite | One process is enough for a friends' table and is easy to host |
 | `packages/web` | React and Vite | A phone-sized table that only renders what the server sends |
 
-Node 22 is required. SQLite is the one built into Node, so there is no separate database to run. Each hand stores a 32-byte seed from the operating system's random source, the shuffled deck, and every action. The shuffle is Fisher-Yates fed by HMAC-SHA256 of that seed, with the usual bias fix. Replaying the seed rebuilds the deck. Replaying the deck and the actions rebuilds the hand. The seed and the deck never go to the browsers.
+Node 22 is required. SQLite is the one built into Node, so there is no separate database to run. Each hand stores a 32-byte seed from the operating system's random source, the shuffled deck, and every action. The shuffle is Fisher-Yates fed by HMAC-SHA256 of that seed, with the usual bias fix. Replaying the seed rebuilds the deck. Replaying the deck and the actions rebuilds the hand. The seed and the deck never go to the browsers. A soak table is the exception: that hand's seed is sent so a failed soak can be replayed, and those accounts stay off the leaderboard.
 
 This shape is what a real-money operator would later need: the server, not the phone, decides the shuffle and whether a move counts, and the record of each hand can be audited. It is not a licensed gaming system today.
 
@@ -71,6 +71,20 @@ npm start
 ```
 
 That serves the site and the socket on port 8787. The database file is `data/uhoh.sqlite`. Override the location with `DATA_DIR` or `DB_FILE`, and the port with `PORT`.
+
+## Soak a live deploy
+
+After a deploy, this plays complete headless matches against a running site and checks the rules on every update. It uses guest accounts whose names start with `soak-`. The server marks those accounts and their private tables, skips their stats, hides them from both leaderboards, and deletes them when the run cleans up. Run one soak at a time. A second run's cleanup drops the first.
+
+```bash
+npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
+```
+
+`--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. One seat reconnects once mid-run.
+
+The summary is printed and written to `soak-reports/summary.json`. A failure also writes a replay log. Rebuild that log offline with `npm run soak -- --replay soak-reports/<file>.json` after `npm run build:rules`.
+
+Add `--no-ui` to skip the browser check. Without that flag, the run opens the site at 390×844, starts a 4-player game against the computer, plays a few turns, and asserts there are no console errors and every board tile sits inside the felt and clear of the seat badges. That step needs `playwright-core` and Chrome (`npm install --no-save playwright-core` when the import fails). Set `CHROME_PATH` if Chrome is not on the default path.
 
 While a hand is going, a scoring play floats `+N` in gold from that end for about a second. The addition across the open ends, such as `2+2+6+5=15`, stays on by default as a compact line so a test table can be checked by eye. To hide the addition, set `SHOW_SCORE_MATH` to `0` (`false`, `off`, and `no` also hide it) and restart the server. Unset, empty, or `1` leaves it on. The page reads the flag from `/config.js` when it loads, so changing it does not need a rebuild.
 

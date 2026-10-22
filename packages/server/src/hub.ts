@@ -49,7 +49,7 @@ export interface ChatLine {
 
 export type ServerMessage =
   | { type: "welcome"; token: string; playerId: string; roomCode: string; chat: ChatLine[] }
-  | { type: "state"; view: PlayerView }
+  | { type: "state"; view: PlayerView; audit?: { handSeed: string } }
   | { type: "chat"; line: ChatLine }
   | { type: "error"; message: string };
 
@@ -145,6 +145,10 @@ interface LiveRoom {
   turnDeadline: number | null;
   continueDeadline: number | null;
   ended: { reason: "player_left"; playerId: string; name: string } | null;
+  /** Post-deploy soak table. Results stay off the leaderboard, and the hand seed is auditable. */
+  soak: boolean;
+  /** Seed of the hand in progress. Sent to browsers only while soak is set. */
+  handSeed: string | null;
 }
 
 export interface BoundSession {
@@ -201,6 +205,11 @@ export function cleanName(input: unknown): string | null {
   if (name.length < 1 || name.length > 16) return null;
   if (/[\u0000-\u001f]/.test(name)) return null;
   return name;
+}
+
+/** Guest names from the soak script. The flag sticks after a rename. */
+export function isSoakName(name: string): boolean {
+  return name.toLowerCase().startsWith("soak-");
 }
 
 export function cleanChatText(input: unknown): string | null {
@@ -268,6 +277,39 @@ export class Hub {
   discardRoom(playerId: string): void {
     const room = this.roomFor(playerId);
     if (room) this.dropRoom(room);
+  }
+
+  /**
+   * Disconnect every soak table and delete its rows.
+   * A second soak run calls this before it sits down, so only one soak should be in flight.
+   */
+  dropSoakRooms(): number {
+    let count = 0;
+    for (const room of [...this.rooms.values()]) {
+      if (!room.soak) continue;
+      for (const seat of room.seats) {
+        const close = seat.close;
+        seat.send = null;
+        seat.close = null;
+        seat.connected = false;
+        seat.generation += 1;
+        try {
+          close?.();
+        } catch {
+          // The socket is already gone.
+        }
+      }
+      this.clearTimer(this.botTimers, room.id);
+      this.clearTimer(this.turnTimers, room.id);
+      this.clearTimer(this.continueTimers, room.id);
+      this.clearTimer(this.botFillTimers, room.id);
+      for (const seat of room.seats) this.byPlayer.delete(seat.id);
+      this.rooms.delete(room.id);
+      this.byCode.delete(room.code);
+      this.store.purgeRoom(room.id);
+      count += 1;
+    }
+    return count;
   }
 
   /** Drop every live table that includes one of these accounts. */
@@ -388,6 +430,9 @@ export class Hub {
       return { ok: false, error: "A series is best of 3, 5, or 7." };
     }
     const created = nowIso();
+    const soak = this.accountIsSoak(accountUserId, name);
+    if (soak && accountUserId) this.store.markSoak(accountUserId);
+    const listed = soak ? false : message.listed === true;
     const room: LiveRoom = {
       id: makeId("r"),
       code: roomCode(this.store),
@@ -398,10 +443,10 @@ export class Hub {
         boneyardMode: message.boneyardMode,
         seriesLength: message.seriesLength,
       },
-      casual: message.listed === true ? false : message.casual === true,
-      listed: message.listed === true,
+      casual: soak ? true : listed ? false : message.casual === true,
+      listed,
       createdAt: Date.now(),
-      quickWaitUntil: message.listed === true ? Date.now() + this.quickWaitMs : null,
+      quickWaitUntil: listed ? Date.now() + this.quickWaitMs : null,
       botFillAt: null,
       recap: null,
       status: "lobby",
@@ -413,6 +458,8 @@ export class Hub {
       turnDeadline: null,
       continueDeadline: null,
       ended: null,
+      soak,
+      handSeed: null,
     };
     const seat = this.makeSeat(
       room.hostId,
@@ -438,6 +485,7 @@ export class Hub {
       rules_version: RULES_VERSION,
       casual: room.casual ? 1 : 0,
       listed: room.listed ? 1 : 0,
+      soak: room.soak ? 1 : 0,
     });
     this.store.insertPlayer({
       id: seat.id,
@@ -470,6 +518,14 @@ export class Hub {
     const code = message.code.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const room = this.byCode.get(code) ? this.rooms.get(this.byCode.get(code)!) : undefined;
     if (!room) return { ok: false, error: "No table with that code." };
+    const joinerSoak = this.accountIsSoak(accountUserId, name);
+    if (joinerSoak !== room.soak) {
+      return {
+        ok: false,
+        error: joinerSoak ? "A soak account only sits at a soak table." : "That table is a soak test.",
+      };
+    }
+    if (joinerSoak && accountUserId) this.store.markSoak(accountUserId);
     if (!this.openToHumans(room)) {
       return {
         ok: false,
@@ -814,6 +870,7 @@ export class Hub {
     room.handId = handId;
     room.actionSeq = 0;
     room.recap = null;
+    room.handSeed = seed.toString("hex");
   }
 
   private solo(
@@ -1058,6 +1115,8 @@ export class Hub {
       turnDeadline: null,
       continueDeadline: null,
       ended: null,
+      soak: row.soak === 1,
+      handSeed: null,
     };
     const worn = new Set<string>();
     for (const player of players) {
@@ -1083,7 +1142,9 @@ export class Hub {
       );
     }
     if (row.status !== "lobby") {
-      const logged = this.store.handsForSeries(row.id, row.series_id).map((hand) => ({
+      const savedHands = this.store.handsForSeries(row.id, row.series_id);
+      room.handSeed = savedHands[savedHands.length - 1]?.seed ?? null;
+      const logged = savedHands.map((hand) => ({
         deck: JSON.parse(hand.deck_json) as string[],
         actions: this.store.actions(hand.id),
         id: hand.id,
@@ -1269,16 +1330,23 @@ export class Hub {
       return toChatLine(row, speaker?.name ?? "Someone");
     });
     this.tell(seat, { type: "welcome", token: seat.token, playerId: seat.id, roomCode: room.code, chat });
-    this.tell(seat, { type: "state", view: this.view(room, seat.id) });
+    this.tell(seat, this.stateFor(room, seat.id));
   }
 
   private broadcast(room: LiveRoom, holdMs = 0): void {
     this.armTurn(room, holdMs);
     for (const seat of room.seats) {
       if (!seat.send) continue;
-      seat.send({ type: "state", view: this.view(room, seat.id) });
+      seat.send(this.stateFor(room, seat.id));
     }
     this.scheduleBot(room);
+  }
+
+  /** Real games keep the seed on the server. A soak table sends it so a failure can be replayed. */
+  private stateFor(room: LiveRoom, playerId: string): Extract<ServerMessage, { type: "state" }> {
+    const view = this.view(room, playerId);
+    if (room.soak && room.handSeed) return { type: "state", view, audit: { handSeed: room.handSeed } };
+    return { type: "state", view };
   }
 
   private armTurn(room: LiveRoom, holdMs = 0): void {
@@ -1303,6 +1371,9 @@ export class Hub {
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const name = cleanName(message.name);
     if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+    if (this.accountIsSoak(accountUserId, name)) {
+      return { ok: false, error: "Soak accounts use a private table." };
+    }
     const size = message.size;
     if (size !== 2 && size !== 3 && size !== 4 && size !== "any") {
       return { ok: false, error: "Pick 2, 3, 4, or any size." };
@@ -1456,6 +1527,10 @@ export class Hub {
   }
 
   private setCasual(room: LiveRoom, seat: LiveSeat, casual: boolean): void {
+    if (room.soak) {
+      this.tell(seat, { type: "error", message: "A soak table stays off the books." });
+      return;
+    }
     if (room.listed) {
       this.tell(seat, { type: "error", message: "A quick table stays ranked until computers sit down." });
       return;
@@ -1488,6 +1563,7 @@ export class Hub {
   private settleCompleted(room: LiveRoom): void {
     const hand = room.match?.lastHand;
     if (!hand?.gameWinnerId || !room.match) return;
+    if (this.skipSettle(room)) return;
     if (room.recap?.gameNumber === hand.gameNumber) return;
     try {
       room.recap = settleGame(this.store, {
@@ -1509,6 +1585,7 @@ export class Hub {
   private settleAbandoned(room: LiveRoom, leaverId: string): void {
     const gameNumber = room.match?.gameNumber ?? 0;
     if (!room.match || gameNumber < 1) return;
+    if (this.skipSettle(room)) return;
     if (room.recap?.gameNumber === gameNumber) return;
     try {
       room.recap = settleGame(this.store, {
@@ -1525,6 +1602,17 @@ export class Hub {
       const detail = error instanceof Error ? error.message : "The rating could not be saved.";
       console.warn(`Room ${room.id} rating was not saved (${detail}).`);
     }
+  }
+
+  private skipSettle(room: LiveRoom): boolean {
+    if (room.soak) return true;
+    return room.seats.some((seat) => Boolean(seat.userId) && this.store.user(seat.userId!)?.is_soak === 1);
+  }
+
+  private accountIsSoak(userId: string | null, name: string): boolean {
+    if (isSoakName(name)) return true;
+    if (!userId) return false;
+    return this.store.user(userId)?.is_soak === 1;
   }
 
   private finishSeats(room: LiveRoom, scores: Record<string, number>, leaverId: string | null, gameNumber: number) {
