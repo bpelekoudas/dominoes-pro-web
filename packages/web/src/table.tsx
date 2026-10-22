@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { FIT_MARGIN, layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
-import { chainBounds, DESK_SCALE_CAP, fitScale, handOverPlacement, nextBoardScale, PHONE_SCALE_CAP } from "./board-scale.js";
+import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { cameraScale, chainBounds, handOverPlacement } from "./board-scale.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
@@ -84,11 +84,13 @@ export function Table({
 }) {
   const board = view.board;
   const layout = useMemo(() => (board?.center ? layoutBoard(board) : null), [board]);
-  const frame = useMemo(() => (layout ? chainBounds(layout.tiles, FIT_MARGIN) : null), [layout]);
+  const frame = useMemo(() => (layout ? chainBounds(layout.tiles, 0) : null), [layout]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [lift, setLift] = useState(0);
+  const [cameraArmed, setCameraArmed] = useState(false);
+  const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
   const frozen = useRef(false);
@@ -115,13 +117,24 @@ export function Table({
       } else {
         feltLock.current = { hand: handKey, w: width, h: height };
       }
-      const bounds = chainBounds(layout.tiles, FIT_MARGIN);
-      const computed = fitScale(bounds, { w: width, h: height }, width >= 800 ? DESK_SCALE_CAP : PHONE_SCALE_CAP);
+      const bounds = chainBounds(layout.tiles, 0);
+      const column = viewport.closest(".felt-column");
+      const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
       const newHand = held.current?.hand !== handKey;
-      const next = nextBoardScale(newHand ? null : (held.current?.scale ?? null), computed, newHand);
+      const next = cameraScale({
+        bounds,
+        felt: { w: width, h: height },
+        screenWidth,
+        previous: newHand ? null : (held.current?.scale ?? null),
+        newHand,
+      });
       held.current = { hand: handKey, scale: next };
       frozen.current = handOver;
       setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
+      if (!armOnce.current) {
+        armOnce.current = true;
+        requestAnimationFrame(() => setCameraArmed(true));
+      }
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -184,6 +197,16 @@ export function Table({
     const ids = new Set(slotKey.split(","));
     return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end, previewDouble), id: end.id }));
   }, [layout, slotKey, previewDouble]);
+  const ghostFaces = useMemo(() => {
+    const faces = new Map<string, { a: number; b: number; orientation: "horizontal" | "vertical" }>();
+    if (!layout || !focusTile) return faces;
+    for (const box of slotBoxes) {
+      const end = layout.ends.find((item) => item.id === box.id);
+      if (!end) continue;
+      faces.set(box.id, ghostFace(focusTile, box, end));
+    }
+    return faces;
+  }, [layout, focusTile, slotBoxes]);
   const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
   const pop = useScorePop(view.lastPlay);
   const popAt = useAnchor(stageRef, layout, frame, scale, pop?.tileId ?? null, pop?.endId ?? null);
@@ -205,6 +228,7 @@ export function Table({
       data-board-lift={String(lift)}
       data-board-frozen={handOver ? "true" : "false"}
       data-win-board="true"
+      data-camera={cameraArmed ? "armed" : "hold"}
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
@@ -268,17 +292,21 @@ export function Table({
           }}
         />
       ) : null}
-      {slots.map((slot) =>
-        createPortal(
+      {slots.map((slot) => {
+        const face = ghostFaces.get(slot.id) ?? null;
+        return createPortal(
           <div
             key={slot.id}
             className="ghost-slot"
             data-end-id={slot.id}
             style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
-          />,
+          >
+            {face ? <Domino a={face.a} b={face.b} orientation={face.orientation} /> : null}
+          </div>,
           document.body,
-        ),
-      )}
+        );
+      })}
+      <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
       {pop && popAt
         ? createPortal(
             <p className="score-pop" style={{ left: popAt.left, top: popAt.top }} data-awarded={pop.awarded}>
@@ -295,6 +323,89 @@ export function Table({
     onPlay(selectedTile, endId);
     onSelect(null);
   }
+}
+
+function ghostFace(
+  tileId: string,
+  box: LayoutBox,
+  end: PlacedEnd,
+): { a: number; b: number; orientation: "horizontal" | "vertical" } {
+  const parts = tileId.split("-").map((part) => Number(part));
+  const low = Number.isFinite(parts[0]) ? parts[0]! : 0;
+  const high = Number.isFinite(parts[1]) ? parts[1]! : low;
+  const orientation = box.w >= box.h ? "horizontal" : "vertical";
+  const match = low === end.match || high === end.match ? end.match : low;
+  const other = match === low ? high : low;
+  const dx = box.x + box.w / 2 - (end.x + end.w / 2);
+  const dy = box.y + box.h / 2 - (end.y + end.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? { a: match, b: other, orientation } : { a: other, b: match, orientation };
+  }
+  return dy >= 0 ? { a: match, b: other, orientation } : { a: other, b: match, orientation };
+}
+
+function Arrival({
+  lastPlay,
+  yourId,
+  layout,
+}: {
+  lastPlay: PlayerView["lastPlay"];
+  yourId: string;
+  layout: BoardLayout | null;
+}) {
+  const seq = lastPlay?.seq ?? -1;
+  const tileId = lastPlay?.tileId ?? null;
+  const playerId = lastPlay?.playerId ?? null;
+  const awarded = lastPlay?.awarded ?? 0;
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [face, setFace] = useState<{ a: number; b: number; orientation: "horizontal" | "vertical" } | null>(null);
+  const skip = playerId === yourId || !tileId || bigMomentLevel(awarded) !== null || prefersReducedMotion();
+
+  useLayoutEffect(() => {
+    if (skip || !tileId || !playerId) {
+      setBox(null);
+      return;
+    }
+    const tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
+    const seat = document.querySelector<HTMLElement>(`[data-player-id="${CSS.escape(playerId)}"] .avatar`);
+    if (!tile || !seat) {
+      setBox(null);
+      return;
+    }
+    const placed = layout?.tiles.find((item) => item.tileId === tileId);
+    const to = tile.getBoundingClientRect();
+    const from = seat.getBoundingClientRect();
+    tile.classList.add("is-arriving");
+    setFace(
+      placed
+        ? { a: placed.a, b: placed.b, orientation: placed.orientation }
+        : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
+    );
+    setBox({ left: from.left, top: from.top, width: Math.max(18, from.width), height: Math.max(18, from.height) });
+    let frame = 0;
+    const timer = window.setTimeout(() => {
+      tile.classList.remove("is-arriving");
+      setBox(null);
+    }, 420);
+    frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => {
+        setBox({ left: to.left, top: to.top, width: to.width, height: to.height });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      tile.classList.remove("is-arriving");
+    };
+  }, [seq, tileId, playerId, skip, layout]);
+
+  if (!box || !face) return null;
+  return createPortal(
+    <div className="arrive-tile" data-arrive={tileId ?? ""} style={box}>
+      <Domino a={face.a} b={face.b} orientation={face.orientation} />
+    </div>,
+    document.body,
+  );
 }
 
 function nextSlotBox(layout: BoardLayout, end: PlacedEnd, isDouble: boolean): LayoutBox {

@@ -409,6 +409,7 @@ function Game({
   const right = around.find((seat) => seat.edge === "right") ?? null;
   const you = around.find((seat) => seat.edge === "bottom") ?? null;
   const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby" && view.phase !== "between";
+  const notice = useFleetingNotice(view);
   const [muted, setMute] = useState(isMuted);
   const [replayToken, setReplayToken] = useState(0);
   useEffect(() => {
@@ -532,11 +533,23 @@ function Game({
         <>
           <div className="table-frame" data-opponents={around.length - 1}>
             {top ? (
-              <SeatRail edge="top" player={top.player} bubble={bubbleText(bubble, top.player.id)} view={view} />
+              <SeatRail
+                edge="top"
+                player={top.player}
+                bubble={bubbleText(bubble, top.player.id)}
+                notice={notice?.playerId === top.player.id ? notice.text : null}
+                view={view}
+              />
             ) : null}
             <div className="table-middle">
               {left ? (
-                <SeatRail edge="left" player={left.player} bubble={bubbleText(bubble, left.player.id)} view={view} />
+                <SeatRail
+                  edge="left"
+                  player={left.player}
+                  bubble={bubbleText(bubble, left.player.id)}
+                  notice={notice?.playerId === left.player.id ? notice.text : null}
+                  view={view}
+                />
               ) : null}
               <Table
                 view={view}
@@ -549,7 +562,13 @@ function Game({
                 tableArt={tableArt}
               />
               {right ? (
-                <SeatRail edge="right" player={right.player} bubble={bubbleText(bubble, right.player.id)} view={view} />
+                <SeatRail
+                  edge="right"
+                  player={right.player}
+                  bubble={bubbleText(bubble, right.player.id)}
+                  notice={notice?.playerId === right.player.id ? notice.text : null}
+                  view={view}
+                />
               ) : null}
             </div>
           </div>
@@ -561,16 +580,18 @@ function Game({
                   <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p>
                 ) : null}
               </div>
-              <div className="tray-copy">
-                <p className={`your-turn${yourTurn ? "" : " reserved"}`}>Your turn</p>
-                {yourTurn ? <TurnBar view={view} /> : <div className="turn-bar reserved" aria-hidden="true" />}
-                <StatusLine view={view} />
-                {demoRequested() ? (
-                  <button type="button" className="uhoh-test" data-demo="uhoh" onClick={() => setReplayToken((value) => value + 1)}>
-                    UH-OH
-                  </button>
-                ) : null}
-              </div>
+              {yourTurn ? <p className="your-turn">Your turn</p> : null}
+              {yourTurn ? <TurnBar view={view} /> : null}
+              <StatusLine view={view} />
+              {notice && you && notice.playerId === you.player.id ? (
+                <p className="seat-notice local-notice">{notice.text}</p>
+              ) : null}
+              <p className="sr-only" role="status">{view.prompt}</p>
+              {demoRequested() ? (
+                <button type="button" className="uhoh-test" data-demo="uhoh" onClick={() => setReplayToken((value) => value + 1)}>
+                  UH-OH
+                </button>
+              ) : null}
             </div>
             <div className="tray-row">
               <Hand
@@ -740,11 +761,13 @@ function SeatRail({
   edge,
   player,
   bubble,
+  notice,
   view,
 }: {
   edge: Exclude<SeatEdge, "bottom">;
   player: PlayerView["players"][number];
   bubble: string | null;
+  notice: string | null;
   view: PlayerView;
 }) {
   return (
@@ -754,14 +777,14 @@ function SeatRail({
       data-player-id={player.id}
       data-tiles={player.tileCount}
     >
-      {edge === "top" ? <SeatChip player={player} view={view} /> : null}
+      <SeatChip player={player} view={view} />
       <div className={`backs backs-${edge}`} aria-hidden="true">
         {Array.from({ length: player.tileCount }, (_, index) => (
           <i key={index} className="tile-back" />
         ))}
       </div>
-      {edge === "top" ? null : <SeatChip player={player} view={view} />}
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
+      {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
     </div>
   );
 }
@@ -852,24 +875,50 @@ function YardPile({
 
 function StatusLine({ view }: { view: PlayerView }) {
   const math = scoreMathOn() && view.openEquation ? view.openEquation.replaceAll(" ", "") : null;
-  const note = drawNote(view);
-  const prompt = view.prompt === "Your turn." ? null : view.prompt;
-  const text = note ?? prompt;
+  if (!math) return null;
   return (
     <p className="status-line" data-phase={view.phase}>
-      {math ? <span className="status-math">{math}</span> : null}
-      {text ? <span className="status-prompt">{text}</span> : null}
+      <span className="status-math">{math}</span>
     </p>
   );
 }
 
-function drawNote(view: PlayerView): string | null {
-  if (!view.lastDraw) return null;
-  if (view.lastDraw.playerId === view.yourId) {
-    if (view.lastDraw.tileIds && view.lastDraw.tileIds.length === 1) return `You drew ${pretty(view.lastDraw.tileIds[0] ?? "")}.`;
-    return `You drew ${view.lastDraw.count} tile${view.lastDraw.count === 1 ? "" : "s"}.`;
+function useFleetingNotice(view: PlayerView): { playerId: string; text: string } | null {
+  const token = noticeToken(view);
+  const [notice, setNotice] = useState<{ playerId: string; text: string } | null>(null);
+  useEffect(() => {
+    const next = fleetingNotice(view);
+    if (!next) {
+      setNotice(null);
+      return;
+    }
+    setNotice(next);
+    const timer = window.setTimeout(() => setNotice(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [token]);
+  return notice;
+}
+
+function noticeToken(view: PlayerView): string {
+  if (view.phase === "draw" || view.phase === "knock") {
+    return `blocked:${view.gameNumber}:${view.handNumber}:${view.turnPlayerId ?? ""}`;
   }
-  return `${nameOf(view, view.lastDraw.playerId)} drew ${view.lastDraw.count}.`;
+  if (view.phase !== "play") return "";
+  const draw = view.lastDraw;
+  if (!draw) return "";
+  return `draw:${view.gameNumber}:${view.handNumber}:${draw.playerId}:${draw.count}:${draw.tileIds?.join(",") ?? ""}`;
+}
+
+function fleetingNotice(view: PlayerView): { playerId: string; text: string } | null {
+  if (view.phase === "draw" || view.phase === "knock") {
+    return { playerId: view.yourId, text: "No dominoes to play" };
+  }
+  if (view.phase !== "play" || !view.lastDraw) return null;
+  const draw = view.lastDraw;
+  if (draw.playerId === view.yourId && draw.tileIds && draw.tileIds.length === 1) {
+    return { playerId: draw.playerId, text: `Drew ${pretty(draw.tileIds[0] ?? "")}` };
+  }
+  return { playerId: draw.playerId, text: `Drew ${draw.count}` };
 }
 
 function PlayMark() {
@@ -1162,10 +1211,6 @@ function playerNames(view: PlayerView): Map<string, string> {
 
 function playerFaces(view: PlayerView): Map<string, string> {
   return new Map(view.players.map((player) => [player.id, player.avatarId]));
-}
-
-function nameOf(view: PlayerView, playerId: string): string {
-  return view.players.find((player) => player.id === playerId)?.name ?? "Someone";
 }
 
 function pretty(tileId: string): string {

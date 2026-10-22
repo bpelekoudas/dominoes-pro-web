@@ -1,4 +1,4 @@
-import { FIT_MARGIN, type LayoutBox } from "../../rules/src/layout.js";
+import { FIT_MARGIN, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -51,6 +51,72 @@ export function scaleForTiles(tiles: readonly LayoutBox[], felt: FeltSize, cap: 
 export function nextBoardScale(previous: number | null, computed: number, newHand: boolean): number {
   if (newHand || previous == null || !Number.isFinite(previous)) return computed;
   return Math.min(previous, computed);
+}
+
+/** Opening tile width, as a fraction of the table's screen. Middle of 12–15%. */
+export const OPEN_TILE_FRAC = 0.135;
+/** Floor. The snake turns before the picture goes below this. About 4.5% of the screen. */
+export const MIN_TILE_FRAC = 0.045;
+/** Zoom out once the chain comes this close to the felt edge. */
+export const CAMERA_DANGER = 28;
+/** After a zoom, leave this much air so the next tile does not zoom again. */
+export const CAMERA_COMFORT = 72;
+/** Hard inset. The chain stays on the felt even if that means dipping under the floor. */
+export const CAMERA_EDGE = 8;
+/** Ease-out on the felt. No overshoot. */
+export const CAMERA_EASE_MS = 240;
+
+export interface CameraInput {
+  bounds: FeltSize;
+  felt: FeltSize;
+  /** Width of the table column. Opening size and the floor are fractions of this. */
+  screenWidth: number;
+  previous: number | null;
+  newHand: boolean;
+}
+
+function scaleForInset(bounds: FeltSize, felt: FeltSize, inset: number): number {
+  const roomW = Math.max(1, felt.w - inset * 2);
+  const roomH = Math.max(1, felt.h - inset * 2);
+  return Math.min(roomW / Math.max(1, bounds.w), roomH / Math.max(1, bounds.h));
+}
+
+/**
+ * Start with a large tile. Hold that size until a tile would sit inside the
+ * danger margin, then ease out to the comfort margin. Never zoom back in
+ * during a hand. A new hand starts large again. The picture stays on the felt,
+ * and it stays at least the minimum size whenever that still fits.
+ */
+export function cameraScale(input: CameraInput): number {
+  const screen = Math.max(1, input.screenWidth);
+  // Opening size is the ceiling. The old phone and desk caps sat under
+  // 12–15% of a wide screen, so a Fold opened smaller than the reference.
+  const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const floor = Math.min(open, (MIN_TILE_FRAC * screen) / TILE_SHORT);
+  const cap = open;
+  const short = Math.max(1, Math.min(input.felt.w, input.felt.h));
+  // Narrow felts (a phone with players on both sides) cannot spare 72px a side.
+  const dangerInset = Math.max(10, Math.min(CAMERA_DANGER, short * 0.08));
+  const comfortInset = Math.max(dangerInset + 16, Math.min(CAMERA_COMFORT, short * 0.16));
+  const comfortFit = scaleForInset(input.bounds, input.felt, comfortInset);
+  const dangerFit = scaleForInset(input.bounds, input.felt, dangerInset);
+  const edgeFit = scaleForInset(input.bounds, input.felt, CAMERA_EDGE);
+  // Comfort air when it still clears the floor. Otherwise the danger air.
+  // The floor is a minimum, not a place to slam a short chain.
+  let target = comfortFit;
+  if (comfortFit < floor) target = dangerFit >= floor ? dangerFit : floor;
+  target = Math.min(cap, target, edgeFit);
+  if (target < floor && floor <= edgeFit) target = Math.min(floor, edgeFit);
+  if (edgeFit < floor) target = Math.min(cap, edgeFit);
+
+  if (input.newHand || input.previous == null || !Number.isFinite(input.previous)) {
+    return Math.min(open, target);
+  }
+
+  const previous = Math.min(input.previous, cap);
+  // Still clear of the edge. Hold, including after the felt grows.
+  if (previous <= dangerFit + 1e-6) return Math.min(previous, edgeFit);
+  return Math.min(previous, target);
 }
 
 /** Gold ring clearance between the last tile and the hand-over sheet. */
