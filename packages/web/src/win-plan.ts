@@ -4,8 +4,12 @@ import { BIG_MOMENT_MS, bigMomentLevel } from "../../rules/src/moment.js";
 export const ZERO_HOLD_MS = 2000;
 /** Reveal plus the pip flight, before the score pulse finishes. */
 export const HAND_HOLD_MS = 2400;
-export const GAME_BANNER_MS = 1500;
+export const GAME_BANNER_MS = 2400;
 export const MATCH_BANNER_MS = 2500;
+/** Domino, then HAND WON, before the pip tally. Shorter when the UH-OH slam already played. */
+export const HAND_CALL_MS = 1100;
+export const HAND_CALL_AFTER_UHOH_MS = 420;
+export const LOCK_CALL_MS = 880;
 export const PIP_START_MS = 420;
 export const PIP_FLIGHT_MS = 680;
 /** The last pip has landed by this time, then the score pulses. */
@@ -142,7 +146,15 @@ export function scoreAt(
 
 export function winBannerCopy(kind: "game" | "match", name: string, local: boolean): string {
   if (kind === "match") return local ? "You Win the Match!" : `${name} Wins the Match!`;
-  return local ? "You Win!" : `${name} Wins!`;
+  return local ? "YOU WIN" : "GAME WON";
+}
+
+/** The word that plays before the pip tally. A score-out has no extra call. */
+export function callMs(reason: "domino" | "locked" | "score", awarded: number | null, reduced: boolean): number {
+  if (reason === "score") return 0;
+  if (reduced) return 280;
+  if (reason === "locked") return LOCK_CALL_MS;
+  return bigMomentLevel(awarded ?? 0) ? HAND_CALL_AFTER_UHOH_MS : HAND_CALL_MS;
 }
 
 /**
@@ -159,9 +171,10 @@ export function uhOhWaitMs(
 }
 
 export interface CelebrationStep {
-  stage: "uhoh" | "reveal" | "banner" | "lineup" | "sheet";
+  stage: "uhoh" | "call" | "reveal" | "banner" | "lineup" | "sheet";
   ms: number;
   banner?: "game" | "match";
+  call?: "domino" | "lock";
 }
 
 /** Client-only sequence. Bots use the same lengths; the server continue clock stays put. */
@@ -176,6 +189,8 @@ export function celebrationTimeline(input: {
   const steps: CelebrationStep[] = [];
   const wait = uhOhWaitMs(input.reason, input.awarded, input.reduced);
   if (wait > 0) steps.push({ stage: "uhoh", ms: wait });
+  const call = callMs(input.reason, input.awarded, input.reduced);
+  if (call > 0) steps.push({ stage: "call", ms: call, call: input.reason === "locked" ? "lock" : "domino" });
   steps.push({ stage: "reveal", ms: input.plan.holdMs });
   if (input.seriesWinner) {
     steps.push({ stage: "banner", ms: MATCH_BANNER_MS, banner: "match" });
@@ -262,7 +277,7 @@ export interface ConfettiBit {
 
 export function confettiAt(kind: "game" | "match", elapsed: number, reduced: boolean): ConfettiBit[] {
   if (reduced || elapsed <= 0) return [];
-  const count = kind === "match" ? 46 : 18;
+  const count = kind === "match" ? 46 : 8;
   const bits: ConfettiBit[] = [];
   for (let index = 0; index < count; index += 1) {
     const angle = (index / count) * Math.PI * 2 + (index % 5) * 0.08;
@@ -282,7 +297,7 @@ export function confettiAt(kind: "game" | "match", elapsed: number, reduced: boo
       size: 6 + (index % 4) * 3,
       color: index % 2 === 0 ? "#e31e26" : "#d5a336",
       opacity: fade,
-      round: index % 3 === 0,
+      round: kind === "match" && index % 3 === 0,
     });
   }
   return bits;

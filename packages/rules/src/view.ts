@@ -12,6 +12,7 @@ import {
   type LastDraw,
   type LastPlay,
   type MatchState,
+  type PublicEvent,
   type SeriesLength,
 } from "./engine.js";
 
@@ -167,6 +168,10 @@ export interface PlayerView {
    */
   tableId: string;
   lastPlay: LastPlay | null;
+  /** Latest public action this hand. A knock is visible here even though no tile landed. */
+  lastEvent: { playerId: string; kind: PublicEvent["kind"] } | null;
+  /** Knocks in a row at the end of the hand log. A play or a draw resets it. */
+  knockStreak: number;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
 }
@@ -330,9 +335,20 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
     quick: meta.quick ?? null,
     tableId: meta.sharedTableId || "TBL-001",
     lastPlay: match?.lastPlay ?? null,
+    lastEvent: match?.log.length ? { playerId: match.log[match.log.length - 1]!.playerId, kind: match.log[match.log.length - 1]!.kind } : null,
+    knockStreak: knockStreakOf(match?.log ?? []),
     lastDraw,
     taunts: tauntsForPlayer(),
   };
+}
+
+export function knockStreakOf(log: readonly { kind: string }[]): number {
+  let streak = 0;
+  for (let index = log.length - 1; index >= 0; index -= 1) {
+    if (log[index]?.kind !== "knock") break;
+    streak += 1;
+  }
+  return streak;
 }
 
 function privateDraw(draw: LastDraw | null, viewerId: string): PlayerView["lastDraw"] {

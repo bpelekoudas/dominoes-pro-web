@@ -60,6 +60,7 @@ export function MomentLayer({
   tile,
   anchor,
   effect = "glass",
+  cry = true,
   onShake,
   onPhase,
   onDone,
@@ -70,6 +71,8 @@ export function MomentLayer({
   tile: { a: number; b: number; orientation: "horizontal" | "vertical"; spinner?: boolean };
   anchor: HitBox | null;
   effect?: FxId;
+  /** Say UH OH only for a lock or a comeback. A plain big score shows the points. */
+  cry?: boolean;
   onShake: (level: BigMomentLevel | null) => void;
   onPhase?: (phase: "impact" | "shatter" | "title") => void;
   onDone: () => void;
@@ -192,14 +195,18 @@ export function MomentLayer({
         data-uhoh="title"
         data-phase={phase}
         role="img"
-        aria-label={`UH-OH, plus ${awarded}`}
+        aria-label={cry ? `UH-OH, plus ${awarded}` : `plus ${awarded}`}
       >
-        <div className="uhoh-word">
-          <span>UH</span>
-          <Hyphen />
-          <span>OH</span>
-        </div>
-        <p className="uhoh-points">+{awarded}</p>
+        {cry ? (
+          <div className="uhoh-word">
+            <span>UH</span>
+            <Hyphen />
+            <span>OH</span>
+          </div>
+        ) : (
+          <div className="uhoh-word">+{awarded}</div>
+        )}
+        {cry ? <p className="uhoh-points">+{awarded}</p> : null}
       </div>
     </>
   );

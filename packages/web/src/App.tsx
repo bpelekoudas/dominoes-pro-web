@@ -16,6 +16,8 @@ import { AvatarFace, BotBadge } from "./avatars";
 import { useMatchCosmetics } from "./store";
 import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
+import { FeelCall, FeelTally } from "./feel/overlay";
+import { FeelPreview, feelPreviewRequested } from "./feel/preview";
 import { useHandCelebration, useWinScore, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 
 interface ChatLine {
@@ -219,6 +221,7 @@ export function App() {
   };
 
   const winMode = winPreviewRequested();
+  if (feelPreviewRequested() && !view) return <FeelPreview />;
   if (winMode && !view) {
     return <WinPreview mode={winMode} />;
   }
@@ -613,6 +616,16 @@ function Game({
         onClose={onToggleChat}
         onPreset={(packId, tauntId) => onSend({ type: "chat", kind: "preset", packId, tauntId })}
       />
+      {win.stage === "call" && win.call ? <FeelCall kind={win.call} reduced={win.reduced} onSkip={win.skip} /> : null}
+      {win.stage === "pips" && view.lastHand ? (
+        <FeelTally
+          reason={view.lastHand.reason}
+          pipCounts={view.lastHand.pipCounts}
+          winnerIds={view.lastHand.winnerIds}
+          awards={view.lastHand.leftoverAwards}
+          reduced={win.reduced}
+        />
+      ) : null}
       {win.plan && (win.stage === "pips" || win.stage === "banner") ? (
         <WinShow
           stage={win.stage}

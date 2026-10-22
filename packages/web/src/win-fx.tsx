@@ -9,10 +9,14 @@ import { seatAround } from "./seats";
 import { playWinSting } from "./sound";
 import { matchLineSeed, winLineFor } from "./win-lines";
 import { Domino } from "./table";
+import { FeelCall, FeelTally } from "./feel/overlay";
+import { pulse as feelPulse } from "./feel/haptics";
+import { playFeel } from "./feel/synth";
 import {
   GAME_BANNER_MS,
   MATCH_BANNER_MS,
   bannerMotion,
+  callMs,
   confettiAt,
   easeInOut,
   lastLandMs,
@@ -48,7 +52,7 @@ export interface WinScoreState {
   hot: Record<string, boolean>;
 }
 
-type Stage = "idle" | "wait" | "pips" | "banner" | "lineup" | "done";
+type Stage = "idle" | "wait" | "call" | "pips" | "banner" | "lineup" | "done";
 type FreezeStage = "pips" | "banner" | "lineup";
 
 export interface HandCelebration {
@@ -63,6 +67,7 @@ export interface HandCelebration {
   frozenAt: number | null;
   skip: () => void;
   onLand: (id: string, winnerId: string, value: number) => void;
+  call: "domino" | "lock" | null;
 }
 
 export const WinScoreContext = createContext<WinScoreState | null>(null);
@@ -163,6 +168,7 @@ export function useHandCelebration(
   const base = useMemo(() => baseScores(view), [key]);
   const final = useMemo(() => finalScores(base, plan), [base, plan]);
   const waitMs = active && view.lastHand ? uhOhWaitMs(view.lastHand.reason, view.lastPlay?.awarded ?? null, reduced) : 0;
+  const spokenMs = active && view.lastHand ? callMs(view.lastHand.reason, view.lastPlay?.awarded ?? null, reduced) : 0;
 
   const [tracked, setTracked] = useState(key);
   const [stage, setStage] = useState<Stage>("idle");
@@ -177,6 +183,7 @@ export function useHandCelebration(
   const baseRef = useRef(base);
   const finalRef = useRef(final);
   const keyRef = useRef(key);
+  const startPipsRef = useRef<() => void>(() => {});
   viewRef.current = view;
   planRef.current = plan;
   bannerRef.current = banner;
@@ -252,17 +259,30 @@ export function useHandCelebration(
       }
       timers.current.push(window.setTimeout(goBannerOrSheet, planNow.holdMs));
     };
+    startPipsRef.current = startPips;
+
+    const begin = () => {
+      if (spokenMs > 0 && handNow.reason !== "score") {
+        setStage("call");
+        const lock = handNow.reason === "locked";
+        playFeel(lock ? "lock" : "domino", reducedNow ? 0 : 150);
+        feelPulse(lock ? [18, 40, 18, 50, 24] : [28, 36, 40]);
+        timers.current.push(window.setTimeout(startPips, spokenMs));
+        return;
+      }
+      startPips();
+    };
 
     if (wait > 0) {
       setStage("wait");
-      timers.current.push(window.setTimeout(startPips, wait));
+      timers.current.push(window.setTimeout(begin, wait));
     } else {
-      startPips();
+      begin();
     }
     return clearTimers;
   }, [active, key, freeze]);
 
-  const stageNow: Stage = !active || !plan ? "idle" : freeze ? freeze.stage : stage === "idle" ? (waitMs > 0 ? "wait" : "pips") : stage;
+  const stageNow: Stage = !active || !plan ? "idle" : freeze ? freeze.stage : stage === "idle" ? (waitMs > 0 ? "wait" : spokenMs > 0 ? "call" : "pips") : stage;
   const visible = (() => {
     if (!plan) return base;
     if (freeze) return reduced || freeze.stage === "banner" || freeze.stage === "lineup" ? final : scoreAt(base, plan, freeze.at, false);
@@ -282,6 +302,11 @@ export function useHandCelebration(
   const skip = () => {
     if (freeze) return;
     const current = stageRef.current;
+    if (current === "call") {
+      clearTimers();
+      startPipsRef.current();
+      return;
+    }
     if (current !== "pips" && current !== "banner" && current !== "lineup") return;
     clearTimers();
     setShown(finalRef.current);
@@ -334,6 +359,7 @@ export function useHandCelebration(
     frozenAt: freeze ? freeze.at : null,
     skip,
     onLand,
+    call: view.lastHand?.reason === "locked" ? "lock" : view.lastHand?.reason === "domino" ? "domino" : null,
   };
 }
 
@@ -555,6 +581,11 @@ export function WinShow({
             </div>
           ) : null}
           <div className={`win-banner ${banner.kind}`} ref={popRef}>
+            {banner.kind === "game" && !reduced ? (
+              <div className="feel-topple" aria-hidden="true">
+                <i /><i /><i /><i /><i />
+              </div>
+            ) : null}
             <div className="win-banner-pop">
               {banner.kind === "match" ? (
                 <span className="win-avatar">
@@ -708,6 +739,8 @@ function previewView(mode: WinPreviewMode): PlayerView {
       quick: null,
       tableId: "TBL-011",
       lastPlay: { playerId: "you", tileId: "0-0", endId: "lead", total: 0, awarded: 0, seq: 1 },
+      lastEvent: null,
+      knockStreak: 0,
       lastDraw: null,
       taunts: [],
     };
@@ -784,6 +817,8 @@ function previewView(mode: WinPreviewMode): PlayerView {
     quick: null,
     tableId: "TBL-011",
     lastPlay: { playerId: "you", tileId: "0-0", endId: "lead", total: 0, awarded: 0, seq: 1 },
+    lastEvent: null,
+    knockStreak: 0,
     lastDraw: null,
     taunts: [],
   };
@@ -856,6 +891,16 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
             </div>
           ) : null}
         </div>
+        {win.stage === "call" && win.call ? <FeelCall kind={win.call} reduced={win.reduced} onSkip={win.skip} /> : null}
+        {win.stage === "pips" && view.lastHand ? (
+          <FeelTally
+            reason={view.lastHand.reason}
+            pipCounts={view.lastHand.pipCounts}
+            winnerIds={view.lastHand.winnerIds}
+            awards={view.lastHand.leftoverAwards}
+            reduced={win.reduced}
+          />
+        ) : null}
         {win.plan && (win.stage === "pips" || win.stage === "banner") ? (
           <WinShow
             stage={win.stage}

@@ -108,8 +108,8 @@ describe("hand win pips", () => {
 
 describe("win banners", () => {
   it("names the winner, and the local player reads You", () => {
-    expect(winBannerCopy("game", "Rio", true)).toBe("You Win!");
-    expect(winBannerCopy("game", "Rio", false)).toBe("Rio Wins!");
+    expect(winBannerCopy("game", "Rio", true)).toBe("YOU WIN");
+    expect(winBannerCopy("game", "Rio", false)).toBe("GAME WON");
     expect(winBannerCopy("match", "Rio", true)).toBe("You Win the Match!");
     expect(winBannerCopy("match", "Rio", false)).toBe("Rio Wins the Match!");
   });
@@ -143,10 +143,11 @@ describe("win banners", () => {
       seriesWinner: true,
       reduced: false,
     });
-    expect(worst.steps.map((step) => step.stage)).toEqual(["uhoh", "reveal", "banner", "lineup", "sheet"]);
-    expect(worst.steps[2]?.banner).toBe("match");
-    expect(worst.steps[2]?.ms).toBe(MATCH_BANNER_MS);
-    expect(worst.steps[3]).toEqual({ stage: "lineup", ms: 0 });
+    expect(worst.steps.map((step) => step.stage)).toEqual(["uhoh", "call", "reveal", "banner", "lineup", "sheet"]);
+    expect(worst.steps[1]).toMatchObject({ stage: "call", call: "domino", ms: 420 });
+    expect(worst.steps[3]?.banner).toBe("match");
+    expect(worst.steps[3]?.ms).toBe(MATCH_BANNER_MS);
+    expect(worst.steps[4]).toEqual({ stage: "lineup", ms: 0 });
     expect(worst.untilSheet).toBeLessThan(9000);
 
     const game = celebrationTimeline({
@@ -157,8 +158,8 @@ describe("win banners", () => {
       seriesWinner: false,
       reduced: false,
     });
-    expect(game.steps.map((step) => step.banner ?? step.stage)).toEqual(["reveal", "game", "sheet"]);
-    expect(game.steps[1]?.ms).toBe(GAME_BANNER_MS);
+    expect(game.steps.map((step) => step.banner ?? step.call ?? step.stage)).toEqual(["lock", "reveal", "game", "sheet"]);
+    expect(game.steps[2]?.ms).toBe(GAME_BANNER_MS);
     expect(game.steps.some((step) => step.stage === "lineup")).toBe(false);
 
     const quiet = celebrationTimeline({

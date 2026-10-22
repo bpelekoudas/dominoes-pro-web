@@ -4,6 +4,8 @@ import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { cameraScale, chainBounds, handOverPlacement } from "./board-scale.js";
 import { handFit } from "./hand-fit.js";
+import { FeelRipple, useLiveFeel } from "./feel/live";
+import { scoreTier } from "./feel/ladder";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
@@ -209,6 +211,7 @@ export function Table({
     return faces;
   }, [layout, focusTile, slotBoxes]);
   const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
+  const feel = useLiveFeel(view);
   const pop = useScorePop(view.lastPlay);
   const popAt = useAnchor(stageRef, layout, frame, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
@@ -247,6 +250,7 @@ export function Table({
               <div
                 key={tile.tileId}
                 className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
               >
@@ -260,7 +264,7 @@ export function Table({
                 <button
                   key={end.id}
                   type="button"
-                  className={`end-cap${hot ? " hot" : ""}${aim ? " aim" : ""}`}
+                  className={`end-cap${hot ? " hot" : ""}${aim ? " aim" : ""}${feel.scoring ? " is-scoring" : ""}`}
                   style={place(end, frame)}
                   data-end-id={end.id}
                   data-hot={hot ? "true" : "false"}
@@ -285,6 +289,7 @@ export function Table({
           }}
           anchor={anchor}
           effect={moment.effect}
+          cry={feel.cry}
           onShake={setShake}
           onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
           onDone={() => {
@@ -308,12 +313,14 @@ export function Table({
         );
       })}
       <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
+      <FeelRipple knock={feel.knock} />
       {pop && popAt
         ? createPortal(
             <p
               className="score-pop"
               style={{ left: popAt.left, top: popAt.top }}
               data-awarded={pop.awarded}
+              data-tier={scoreTier(pop.awarded)}
               data-place={popAt.place}
             >
               +{pop.awarded}

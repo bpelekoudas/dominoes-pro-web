@@ -5,6 +5,7 @@ import { AvatarFace, AvatarPicker, BotBadge, Portrait } from "./avatars";
 import { StoreScreen } from "./store";
 import { RankLine } from "./rank";
 import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume, type MusicChoice } from "./music";
+import { hapticsOn, setHaptics } from "./feel/haptics";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
 
 type BoneyardMode = "draw_one" | "draw_until";
@@ -108,6 +109,7 @@ export function ArcadeHome({
   const [sheet, setSheet] = useState<Sheet>(forced);
   const [tables, setTables] = useState<OpenTable[]>([]);
   const [muted, setMuteState] = useState(isMuted);
+  const [haptics, setHapticState] = useState(hapticsOn);
   const [music, setMusic] = useState<MusicChoice>(musicChoice);
   const [musicLevel, setMusicLevel] = useState(() => Math.round(musicVolume() * 100));
   const readyName = name.trim();
@@ -425,6 +427,19 @@ export function ArcadeHome({
             })}
           >
             {muted ? "Sound effects off" : "Sound effects on"}
+          </button>
+          <button
+            type="button"
+            className="capsule"
+            aria-pressed={haptics}
+            data-action="haptics"
+            onClick={press(() => {
+              const next = !haptics;
+              setHapticState(next);
+              setHaptics(next);
+            })}
+          >
+            {haptics ? "Haptics on" : "Haptics off"}
           </button>
           <h3>Music</h3>
           <div className="choices music-choices" data-music={music} role="group" aria-label="Music">
