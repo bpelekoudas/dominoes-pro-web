@@ -61,8 +61,11 @@ export const MIN_TILE_FRAC = 0.045;
 export const CAMERA_DANGER = 28;
 /** After a zoom, leave this much air so the next tile does not zoom again. */
 export const CAMERA_COMFORT = 72;
-/** Hard inset. The chain stays on the felt even if that means dipping under the floor. */
-export const CAMERA_EDGE = 8;
+/**
+ * Hard inset. Clears the opponent slivers that peek in from the felt edge
+ * (about 14px) with a little air, even when a long chain is at the floor.
+ */
+export const CAMERA_EDGE = 18;
 /** Ease-out on the felt. No overshoot. */
 export const CAMERA_EASE_MS = 240;
 

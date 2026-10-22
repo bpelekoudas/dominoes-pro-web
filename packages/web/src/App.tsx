@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { seatAround, type SeatEdge } from "./seats.js";
+import { sliverGap } from "./edge-slivers.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
 import { demoAward, demoRequested, FxGallery, fxGalleryRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
@@ -533,20 +534,6 @@ function Game({
       ) : (
         <>
           <div className="table-frame" data-opponents={opponents.length}>
-            {opponents.length > 0 ? (
-              <div className="opponent-rail" data-count={opponents.length}>
-                {opponents.map((seat) => (
-                  <SeatRail
-                    key={seat.player.id}
-                    edge={seat.edge}
-                    player={seat.player}
-                    bubble={bubbleText(bubble, seat.player.id)}
-                    notice={notice?.playerId === seat.player.id ? notice.text : null}
-                    view={view}
-                  />
-                ))}
-              </div>
-            ) : null}
             <div className="table-middle">
               <Table
                 view={view}
@@ -558,6 +545,16 @@ function Game({
                 replayToken={replayToken}
                 tableArt={tableArt}
               />
+              {opponents.map((seat) => (
+                <EdgeSeat
+                  key={seat.player.id}
+                  edge={seat.edge}
+                  player={seat.player}
+                  bubble={bubbleText(bubble, seat.player.id)}
+                  notice={notice?.playerId === seat.player.id ? notice.text : null}
+                  view={view}
+                />
+              ))}
             </div>
           </div>
           <div className="hand-tray">
@@ -745,7 +742,7 @@ function Lobby({
   );
 }
 
-function SeatRail({
+function EdgeSeat({
   edge,
   player,
   bubble,
@@ -758,19 +755,76 @@ function SeatRail({
   notice: string | null;
   view: PlayerView;
 }) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const [gap, setGap] = useState(3);
+  const along = edge === "top" ? 16 : 18;
+  const count = player.tileCount;
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const measure = () => {
+      const sample = rail.querySelector<HTMLElement>(".sliver");
+      const alongSize = sample
+        ? edge === "top"
+          ? sample.getBoundingClientRect().width
+          : sample.getBoundingClientRect().height
+        : along;
+      const badge = rail.querySelector<HTMLElement>(".edge-badge");
+      const reserve = edge === "top" || !badge ? 0 : badge.getBoundingClientRect().height + 6;
+      const span = edge === "top" ? rail.clientWidth : Math.max(0, rail.clientHeight - reserve);
+      const next = sliverGap(count, span, Math.max(1, alongSize), 3);
+      setGap((current) => (Math.abs(current - next) < 0.2 ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [along, count, edge]);
   return (
     <div
-      className={`rail rail-${edge}${player.isTurn ? " turn" : ""}`}
+      ref={railRef}
+      className={`rail edge edge-${edge}${player.isTurn ? " turn" : ""}`}
       data-edge={edge}
       data-player-id={player.id}
-      data-tiles={player.tileCount}
+      data-tiles={count}
+      data-skin={player.tileSkin || "ivory"}
     >
-      <SeatChip player={player} view={view} />
-      <span className="count-badge" aria-label={`${player.tileCount} tiles`}>
-        {player.tileCount}
-      </span>
+      {edge === "top" ? null : <EdgeBadge player={player} view={view} />}
+      <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">
+        {Array.from({ length: count }, (_, index) => (
+          <i
+            key={index}
+            className="sliver"
+            style={index === 0 ? undefined : edge === "top" ? { marginLeft: gap } : { marginTop: gap }}
+          />
+        ))}
+      </div>
+      {edge === "top" ? <EdgeBadge player={player} view={view} /> : null}
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
       {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
+      <span className="sr-only">
+        {player.name}, {count} tiles
+      </span>
+    </div>
+  );
+}
+
+function EdgeBadge({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
+  const clock = useServerNow(view.serverNow);
+  const live = useWinScore(player.id, player.score);
+  const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
+  const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
+  return (
+    <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}`} data-player-id={player.id}>
+      <AvatarFace
+        id={player.avatarId}
+        bot={player.bot && !player.accountBot}
+        frameId={player.frameId}
+        timer={player.isTurn && view.turnDeadline ? ratio : null}
+      />
+      <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id}>
+        {live.score}
+      </strong>
     </div>
   );
 }

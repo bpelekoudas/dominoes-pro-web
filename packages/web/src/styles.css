@@ -263,46 +263,102 @@ input {
   flex-direction: column;
 }
 .table-middle {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
 }
 .rail { position: relative; z-index: 2; }
 .rail:not(.turn) .backs,
-.rail:not(.turn) .seat-chip,
-.rail:not(.turn) .count-badge { opacity: 0.58; }
-/* Every opponent sits in one slim row so the felt can use the screen width. */
-.opponent-rail {
+.rail:not(.turn) .seat-chip { opacity: 0.58; }
+/* Opponent tile backs peek in from the felt edge. They overlay the board
+   and do not take a row or a column out of the felt. */
+.table-middle > .edge {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  overflow: visible;
+}
+.edge-left,
+.edge-right {
+  top: 8%;
+  bottom: 4%;
+  width: max-content;
+  max-width: 42%;
+  justify-content: center;
+}
+.edge-left { left: 0; align-items: flex-start; }
+.edge-right { right: 0; align-items: flex-end; }
+.edge-top {
+  top: 0;
+  left: 16px;
+  right: 16px;
+  align-items: center;
+}
+.edge-slivers { display: flex; }
+.edge-left .edge-slivers,
+.edge-right .edge-slivers { flex-direction: column; }
+.edge-top .edge-slivers {
+  flex-direction: row;
+  justify-content: center;
+  width: 100%;
+}
+.sliver {
+  position: relative;
   flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  padding: 0 8px;
-  overflow: visible;
+  background: #f6f3ec;
+  box-shadow: inset 0 0 0 1px rgba(28, 24, 18, 0.38), 0 1px 2px rgba(0, 0, 0, 0.28);
 }
-.opponent-rail[data-count="1"] { justify-content: center; }
-.opponent-rail .rail,
-.opponent-rail .rail-top,
-.opponent-rail .rail-left,
-.opponent-rail .rail-right {
-  flex: 0 1 auto;
+.edge-left .sliver,
+.edge-right .sliver { width: 14px; height: 18px; }
+.edge-left .sliver { border-radius: 0 3px 3px 0; }
+.edge-right .sliver { border-radius: 3px 0 0 3px; }
+.edge-top .sliver { width: 16px; height: 14px; border-radius: 0 0 3px 3px; }
+.edge-left .sliver::after,
+.edge-right .sliver::after,
+.edge-top .sliver::after {
+  content: "";
+  position: absolute;
+  background: rgba(168, 42, 46, 0.55);
+}
+.edge-left .sliver::after { left: 2px; top: 2px; bottom: 2px; width: 1px; }
+.edge-right .sliver::after { right: 2px; top: 2px; bottom: 2px; width: 1px; }
+.edge-top .sliver::after { top: 2px; left: 2px; right: 2px; height: 1px; }
+.edge[data-skin="neon"] .sliver { background: #e7fbff; }
+.edge[data-skin="marble"] .sliver { background: #f3f3f3; }
+.edge[data-skin="charcoal"] .sliver { background: #e4e2de; }
+.edge[data-skin="gold"] .sliver { background: #f8efd4; }
+.edge[data-skin="sky"] .sliver { background: #e6f6fb; }
+.edge[data-skin="cherry"] .sliver { background: #fdecef; }
+.edge[data-skin="wood"] .sliver { background: #f4e6d4; }
+.edge[data-skin="boss"] .sliver { background: #efe8d6; }
+.edge[data-skin="ice"] .sliver { background: #f3fbff; }
+.edge[data-skin="candy"] .sliver { background: #fff0f6; }
+.edge.rail .seat-chip { opacity: 1; }
+.edge .edge-badge {
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
   width: auto;
-  min-width: 0;
-  min-height: 0;
-  max-width: 32%;
-  max-height: none;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0;
-  overflow: visible;
+  max-width: none;
+  margin: 0 0 4px;
+  padding: 1px 7px 1px 1px;
+  pointer-events: none;
 }
-.opponent-rail[data-count="2"] .rail { max-width: 46%; }
-.opponent-rail[data-count="1"] .rail { flex: 0 1 240px; max-width: 70%; }
+.edge-top .edge-badge { margin: 4px 0 0; }
+.edge-badge .avatar { width: 26px; height: 26px; font-size: 0.85rem; }
+.edge-badge strong {
+  color: var(--gold);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.edge-left .talk-bubble { left: calc(100% + 6px); top: 0; }
+.edge-right .talk-bubble { right: calc(100% + 6px); left: auto; top: 0; }
+.edge-top .talk-bubble { left: 50%; top: calc(100% + 4px); transform: translateX(-50%); }
 .rail-top {
   min-height: 44px;
   max-height: 48px;
@@ -379,40 +435,6 @@ input {
   flex: none;
   max-width: 48%;
 }
-.opponent-rail .seat-chip {
-  position: relative;
-  left: auto;
-  right: auto;
-  top: auto;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  padding: 1px 16px 1px 1px;
-}
-.opponent-rail .avatar { width: 26px; height: 26px; font-size: 0.9rem; }
-.opponent-rail .chip-name { font-size: 0.68rem; }
-.opponent-rail .chip-text { overflow: hidden; }
-.opponent-rail .chip-meta { min-width: 0; overflow: hidden; }
-.count-badge {
-  position: absolute;
-  z-index: 3;
-  right: 0;
-  top: 50%;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: #141414;
-  color: var(--paper);
-  box-shadow: inset 0 0 0 1px rgba(239, 239, 239, 0.45);
-  font-size: 0.62rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 16px;
-  text-align: center;
-  transform: translateY(-50%);
-  pointer-events: none;
-}
 .you-float .seat-chip { position: relative; left: auto; top: auto; right: auto; }
 .you-float .seat-chip:not(.turn) { opacity: 0.58; }
 .avatar {
@@ -468,18 +490,6 @@ input {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
 }
 .rail-top .talk-bubble { left: 8px; top: 46px; }
-.opponent-rail .talk-bubble,
-.opponent-rail .seat-notice {
-  left: 0;
-  right: auto;
-  top: calc(100% + 4px);
-  max-width: min(180px, 46vw);
-}
-.opponent-rail .rail:last-child .talk-bubble,
-.opponent-rail .rail:last-child .seat-notice {
-  left: auto;
-  right: 0;
-}
 .you-float { position: relative; z-index: 4; flex: none; }
 .you-float .talk-bubble { left: 0; bottom: calc(100% + 4px); }
 .tray-notices {
