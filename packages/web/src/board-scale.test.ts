@@ -2,17 +2,21 @@ import { describe, expect, it } from "vitest";
 import { FIT_MARGIN } from "../../rules/src/layout.js";
 import { TILE_SHORT } from "../../rules/src/layout.js";
 import {
+  boardShift,
   CAMERA_EDGE,
   cameraScale,
   chainBounds,
+  clearanceInsets,
   FELT_PAD_Y,
   fitScale,
   handOverPlacement,
+  landedTileBox,
   MIN_TILE_FRAC,
   nextBoardScale,
   OPEN_TILE_FRAC,
   PHONE_SCALE_CAP,
   scaleForTiles,
+  zoneInsets,
 } from "./board-scale.js";
 
 const felt = { w: 412, h: 560 };
@@ -169,6 +173,54 @@ describe("board scale", () => {
     const again = cameraScale({ bounds: one, felt, screenWidth: screen, previous: scale, newHand: true });
     expect(again).toBeCloseTo(open, 5);
     expect(cameraScale({ bounds: one, felt, screenWidth: screen, previous: scale, newHand: false })).toBeLessThanOrEqual(scale);
+  });
+
+  it("fits a tall chain under a top badge and clear of the side racks", () => {
+    const felt = { w: 920, h: 700 };
+    const bounds = { w: 220, h: 640 };
+    const reserve = { top: 72, right: 86, bottom: 0, left: 86 };
+    const scale = cameraScale({ bounds, felt, screenWidth: 920, previous: null, newHand: true, reserve });
+    const clearance = clearanceInsets(reserve);
+    const shift = boardShift(clearance);
+    const chainW = bounds.w * scale;
+    const chainH = bounds.h * scale;
+    const top = (felt.h - chainH) / 2 + shift.y;
+    const left = (felt.w - chainW) / 2 + shift.x;
+    expect(top).toBeGreaterThanOrEqual(clearance.top - 0.6);
+    expect(left).toBeGreaterThanOrEqual(clearance.left - 0.6);
+    expect(top + chainH).toBeLessThanOrEqual(felt.h - clearance.bottom + 0.6);
+    expect(left + chainW).toBeLessThanOrEqual(felt.w - clearance.right + 0.6);
+    expect(shift.y).toBeGreaterThan(0);
+  });
+
+  it("reserves the side a badge actually overlaps, plus a gap", () => {
+    const felt = { left: 0, top: 40, right: 390, bottom: 640 };
+    const insets = zoneInsets(felt, [
+      { left: 150, top: 40, right: 240, bottom: 96 },
+      { left: 0, top: 180, right: 74, bottom: 230 },
+    ]);
+    expect(insets.top).toBeGreaterThanOrEqual(56);
+    expect(insets.left).toBeGreaterThanOrEqual(74);
+    expect(insets.right).toBe(0);
+    expect(insets.bottom).toBe(0);
+  });
+
+  it("lands a turned horizontal tile on its own center, not the scorer's seat", () => {
+    const felt = { left: 0, top: 80, width: 390, height: 520 };
+    const frame = { x: -40, y: -220, w: 280, h: 360 };
+    const tile = { x: 150, y: -180, w: 72, h: 36 };
+    const scale = 1.4;
+    const shiftY = 18;
+    const hit = landedTileBox(felt, frame, scale, 0, shiftY, tile);
+    const scalerW = frame.w * scale;
+    const scalerH = frame.h * scale;
+    const left = felt.left + (felt.width - scalerW) / 2 + (tile.x - frame.x) * scale;
+    const top = felt.top + (felt.height - scalerH) / 2 + shiftY + (tile.y - frame.y) * scale;
+    expect(hit.x).toBeCloseTo(left + (tile.w * scale) / 2, 5);
+    expect(hit.y).toBeCloseTo(top + (tile.h * scale) / 2, 5);
+    expect(hit.w).toBeCloseTo(tile.w * scale, 5);
+    expect(hit.h).toBeCloseTo(tile.h * scale, 5);
+    expect(hit.y).toBeLessThan(felt.top + felt.height - 40);
   });
 
   it("pads the chain and ignores an empty board", () => {

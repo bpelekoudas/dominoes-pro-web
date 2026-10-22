@@ -3,13 +3,22 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
-import { cameraScale, chainBounds, handOverPlacement } from "./board-scale.js";
+import {
+  boardShift,
+  cameraScale,
+  chainBounds,
+  clearanceInsets,
+  handOverPlacement,
+  landedTileBox,
+  zoneInsets,
+  type AxisInsets,
+} from "./board-scale.js";
 import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
 import { scoreTier } from "./feel/ladder";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
-import { demoAward, MomentLayer, type HitBox } from "./moment.js";
+import { demoAward, MomentLayer } from "./moment.js";
 import {
   chooseDropEnd,
   type DropBox,
@@ -93,7 +102,10 @@ export function Table({
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [lift, setLift] = useState(0);
+  const [reserve, setReserve] = useState<AxisInsets>({ top: 0, right: 0, bottom: 0, left: 0 });
   const [cameraArmed, setCameraArmed] = useState(false);
+  const clearance = clearanceInsets(reserve);
+  const shift = boardShift(clearance);
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
@@ -106,6 +118,8 @@ export function Table({
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
     const measure = () => {
+      const nextReserve = measureReserve(viewport);
+      setReserve((current) => (sameInsets(current, nextReserve) ? current : nextReserve));
       // Hand over keeps the last scale. The sheet must not zoom the chain.
       if (frozen.current && held.current?.hand === handKey) return;
       let width = viewport.clientWidth;
@@ -131,6 +145,7 @@ export function Table({
         screenWidth,
         previous: newHand ? null : (held.current?.scale ?? null),
         newHand,
+        reserve: nextReserve,
       });
       held.current = { hand: handKey, scale: next };
       frozen.current = handOver;
@@ -143,6 +158,10 @@ export function Table({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
+    const app = viewport.closest(".felt-app");
+    app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+      observer.observe(node);
+    });
     return () => observer.disconnect();
   }, [layout, handOver, handKey]);
 
@@ -214,11 +233,13 @@ export function Table({
   const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
   const feel = useLiveFeel(view);
   const pop = useScorePop(view.lastPlay);
-  const popAt = useAnchor(stageRef, layout, frame, scale, pop?.tileId ?? null, pop?.endId ?? null);
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
-  const anchor = useHitBox(stageRef, moment?.tileId ?? null, moment?.key ?? "", layout, scale);
+  const landed = useTileCenter(viewportRef, layout, frame, scale, shift.x, shift.y + lift, lastTileId);
+  // Keep the state object. A fresh literal would restart the shatter on every render.
+  const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
+  const popAt = pop && landed && pop.tileId === lastTileId ? { left: landed.x, top: landed.y, place: "tile" as const } : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
   return (
@@ -232,6 +253,10 @@ export function Table({
       data-table-id={view.tableId}
       data-board-scale={scale.toFixed(2)}
       data-board-lift={String(lift)}
+      data-fit-top={clearance.top.toFixed(0)}
+      data-fit-right={clearance.right.toFixed(0)}
+      data-fit-bottom={clearance.bottom.toFixed(0)}
+      data-fit-left={clearance.left.toFixed(0)}
       data-board-frozen={handOver ? "true" : "false"}
       data-win-board="true"
       data-camera={cameraArmed ? "armed" : "hold"}
@@ -241,7 +266,7 @@ export function Table({
       {layout && frame ? (
         <div
           className="board-scaler"
-          style={{ width: frame.w * scale, height: frame.h * scale, transform: `translateY(${lift}px)` }}
+          style={{ width: frame.w * scale, height: frame.h * scale, transform: `translate(${shift.x}px, ${shift.y + lift}px)` }}
         >
           <div
             className="board-stage"
@@ -278,7 +303,7 @@ export function Table({
           </div>
         </div>
       ) : null}
-      {moment ? (
+      {moment && anchor ? (
         <MomentLayer
           token={moment.key}
           awarded={moment.awarded}
@@ -507,27 +532,67 @@ function useBigMoment(
   return { moment, dismissMoment: dismiss };
 }
 
-function useHitBox(
-  stageRef: { current: HTMLDivElement | null },
-  tileId: string | null,
-  key: string,
+function useTileCenter(
+  viewportRef: { current: HTMLDivElement | null },
   layout: BoardLayout | null,
+  frame: LayoutBox | null,
   scale: number,
-): HitBox | null {
-  const [box, setBox] = useState<HitBox | null>(null);
+  shiftX: number,
+  shiftY: number,
+  tileId: string | null,
+): { x: number; y: number; w: number; h: number } | null {
+  const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   useLayoutEffect(() => {
-    if (!key) return;
-    const stage = stageRef.current;
-    const el = tileId ? stage?.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`) : null;
-    const rect = (el ?? stage)?.getBoundingClientRect();
-    if (!rect) return;
-    if (el) {
-      setBox({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, w: rect.width, h: rect.height });
+    const viewport = viewportRef.current;
+    const tile = tileId && layout ? layout.tiles.find((item) => item.tileId === tileId) : undefined;
+    const root = document.documentElement;
+    if (!viewport || !frame || !tile) {
+      setBox(null);
+      delete root.dataset.tileHitX;
+      delete root.dataset.tileHitY;
       return;
     }
-    setBox({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, w: 44, h: 88 });
-  }, [stageRef, tileId, key, layout, scale]);
+    const felt = viewport.getBoundingClientRect();
+    const next = landedTileBox(
+      { left: felt.left, top: felt.top, width: felt.width, height: felt.height },
+      frame,
+      scale,
+      shiftX,
+      shiftY,
+      tile,
+    );
+    root.dataset.tileHitX = next.x.toFixed(1);
+    root.dataset.tileHitY = next.y.toFixed(1);
+    root.dataset.tileHitW = next.w.toFixed(1);
+    root.dataset.tileHitH = next.h.toFixed(1);
+    setBox((current) =>
+      current &&
+      Math.abs(current.x - next.x) < 0.5 &&
+      Math.abs(current.y - next.y) < 0.5 &&
+      Math.abs(current.w - next.w) < 0.5 &&
+      Math.abs(current.h - next.h) < 0.5
+        ? current
+        : next,
+    );
+  }, [viewportRef, layout, frame, scale, shiftX, shiftY, tileId]);
   return box;
+}
+
+function sameInsets(a: AxisInsets, b: AxisInsets): boolean {
+  return Math.abs(a.top - b.top) < 0.5 && Math.abs(a.right - b.right) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5 && Math.abs(a.left - b.left) < 0.5;
+}
+
+function measureReserve(viewport: HTMLElement): AxisInsets {
+  const felt = viewport.getBoundingClientRect();
+  const zones: DOMRect[] = [];
+  const app = viewport.closest(".felt-app");
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+    if (node instanceof HTMLElement) zones.push(node.getBoundingClientRect());
+  });
+  return zoneInsets(
+    { left: felt.left, top: felt.top, right: felt.right, bottom: felt.bottom },
+    zones.map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })),
+  );
 }
 
 function faceOf(tileId: string | null): { a: number; b: number } {
@@ -565,7 +630,7 @@ function FlyingScore({
   at,
 }: {
   pop: { seq: number; awarded: number; playerId: string };
-  at: { left: number; top: number; place: "above" | "beside" };
+  at: { left: number; top: number; place: "tile" | "above" | "beside" };
 }) {
   const [spot, setSpot] = useState(at);
   const [fly, setFly] = useState(false);
@@ -601,50 +666,6 @@ function FlyingScore({
     </p>,
     document.body,
   );
-}
-
-function useAnchor(
-  stageRef: { current: HTMLDivElement | null },
-  layout: BoardLayout | null,
-  fit: LayoutBox | null,
-  scale: number,
-  tileId: string | null,
-  endId: string | null,
-): { left: number; top: number; place: "above" | "beside" } | null {
-  const [at, setAt] = useState<{ left: number; top: number; place: "above" | "beside" } | null>(null);
-  useLayoutEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || !layout || !fit || !tileId) {
-      setAt(null);
-      return;
-    }
-    const tile = layout.tiles.find((item) => item.tileId === tileId);
-    const end = layout.ends.find((item) => item.id === endId);
-    const box = tile ?? end;
-    if (!box) {
-      setAt(null);
-      return;
-    }
-    const felt = stage.closest(".table-scroll")?.getBoundingClientRect() ?? stage.getBoundingClientRect();
-    const origin = stage.getBoundingClientRect();
-    const local = place(box, fit);
-    const node = stage.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
-    const rect = node?.getBoundingClientRect();
-    const width = rect && rect.width > 1 ? rect.width : local.width * scale;
-    const tileLeft = rect && rect.width > 1 ? rect.left : origin.left + local.left * scale;
-    const tileTop = rect && rect.height > 1 ? rect.top : origin.top + local.top * scale;
-    // The award sits fully above the tile, or just outside it. The top edge
-    // is already clear of the tile, so a fade cannot slide the number onto it.
-    if (tileTop - 46 >= felt.top + 2) {
-      setAt({ left: tileLeft + width / 2, top: tileTop - 46, place: "above" });
-      return;
-    }
-    const roomRight = felt.right - (tileLeft + width);
-    const roomLeft = tileLeft - felt.left;
-    const beside = roomRight >= roomLeft ? tileLeft + width + 10 : Math.max(felt.left + 2, tileLeft - 58);
-    setAt({ left: beside, top: Math.max(felt.top + 2, tileTop), place: "beside" });
-  }, [stageRef, layout, fit, scale, tileId, endId]);
-  return at;
 }
 
 function place(box: LayoutBox, fit: LayoutBox): { left: number; top: number; width: number; height: number } {

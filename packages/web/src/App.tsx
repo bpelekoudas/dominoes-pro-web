@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
 import { tableLink } from "./link.js";
 import { seatAround, type SeatEdge } from "./seats.js";
@@ -18,7 +18,7 @@ import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
 import { FeelCall, FeelTally } from "./feel/overlay";
 import { FeelPreview, feelPreviewRequested } from "./feel/preview";
-import { feelTableRequested, useFeelPlay } from "./feel/table-play";
+import { crowdView, feelSeatsRequested, feelTableRequested, useFeelPlay } from "./feel/table-play";
 import { ScoreChaseContext, useScoreChase, useShownScore } from "./feel/score";
 import { useHandCelebration, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 
@@ -223,6 +223,7 @@ export function App() {
   };
 
   const winMode = winPreviewRequested();
+  if (feelSeatsRequested()) return <FeelSeatsScreen />;
   if (feelTableRequested()) return <FeelPlayScreen />;
   if (feelPreviewRequested() && !view) return <FeelPreview />;
   if (winMode && !view) {
@@ -358,6 +359,35 @@ function Choice<T extends string | number>({
           {option.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function FeelSeatsScreen() {
+  const view = useMemo(() => crowdView(), []);
+  return (
+    <div className="feel-play-root" data-screen="feel-seats" data-players={view.players.length}>
+      <Game
+        view={view}
+        chat={[]}
+        error={null}
+        status="live"
+        selectedTile={null}
+        chatOpen={false}
+        dismissedHand={null}
+        leaveArmed={false}
+        onSelect={() => undefined}
+        onToggleChat={() => undefined}
+        onDismiss={() => undefined}
+        onLeaveArm={() => undefined}
+        onLeave={() => undefined}
+        onLeaveMatch={() => undefined}
+        onCancelQuick={() => undefined}
+        iris={false}
+        onSend={() => undefined}
+        accountUser={null}
+        onAccount={() => undefined}
+      />
     </div>
   );
 }

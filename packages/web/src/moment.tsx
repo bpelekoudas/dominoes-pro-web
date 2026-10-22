@@ -144,6 +144,8 @@ export function MomentLayer({
     const hitY = anchor ? anchor.y : height / 2;
     document.documentElement.style.setProperty("--hit-x", `${(hitX / width) * 100}%`);
     document.documentElement.style.setProperty("--hit-y", `${(hitY / height) * 100}%`);
+    document.documentElement.dataset.crackX = hitX.toFixed(1);
+    document.documentElement.dataset.crackY = hitY.toFixed(1);
     const glass = fxId === "glass" ? buildGlass(width, height, hitX, hitY, awarded) : null;
     const themed = fxId === "glass" ? null : createFxScene(fxId, width, height, hitX, hitY, awarded);
     const ctx = canvas.getContext("2d");
@@ -165,6 +167,8 @@ export function MomentLayer({
     return () => {
       cancelAnimationFrame(frame);
       delete root.dataset.uhohGlass;
+      delete root.dataset.crackX;
+      delete root.dataset.crackY;
     };
   }, [anchor, awarded, effect, fxId, reduced, token]);
 
@@ -193,7 +197,9 @@ export function MomentLayer({
       <div
         className={`uhoh-title${reduced ? " reduced" : ""}`}
         data-uhoh="title"
+        data-origin={anchor ? "tile" : "center"}
         data-phase={phase}
+        style={anchor ? { left: anchor.x, top: anchor.y } : undefined}
         role="img"
         aria-label={cry ? `UH-OH, plus ${awarded}` : `plus ${awarded}`}
       >

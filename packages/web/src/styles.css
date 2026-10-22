@@ -1473,7 +1473,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .tier-up { animation: none; }
   .win-pip, .win-bit, .win-flash, .win-shock { display: none; }
   .chip-meta strong.is-scoring { animation: none; }
-  .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-topple i, .feel-landing, .seat-chip[data-feel],
+  .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-burst, .feel-topple i, .feel-landing, .seat-chip[data-feel],
   .rail[data-feel] .sliver, .hand[data-feel] .hand-tile, .board-tile.last-move,
   .felt-app[data-win-kind="game"] .board-tile, .felt-app[data-win-stage="call"] .board-tile { animation: none; }
 }
@@ -2644,6 +2644,14 @@ html[data-feel-cues~="near-target"] .seat-chip.you .chip-meta strong {
 }
 html[data-feel-cues~="close-game"] .chip-meta strong { letter-spacing: 0.04em; }
 html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { color: #d5a336; }
+.feel-burst {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 47;
+}
 .feel-call {
   position: fixed;
   inset: 0;

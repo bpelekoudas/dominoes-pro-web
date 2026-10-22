@@ -70,6 +70,106 @@ export const CAMERA_EDGE = 30;
 /** Ease-out on the felt. No overshoot. */
 export const CAMERA_EASE_MS = 240;
 
+/** Air between a tile and a seat badge, rack, header, or the bottom bar. */
+export const BADGE_GAP = 10;
+
+export interface AxisInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+const NO_INSET: AxisInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/** Badge reach, and never less than the felt edge inset. */
+export function clearanceInsets(reserve: AxisInsets, floor = CAMERA_EDGE): AxisInsets {
+  return {
+    top: Math.max(reserve.top, floor),
+    right: Math.max(reserve.right, floor),
+    bottom: Math.max(reserve.bottom, floor),
+    left: Math.max(reserve.left, floor),
+  };
+}
+
+/** Move a felt-centered chain into an asymmetric safe rect. */
+export function boardShift(insets: AxisInsets): { x: number; y: number } {
+  return { x: (insets.left - insets.right) / 2, y: (insets.top - insets.bottom) / 2 };
+}
+
+export function scaleForAxis(bounds: FeltSize, felt: FeltSize, insets: AxisInsets): number {
+  const roomW = Math.max(1, felt.w - insets.left - insets.right);
+  const roomH = Math.max(1, felt.h - insets.top - insets.bottom);
+  return Math.min(roomW / Math.max(1, bounds.w), roomH / Math.max(1, bounds.h));
+}
+
+export interface ZoneRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * How far each overlay reaches into the felt. A badge on the top edge
+ * reserves the top, a side rack reserves that side. The gap is extra air
+ * so a tile does not sit against the badge.
+ */
+export function zoneInsets(felt: ZoneRect, zones: readonly ZoneRect[]): AxisInsets {
+  const insets: AxisInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const width = Math.max(1, felt.right - felt.left);
+  const height = Math.max(1, felt.bottom - felt.top);
+  for (const zone of zones) {
+    const left = Math.max(zone.left, felt.left);
+    const right = Math.min(zone.right, felt.right);
+    const top = Math.max(zone.top, felt.top);
+    const bottom = Math.min(zone.bottom, felt.bottom);
+    if (right - left < 1 || bottom - top < 1) continue;
+    const cx = (left + right) / 2;
+    const cy = (top + bottom) / 2;
+    const dLeft = cx - felt.left;
+    const dRight = felt.right - cx;
+    const dTop = cy - felt.top;
+    const dBottom = felt.bottom - cy;
+    const nearest = Math.min(dLeft, dRight, dTop, dBottom);
+    if (nearest === dTop) insets.top = Math.max(insets.top, bottom - felt.top + BADGE_GAP);
+    else if (nearest === dBottom) insets.bottom = Math.max(insets.bottom, felt.bottom - top + BADGE_GAP);
+    else if (nearest === dLeft) insets.left = Math.max(insets.left, right - felt.left + BADGE_GAP);
+    else insets.right = Math.max(insets.right, felt.right - left + BADGE_GAP);
+  }
+  const capX = width * 0.42;
+  const capY = height * 0.42;
+  return {
+    top: Math.min(insets.top, capY),
+    right: Math.min(insets.right, capX),
+    bottom: Math.min(insets.bottom, capY),
+    left: Math.min(insets.left, capX),
+  };
+}
+
+/**
+ * Screen center of a tile after the board has finished zooming and panning.
+ * `shiftX` / `shiftY` are the settled translate, including the hand-over lift.
+ * The in-flight CSS transition is ignored on purpose: the crack and the +N
+ * belong on the tile's landing spot.
+ */
+export function landedTileBox(
+  felt: { left: number; top: number; width: number; height: number },
+  frame: { x: number; y: number; w: number; h: number },
+  scale: number,
+  shiftX: number,
+  shiftY: number,
+  tile: { x: number; y: number; w: number; h: number },
+): { x: number; y: number; w: number; h: number } {
+  const scalerW = frame.w * scale;
+  const scalerH = frame.h * scale;
+  const left = felt.left + (felt.width - scalerW) / 2 + shiftX + (tile.x - frame.x) * scale;
+  const top = felt.top + (felt.height - scalerH) / 2 + shiftY + (tile.y - frame.y) * scale;
+  const w = tile.w * scale;
+  const h = tile.h * scale;
+  return { x: left + w / 2, y: top + h / 2, w, h };
+}
+
 export interface CameraInput {
   bounds: FeltSize;
   felt: FeltSize;
@@ -77,12 +177,11 @@ export interface CameraInput {
   screenWidth: number;
   previous: number | null;
   newHand: boolean;
-}
-
-function scaleForInset(bounds: FeltSize, felt: FeltSize, inset: number): number {
-  const roomW = Math.max(1, felt.w - inset * 2);
-  const roomH = Math.max(1, felt.h - inset * 2);
-  return Math.min(roomW / Math.max(1, bounds.w), roomH / Math.max(1, bounds.h));
+  /**
+   * Seat badges, opponent racks, the header, and the bottom bar, measured
+   * into the felt. The chain fits in what's left and is shifted to match.
+   */
+  reserve?: AxisInsets;
 }
 
 /**
@@ -102,9 +201,10 @@ export function cameraScale(input: CameraInput): number {
   // Narrow felts (a phone with players on both sides) cannot spare 72px a side.
   const dangerInset = Math.max(10, Math.min(CAMERA_DANGER, short * 0.08));
   const comfortInset = Math.max(dangerInset + 16, Math.min(CAMERA_COMFORT, short * 0.16));
-  const comfortFit = scaleForInset(input.bounds, input.felt, comfortInset);
-  const dangerFit = scaleForInset(input.bounds, input.felt, dangerInset);
-  const edgeFit = scaleForInset(input.bounds, input.felt, CAMERA_EDGE);
+  const reserve = input.reserve ?? NO_INSET;
+  const comfortFit = scaleForAxis(input.bounds, input.felt, clearanceInsets(reserve, comfortInset));
+  const dangerFit = scaleForAxis(input.bounds, input.felt, clearanceInsets(reserve, dangerInset));
+  const edgeFit = scaleForAxis(input.bounds, input.felt, clearanceInsets(reserve, CAMERA_EDGE));
   // Comfort air when it still clears the floor. Otherwise the danger air.
   // The floor is a minimum, not a place to slam a short chain.
   let target = comfortFit;
