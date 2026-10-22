@@ -264,13 +264,20 @@ async function playMatch(mode, index, options) {
     if (message.audit?.handSeed) noteSeed(message.view, message.audit.handSeed);
     if (seat.onReady) seat.onReady();
     try {
-      const agreed = agreedView();
-      if (agreed) review(agreed);
-      act(seat);
+      step();
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error));
     }
   };
+
+  // The next intent waits until every seat has this public update. Acting on the
+  // first socket to hear it lets a fast continue skip a scoring state on the rest.
+  function step() {
+    const agreed = agreedView();
+    if (!agreed) return;
+    review(agreed);
+    for (const player of seats) act(player);
+  }
 
   function noteSeed(view, seed) {
     const hand = ensureHand(view);
@@ -553,7 +560,7 @@ async function playMatch(mode, index, options) {
         } finally {
           hold = false;
         }
-        for (const seat of seats) act(seat);
+        step();
       }
       await sleep(40);
     }
@@ -607,9 +614,10 @@ async function playMatch(mode, index, options) {
 }
 
 function publicSignature(view) {
+  // Phase is private. The seat who must draw or knock sees "draw" or "knock"
+  // while everyone else still sees "play" for that same update.
   return JSON.stringify({
     status: view.status,
-    phase: view.phase,
     game: view.gameNumber,
     hand: view.handNumber,
     turn: view.turnPlayerId,
