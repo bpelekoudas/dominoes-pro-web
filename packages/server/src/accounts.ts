@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
-import { cleanName, isSoakName } from "./hub.js";
+import { cleanName, cleanSoakRun, isSoakName } from "./hub.js";
 import { isAvatarId, isWithheldId, resolveAvatar } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
 import { describePlayer, type PublicStanding } from "./ranking.js";
@@ -169,14 +169,17 @@ export class Accounts {
     };
   }
 
-  createGuest(displayName: string, current: PublicUser | null): SignInResult {
+  createGuest(displayName: string, current: PublicUser | null, soakRun: string | null = null): SignInResult {
     const name = cleanName(displayName);
     if (!name) return { outcome: "invalid", error: "Use a name, up to 16 letters." };
+    const runId = isSoakName(name) ? cleanSoakRun(soakRun) : null;
     if (current) {
       if (current.displayName !== name) this.rename(current.id, name);
+      if (runId) this.store.setSoakRun(current.id, runId);
       return { outcome: "ok", user: this.present(current.id)!, token: null };
     }
     const user = this.insertUser(name, true);
+    if (runId) this.store.setSoakRun(user.id, runId);
     const stamp = this.stamp();
     this.store.insertIdentity({
       id: randomUUID(),

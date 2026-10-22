@@ -3,12 +3,16 @@
  *
  *   npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
  *
- * Node 22 has a global WebSocket that can send the session cookie. Node 18 uses the `ws` package.
+ * Node 22 has a global WebSocket that can send the session cookie. Node 20 uses the `ws` package.
  * `npm run build:rules` first so the replay checker can import @uhoh/rules.
  */
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { alignedFronts, createSeatSync, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
+
+const runId = randomUUID();
 
 const MODES = [
   { seats: 2, boneyardMode: "draw_until", seriesLength: 3 },
@@ -63,6 +67,7 @@ mkdirSync(outDir, { recursive: true });
 
 const report = {
   url: pageUrl.origin,
+  runId,
   startedAt: new Date().toISOString(),
   finishedAt: null,
   matches: [],
@@ -300,7 +305,7 @@ async function restoreDrill() {
   const dir = path.join("/tmp", `uhoh-soak-restore-${process.pid}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  const port = 8871;
+  const port = 20000 + (process.pid % 20000);
   const origin = `http://127.0.0.1:${port}`;
   const socketUrl = `ws://127.0.0.1:${port}/ws`;
   let child = startRestoreServer(dir, port);
@@ -318,21 +323,42 @@ async function restoreDrill() {
   }
 }
 
+function serverBinary() {
+  if (Number(process.versions.node.split(".")[0]) >= 22) return process.execPath;
+  // The soak client runs on Node 20. The game server needs Node 22 for node:sqlite.
+  try {
+    const found = execFileSync("node", ["-p", "process.execPath + '\\n' + process.versions.node"], {
+      encoding: "utf8",
+    }).trim();
+    const [bin, version = ""] = found.split("\n");
+    if (bin && bin !== process.execPath && Number(version.split(".")[0]) >= 22) return bin;
+  } catch {
+    // No other Node is on PATH.
+  }
+  throw new Error("The restore check needs Node 22 to boot the server.");
+}
+
 function startRestoreServer(dir, port) {
-  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "packages/server/dist/index.js"], {
+  const child = spawn(serverBinary(), ["--disable-warning=ExperimentalWarning", "packages/server/dist/index.js"], {
     cwd: process.cwd(),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, BOTS_ENABLED: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  child.stderrText = "";
+  child.stderr?.on("data", (chunk) => {
+    child.stderrText = `${child.stderrText}${chunk.toString()}`.slice(-400);
+  });
   child.stdout?.resume();
-  child.stderr?.resume();
   return child;
 }
 
 async function waitHealth(origin, child) {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (child.exitCode != null) throw new Error("The restore server exited before it was ready.");
+    if (child.exitCode != null) {
+      const detail = String(child.stderrText ?? "").trim().split("\n").at(-1);
+      throw new Error(detail ? `The restore server exited before it was ready. ${detail}` : "The restore server exited before it was ready.");
+    }
     try {
       const response = await fetch(new URL("/health", origin));
       if (response.ok) return;
@@ -482,7 +508,11 @@ function humanSummary(data) {
 }
 
 async function cleanup() {
-  const response = await fetch(new URL("/api/soak/cleanup", pageUrl), { method: "POST" });
+  const response = await fetch(new URL("/api/soak/cleanup", pageUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ runId }),
+  });
   if (response.status >= 500) throw new Error(`Cleanup returned ${response.status}.`);
   if (!response.ok) throw new Error(`Cleanup returned ${response.status}: ${await response.text()}`);
   return response.json();
@@ -492,7 +522,7 @@ async function guest(name, origin = pageUrl) {
   const response = await fetch(new URL("/api/guest", origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: name }),
+    body: JSON.stringify({ displayName: name, soakRun: runId }),
   });
   if (response.status >= 500) throw new Error(`Guest sign-in returned ${response.status}.`);
   if (!response.ok) throw new Error(`Guest sign-in returned ${response.status}: ${await response.text()}`);
@@ -525,6 +555,7 @@ async function playMatch(mode, index, options) {
       socket: null,
       pausing: false,
       acted: new Set(),
+      ...createSeatSync(),
     });
   }
 
@@ -565,7 +596,8 @@ async function playMatch(mode, index, options) {
   };
   let failureError = null;
 
-  const onMessage = (seat, raw) => {
+  const onMessage = (seat, socket, raw) => {
+    if (seat.socket !== socket) return;
     lastActivity = Date.now();
     let message;
     try {
@@ -578,14 +610,20 @@ async function playMatch(mode, index, options) {
       fail(`Server error: ${message.message}`);
       return;
     }
-    if (message.type === "welcome") {
+    const kind = ingest(seat, message);
+    if (kind === "welcome") {
       seat.playerId = message.playerId;
       seat.token = message.token;
       if (seat.onReady) seat.onReady();
       return;
     }
-    if (message.type !== "state") return;
-    seat.view = message.view;
+    if (kind === "foreign") {
+      fail("The server sent another player's hand.");
+      return;
+    }
+    if (kind !== "queued" && kind !== "duplicate" && kind !== "lobby") return;
+    seat.stateGen = (seat.stateGen ?? 0) + 1;
+    seat.view = seat.latest;
     if (message.audit?.handSeed) noteSeed(message.view, message.audit.handSeed);
     if (seat.onReady) seat.onReady();
     try {
@@ -595,13 +633,19 @@ async function playMatch(mode, index, options) {
     }
   };
 
-  // The next intent waits until every seat has this public update. Acting on the
-  // first socket to hear it lets a fast continue skip a scoring state on the rest.
+  // Keep every public update until all seats have it. A later turn must not
+  // erase a scoring play that the slower sockets have not checked yet.
   function step() {
-    const agreed = agreedView();
-    if (!agreed) return;
-    review(agreed);
-    for (const player of seats) act(player);
+    while (true) {
+      const fronts = alignedFronts(seats);
+      if (!fronts) break;
+      review(fronts[0], fronts);
+      shiftFronts(seats);
+    }
+    if (hold) return;
+    if (seats.every((seat) => seat.queue.length === 0)) {
+      for (const player of seats) act(player);
+    }
   }
 
   function noteSeed(view, seed) {
@@ -619,14 +663,7 @@ async function playMatch(mode, index, options) {
     return hand;
   }
 
-  function agreedView() {
-    if (seats.some((seat) => !seat.view)) return null;
-    const signature = publicSignature(seats[0].view);
-    if (seats.some((seat) => publicSignature(seat.view) !== signature)) return null;
-    return seats[0].view;
-  }
-
-  function review(view) {
+  function review(view, fronts) {
     const signature = publicSignature(view);
     if (signature === checkedSig) return;
     checkedSig = signature;
@@ -655,7 +692,7 @@ async function playMatch(mode, index, options) {
       prevGame = view.gameNumber;
     }
     checkBoard(view);
-    checkTiles(view);
+    checkTiles(view, fronts);
     checkTurn(view);
     const endKey = view.lastHand ? `${view.lastHand.gameNumber}-${view.lastHand.handNumber}` : null;
     const endedNow = Boolean(endKey && !seenEnds.has(endKey));
@@ -673,14 +710,9 @@ async function playMatch(mode, index, options) {
     }
     for (const player of view.players) {
       if (player.score % 5 !== 0) throw new Error(`Score ${player.score} is not a multiple of 5.`);
-      const before = prevScores[player.id] ?? 0;
-      let expected = 0;
-      if (endedNow) expected += view.lastHand.leftoverAwards[player.id] ?? 0;
-      if (view.lastPlay && view.lastPlay.seq > prevPlaySeq && view.lastPlay.playerId === player.id) {
-        expected += view.lastPlay.awarded;
-      }
-      if (player.score - before !== expected) {
-        throw new Error(`Score moved by ${player.score - before}, expected ${expected}.`);
+      const move = scoreMove(player, view, prevScores[player.id] ?? 0, prevPlaySeq, endedNow);
+      if (move.delta !== move.expected) {
+        throw new Error(`Score moved by ${move.delta}, expected ${move.expected}.`);
       }
       prevScores[player.id] = player.score;
     }
@@ -705,14 +737,10 @@ async function playMatch(mode, index, options) {
     }
   }
 
-  function checkTiles(view) {
+  function checkTiles(view, fronts) {
     const ids = [];
-    for (const seat of seats) {
-      const mine = seat.view.you.hand.map((tile) => tile.id);
-      const reported = seat.view.players.find((player) => player.id === seat.playerId);
-      if (!reported || reported.tileCount !== mine.length) throw new Error("A hand count does not match the tiles dealt.");
-      ids.push(...mine);
-    }
+    if (!handCountsMatch(fronts)) throw new Error("A hand count does not match the tiles dealt.");
+    for (const seatView of fronts) ids.push(...seatView.you.hand.map((tile) => tile.id));
     if (view.board) ids.push(...tilesOnBoard(view.board));
     const unique = new Set(ids);
     if (unique.size !== ids.length) throw new Error("A tile appears more than once.");
@@ -833,7 +861,7 @@ async function playMatch(mode, index, options) {
   }
 
   const wire = (seat, socket) => {
-    socket.on("message", (raw) => onMessage(seat, raw));
+    socket.on("message", (raw) => onMessage(seat, socket, raw));
     socket.on("close", () => {
       if (seat.socket !== socket || seat.pausing || done || failure) return;
       fail("The socket closed before the match finished.");
@@ -853,7 +881,7 @@ async function playMatch(mode, index, options) {
         casual: true,
       }),
     );
-    await waitReady(seats[0]);
+    await waitReady(seats[0], 1);
     const code = seats[0].view?.roomCode;
     if (!code) throw new Error("The table did not send a room code.");
     stats.room = code;
@@ -862,7 +890,7 @@ async function playMatch(mode, index, options) {
       player.socket = await openSocket(wsUrl, player.cookie);
       wire(player, player.socket);
       player.socket.send(JSON.stringify({ type: "join", code, name: player.name }));
-      await waitReady(player);
+      await waitReady(player, 1);
     }
     seats[0].socket.send(JSON.stringify({ type: "start" }));
 
@@ -880,7 +908,7 @@ async function playMatch(mode, index, options) {
         options.reconnect &&
         !reconnectStarted &&
         actions >= 6 &&
-        seats[1]?.view &&
+        seats.every((seat) => seat.queue.length === 0 && seat.view) &&
         seats[1].view.turnPlayerId !== seats[1].playerId &&
         (seats[1].view.phase === "play" || seats[1].view.phase === "draw" || seats[1].view.phase === "knock")
       ) {
@@ -914,26 +942,29 @@ async function playMatch(mode, index, options) {
   async function reconnect(seat) {
     const expected = seat.playerId;
     const token = seat.token;
+    const welcomeAt = seat.welcomeGen + 1;
     seat.pausing = true;
-    seat.view = null;
-    seat.playerId = null;
     const previous = seat.socket;
+    seat.socket = null;
     previous?.close();
     await sleep(80);
     const next = await openSocket(wsUrl, seat.cookie);
-    wire(seat, next);
     seat.socket = next;
-    const ready = waitReady(seat);
+    wire(seat, next);
+    const ready = waitReady(seat, welcomeAt);
     seat.pausing = false;
     next.send(JSON.stringify({ type: "reconnect", token }));
     await ready;
     if (seat.playerId !== expected) throw new Error("Reconnect sat a different player.");
   }
 
-  function waitReady(seat) {
+  function waitReady(seat, welcomeAt) {
+    const seenStates = seat.stateGen ?? 0;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("The table did not send a welcome.")), 15_000);
       const finish = () => {
+        if (seat.welcomeGen !== welcomeAt) return;
+        if ((seat.stateGen ?? 0) <= seenStates) return;
         if (!seat.playerId || !seat.view) return;
         clearTimeout(timer);
         seat.onReady = null;
@@ -943,23 +974,6 @@ async function playMatch(mode, index, options) {
       finish();
     });
   }
-}
-
-function publicSignature(view) {
-  // Phase is private. The seat who must draw or knock sees "draw" or "knock"
-  // while everyone else still sees "play" for that same update.
-  return JSON.stringify({
-    status: view.status,
-    game: view.gameNumber,
-    hand: view.handNumber,
-    turn: view.turnPlayerId,
-    yard: view.boneyardCount,
-    play: view.lastPlay?.seq ?? 0,
-    event: view.lastEvent,
-    scores: view.players.map((player) => [player.id, player.score, player.gamesWon, player.tileCount]),
-    end: view.lastHand ? `${view.lastHand.gameNumber}-${view.lastHand.handNumber}` : null,
-    open: view.openTotal,
-  });
 }
 
 function nextSeat(view, playerId) {
@@ -1095,7 +1109,10 @@ function auditTable() {
 
 function openSocket(url, cookie) {
   const headers = { Cookie: cookie };
-  if (typeof WebSocket !== "function") {
+  // Node 22 has a global WebSocket that accepts a cookie header. Node 20 does not, so it uses `ws`.
+  // SOAK_WS=ws forces that package on either runtime.
+  const usePackage = process.env.SOAK_WS === "ws" || typeof WebSocket !== "function";
+  if (usePackage) {
     return import("ws").then(
       ({ default: WS }) =>
         new Promise((resolve, reject) => {

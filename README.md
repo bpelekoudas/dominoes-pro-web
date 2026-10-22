@@ -74,13 +74,13 @@ That serves the site and the socket on port 8787. The database file is `data/uho
 
 ## Soak a live deploy
 
-After a deploy, this plays complete headless matches against a running site and checks the rules on every update. It uses guest accounts whose names start with `soak-`. The server marks those accounts and their private tables, skips their stats, hides them from both leaderboards, and deletes them when the run cleans up. Run one soak at a time. A second run's cleanup drops the first.
+After a deploy, this plays complete headless matches against a running site and checks the rules on every update. It uses guest accounts whose names start with `soak-`. The server marks those accounts and their private tables, skips their stats, hides them from both leaderboards, and deletes them when that run cleans up. Each run has its own id, and cleanup only drops that id, so two soaks can be in flight without ending each other's games.
 
 ```bash
 npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
 ```
 
-`--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. A knock on an empty boneyard that freezes the table fails on its own. One seat reconnects once mid-run.
+`--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. Every public update stays queued until all seats have it, so a fast computer turn cannot hide a score or a deal from a slower socket, and a reconnect ignores the socket it replaced. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. A knock on an empty boneyard that freezes the table fails on its own. One seat reconnects once mid-run. Node 22 uses the built-in WebSocket. Node 20, and `SOAK_WS=ws` on newer Node, use the `ws` package. The restore drill still boots the game server with Node 22.
 
 Before those matches, one soak guest sits at a 4-player computer table and knocks with an empty boneyard; the computer has to move. A second check parks that kind of turn, restarts a local server on the same database, and requires the computer to play. Build the server first so that restart has something to launch.
 

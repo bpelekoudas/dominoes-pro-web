@@ -14,7 +14,7 @@ import {
   type SignInResult,
 } from "./accounts.js";
 import { BotLeague, leaderboardIncludesBots } from "./bots.js";
-import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, type ClientMessage, type ServerMessage } from "./hub.js";
+import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
@@ -108,16 +108,19 @@ export async function createApp(options: AppOptions = {}) {
 
   app.post("/api/soak/cleanup", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const dropped = hub.dropSoakRooms();
-    const purged = store.purgeSoak();
+    const body = (request.body ?? {}) as { runId?: string };
+    const runId = cleanSoakRun(body.runId);
+    if (!runId) return reply.code(400).send({ error: "Name the soak run to clean up." });
+    const dropped = hub.dropSoakRooms(runId);
+    const purged = store.purgeSoak(runId);
     return { dropped, ...purged };
   });
 
   app.post("/api/guest", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { displayName?: string };
+    const body = request.body as { displayName?: string; soakRun?: string };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
-    return sendAuth(reply, request, accounts.createGuest(body.displayName ?? "", current));
+    return sendAuth(reply, request, accounts.createGuest(body.displayName ?? "", current, cleanSoakRun(body.soakRun)));
   });
 
   app.post("/api/profile", async (request, reply) => {

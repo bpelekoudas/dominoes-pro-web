@@ -118,8 +118,8 @@ describe("soak tables", () => {
   it("does not write games, points, or rating history when a soak table is abandoned", () => {
     const store = new Store(":memory:");
     const accounts = new Accounts(store, { secret: "s".repeat(32), now: () => NOW });
-    const ada = accounts.createGuest("soak-ada", null);
-    const bo = accounts.createGuest("soak-bo", null);
+    const ada = accounts.createGuest("soak-ada", null, "run-soak-a");
+    const bo = accounts.createGuest("soak-bo", null, "run-soak-a");
     if (ada.outcome !== "ok" || bo.outcome !== "ok") throw new Error("guest");
     const hub = new Hub(store, 30);
     const host = connect(
@@ -142,9 +142,9 @@ describe("soak tables", () => {
     const history = store.db.prepare(`SELECT COUNT(*) AS n FROM rating_history`).get() as { n: number };
     expect(history.n).toBe(0);
 
-    expect(hub.dropSoakRooms()).toBe(1);
+    expect(hub.dropSoakRooms("run-soak-a")).toBe(1);
     expect(store.roomByCode(code)).toBeNull();
-    const purged = store.purgeSoak();
+    const purged = store.purgeSoak("run-soak-a");
     expect(purged.users).toBe(2);
     expect(store.user(ada.user.id)).toBeNull();
     expect(store.user(bo.user.id)).toBeNull();
@@ -168,6 +168,39 @@ describe("soak tables", () => {
     for (let step = 0; step < 3; step += 1) hub.missTurn(latestView(host.messages)!.turnPlayerId!);
     expect(latestView(host.messages)?.status).toBe("abandoned");
     expect(store.user(ada.user.id)?.games_played ?? 0).toBeGreaterThan(0);
-    expect(hub.dropSoakRooms()).toBe(0);
+    expect(hub.dropSoakRooms("run-soak-a")).toBe(0);
+  });
+
+  it("cleans up one soak run and leaves another run's table in place", () => {
+    const store = new Store(":memory:");
+    const accounts = new Accounts(store, { secret: "s".repeat(32), now: () => NOW });
+    const ada = accounts.createGuest("soak-ada", null, "run-soak-a");
+    const bo = accounts.createGuest("soak-bo", null, "run-soak-b");
+    if (ada.outcome !== "ok" || bo.outcome !== "ok") throw new Error("guest");
+    const hub = new Hub(store, 30);
+    const first = connect(
+      hub,
+      { type: "create", name: "soak-ada", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      ada.user.id,
+    );
+    const second = connect(
+      hub,
+      { type: "create", name: "soak-bo", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      bo.user.id,
+    );
+    const firstCode = latestView(first.messages)?.roomCode ?? "";
+    const secondCode = latestView(second.messages)?.roomCode ?? "";
+    expect(store.roomByCode(firstCode)?.soak_run).toBe("run-soak-a");
+    expect(store.roomByCode(secondCode)?.soak_run).toBe("run-soak-b");
+
+    expect(hub.dropSoakRooms("")).toBe(0);
+    expect(hub.dropSoakRooms("run-soak-a")).toBe(1);
+    expect(store.roomByCode(firstCode)).toBeNull();
+    expect(store.roomByCode(secondCode)?.code).toBe(secondCode);
+    const purged = store.purgeSoak("run-soak-a");
+    expect(purged.users).toBe(1);
+    expect(store.user(ada.user.id)).toBeNull();
+    expect(store.user(bo.user.id)?.is_soak).toBe(1);
+    expect(hub.dropSoakRooms("run-soak-b")).toBe(1);
   });
 });

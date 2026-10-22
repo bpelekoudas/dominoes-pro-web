@@ -19,6 +19,8 @@ export interface RoomRow {
   listed?: number | null;
   /** 1 when every seat is a soak test. Those rooms are not ranked and are deleted after the run. */
   soak?: number | null;
+  /** The soak process that opened this table. Cleanup for one run leaves the others. */
+  soak_run?: string | null;
 }
 
 export interface PlayerRow {
@@ -62,6 +64,8 @@ export interface UserRow {
   is_bot?: number;
   /** 1 for a post-deploy soak account. Hidden from leaderboards and stats. */
   is_soak?: number;
+  /** Which soak process created this account. Null on older rows. */
+  soak_run?: string | null;
 }
 
 export interface StandingUpdate {
@@ -375,6 +379,9 @@ export class Store {
     if (!roomsNow.some((column) => column.name === "soak")) {
       this.db.exec(`ALTER TABLE rooms ADD COLUMN soak INTEGER NOT NULL DEFAULT 0`);
     }
+    if (!roomsNow.some((column) => column.name === "soak_run")) {
+      this.db.exec(`ALTER TABLE rooms ADD COLUMN soak_run TEXT`);
+    }
     const playersNow = this.db.prepare(`PRAGMA table_info(players)`).all() as Array<{ name: string }>;
     if (!playersNow.some((column) => column.name === "avatar_id")) {
       this.db.exec(`ALTER TABLE players ADD COLUMN avatar_id TEXT`);
@@ -400,6 +407,7 @@ export class Store {
     addUser("peak_step", "peak_step TEXT");
     addUser("is_bot", "is_bot INTEGER NOT NULL DEFAULT 0");
     addUser("is_soak", "is_soak INTEGER NOT NULL DEFAULT 0");
+    addUser("soak_run", "soak_run TEXT");
     const walletCols = this.db.prepare(`PRAGMA table_info(wallets)`).all() as Array<{ name: string }>;
     const walletNames = new Set(walletCols.map((column) => column.name));
     if (!walletNames.has("earned_day")) this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_day TEXT`);
@@ -431,8 +439,8 @@ export class Store {
     this.db
       .prepare(
         `INSERT INTO rooms (
-          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual, listed, soak
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, code, host_id, series_id, player_count, boneyard_mode, series_length, status, created_at, rules_version, casual, listed, soak, soak_run
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         room.id,
@@ -448,6 +456,7 @@ export class Store {
         room.casual ? 1 : 0,
         room.listed ? 1 : 0,
         room.soak ? 1 : 0,
+        room.soak_run ?? null,
       );
   }
 
@@ -763,6 +772,11 @@ export class Store {
     this.db.prepare(`UPDATE users SET is_soak = 1 WHERE id = ?`).run(id);
   }
 
+  /** Remember which soak process owns this account. The flag stays set. */
+  setSoakRun(id: string, runId: string): void {
+    this.db.prepare(`UPDATE users SET soak_run = ?, is_soak = 1 WHERE id = ?`).run(runId, id);
+  }
+
   markBot(id: string): void {
     this.db.prepare(`UPDATE users SET is_bot = 1 WHERE id = ?`).run(id);
   }
@@ -811,13 +825,14 @@ export class Store {
   }
 
   /**
-   * Deletes soak accounts and soak tables. Real players and their games stay.
-   * Call after the live soak rooms have been dropped, so a deleted row is not still in memory.
+   * Deletes one soak run's accounts and tables. Other runs, and real players, stay.
+   * Call after that run's live rooms have been dropped, so a deleted row is not still in memory.
    */
-  purgeSoak(): { users: number; rooms: number } {
-    const rooms = this.db.prepare(`SELECT id FROM rooms WHERE COALESCE(soak, 0) = 1`).all() as Array<{ id: string }>;
+  purgeSoak(runId: string): { users: number; rooms: number } {
+    if (!runId) return { users: 0, rooms: 0 };
+    const rooms = this.db.prepare(`SELECT id FROM rooms WHERE soak_run = ?`).all(runId) as Array<{ id: string }>;
     for (const room of rooms) this.purgeRoom(room.id);
-    const users = this.db.prepare(`SELECT id FROM users WHERE COALESCE(is_soak, 0) = 1`).all() as Array<{ id: string }>;
+    const users = this.db.prepare(`SELECT id FROM users WHERE soak_run = ?`).all(runId) as Array<{ id: string }>;
     for (const row of users) {
       this.db.prepare(`DELETE FROM wallets WHERE user_id = ?`).run(row.id);
       this.db.prepare(`DELETE FROM owned_items WHERE user_id = ?`).run(row.id);

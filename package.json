@@ -12,7 +12,7 @@
     "build": "npm run build:rules && tsc -p packages/server && npm run build -w @uhoh/web",
     "start": "node --disable-warning=ExperimentalWarning packages/server/dist/index.js",
     "bots:purge": "node --disable-warning=ExperimentalWarning packages/server/dist/purge-bots.js",
-    "test": "vitest run && npm run test:legacy",
+    "test": "vitest run && npm run test:legacy && node --test scripts/soak-sync.test.mjs",
     "test:legacy": "node test_logic.js && node test_ai.js",
     "typecheck": "tsc -p packages/rules --noEmit && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
     "soak": "node scripts/soak.mjs"

@@ -147,6 +147,8 @@ interface LiveRoom {
   ended: { reason: "player_left"; playerId: string; name: string } | null;
   /** Post-deploy soak table. Results stay off the leaderboard, and the hand seed is auditable. */
   soak: boolean;
+  /** The soak process that opened this table. Null on a table from before run ids. */
+  soakRun: string | null;
   /** Seed of the hand in progress. Sent to browsers only while soak is set. */
   handSeed: string | null;
 }
@@ -218,6 +220,14 @@ export function cleanName(input: unknown): string | null {
 /** Guest names from the soak script. The flag sticks after a rename. */
 export function isSoakName(name: string): boolean {
   return name.toLowerCase().startsWith("soak-");
+}
+
+/** One soak process. Other runs must not match this, and a missing id matches nothing. */
+export function cleanSoakRun(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const runId = input.trim();
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(runId)) return null;
+  return runId;
 }
 
 export function cleanChatText(input: unknown): string | null {
@@ -317,13 +327,14 @@ export class Hub {
   }
 
   /**
-   * Disconnect every soak table and delete its rows.
-   * A second soak run calls this before it sits down, so only one soak should be in flight.
+   * Disconnect one soak run and delete its rows.
+   * A missing or unknown id drops nothing, so two runs can be in flight together.
    */
-  dropSoakRooms(): number {
+  dropSoakRooms(runId: string): number {
+    if (!runId) return 0;
     let count = 0;
     for (const room of [...this.rooms.values()]) {
-      if (!room.soak) continue;
+      if (!room.soak || room.soakRun !== runId) continue;
       for (const seat of room.seats) {
         const close = seat.close;
         seat.send = null;
@@ -468,6 +479,7 @@ export class Hub {
     }
     const created = nowIso();
     const soak = this.accountIsSoak(accountUserId, name);
+    const soakRun = soak && accountUserId ? (this.store.user(accountUserId)?.soak_run ?? null) : null;
     if (soak && accountUserId) this.store.markSoak(accountUserId);
     const listed = soak ? false : message.listed === true;
     const room: LiveRoom = {
@@ -496,6 +508,7 @@ export class Hub {
       continueDeadline: null,
       ended: null,
       soak,
+      soakRun,
       handSeed: null,
     };
     const seat = this.makeSeat(
@@ -523,6 +536,7 @@ export class Hub {
       casual: room.casual ? 1 : 0,
       listed: room.listed ? 1 : 0,
       soak: room.soak ? 1 : 0,
+      soak_run: room.soakRun,
     });
     this.store.insertPlayer({
       id: seat.id,
@@ -1239,6 +1253,7 @@ export class Hub {
       continueDeadline: null,
       ended: null,
       soak: row.soak === 1,
+      soakRun: row.soak_run ?? null,
       handSeed: null,
     };
     const worn = new Set<string>();
