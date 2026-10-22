@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { FIT_MARGIN } from "../../rules/src/layout.js";
-import { TILE_SHORT } from "../../rules/src/layout.js";
+import { emptyBoard, placeTile } from "../../rules/src/board.js";
+import { FIT_MARGIN, layoutBoard, TILE_SHORT } from "../../rules/src/layout.js";
+import { tileById } from "../../rules/src/tiles.js";
 import {
   boardShift,
   CAMERA_EDGE,
@@ -9,16 +10,17 @@ import {
   clearanceInsets,
   FELT_PAD_Y,
   fitScale,
-  handOverPlacement,
-  actionFocus,
   followCamera,
+  handOverPlacement,
   landedTileBox,
   MIN_TILE_FRAC,
   READABLE_PHONE_PX,
+  READABLE_WIDE_PX,
   nextBoardScale,
   OPEN_TILE_FRAC,
   PHONE_SCALE_CAP,
   scaleForTiles,
+  screenBox,
   zoneInsets,
 } from "./board-scale.js";
 
@@ -233,71 +235,208 @@ describe("board scale", () => {
     expect(chainBounds([]).w).toBe(80);
   });
 
-  it("follows a long chain at a readable size and keeps the play inside the badge clearance", () => {
-    const chain = Array.from({ length: 18 }, (_, index) => ({
-      tileId: `t${index}`,
-      x: 0,
-      y: -index * 72,
-      w: 36,
-      h: 72,
-    }));
-    const frame = chainBounds(chain, 0);
-    const focus = actionFocus(chain, [], "t17");
-    const phone = followCamera({
-      frame,
-      focus,
-      felt: { w: 390, h: 640 },
-      screenWidth: 390,
-      reserve: { top: 70, right: 0, bottom: 0, left: 0 },
-    });
-    expect(phone.mode).toBe("follow");
+  it("keeps every open end on screen down to the readable floor", () => {
+    const ends = [
+      { id: "west", x: -150, y: -18, w: 72, h: 36 },
+      { id: "east", x: 76, y: -18, w: 72, h: 36 },
+      { id: "north", x: -18, y: -250, w: 36, h: 72 },
+      { id: "south", x: -18, y: 200, w: 36, h: 72 },
+    ];
+    const frame = chainBounds(ends, 0);
+    const felt = { w: 390, h: 640 };
+    const reserve = { top: 70, right: 40, bottom: 30, left: 40 };
+    const phone = followCamera({ frame, ends, felt, screenWidth: 390, reserve });
+    const insets = clearanceInsets(reserve);
     expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
-    const insets = clearanceInsets({ top: 70, right: 0, bottom: 0, left: 0 });
-    const chainH = frame.h * phone.scale;
-    const oy = (640 - chainH) / 2 + phone.shiftY;
-    const focusCy = focus.y + focus.h / 2;
-    const seenY = oy + (focusCy - frame.y) * phone.scale;
-    expect(seenY).toBeGreaterThanOrEqual(insets.top);
-    expect(seenY).toBeLessThanOrEqual(640 - insets.bottom);
-    const wide = followCamera({
-      frame,
-      focus,
-      felt: { w: 390, h: 640 },
-      screenWidth: 390,
-      overview: true,
-    });
-    expect(wide.mode).toBe("fit");
-    expect(wide.scale).toBeLessThan(phone.scale);
+    expect(phone.scale * TILE_SHORT).toBeLessThan(52);
+    for (const end of ends) {
+      const seen = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, end);
+      expect(seen.left).toBeGreaterThanOrEqual(insets.left - 0.5);
+      expect(seen.top).toBeGreaterThanOrEqual(insets.top - 0.5);
+      expect(seen.right).toBeLessThanOrEqual(felt.w - insets.right + 0.5);
+      expect(seen.bottom).toBeLessThanOrEqual(felt.h - insets.bottom + 0.5);
+    }
+    const wide = followCamera({ frame, ends, felt: { w: 920, h: 780 }, screenWidth: 920, reserve });
+    expect(wide.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_WIDE_PX - 0.5);
+    const wideInsets = clearanceInsets(reserve);
+    for (const end of ends) {
+      const seen = screenBox({ w: 920, h: 780 }, frame, wide.scale, wide.shiftX, wide.shiftY, end);
+      expect(seen.left).toBeGreaterThanOrEqual(wideInsets.left - 0.5);
+      expect(seen.right).toBeLessThanOrEqual(920 - wideInsets.right + 0.5);
+    }
   });
 
-  it("holds a readable tile on a wide chain and keeps the last tile in the safe rect", () => {
-    const tiles = [];
-    for (let index = 0; index < 10; index += 1) {
-      tiles.push({ tileId: `h${index}`, x: index * 70, y: 0, w: 72, h: 36 });
-      tiles.push({ tileId: `v${index}`, x: 0, y: -index * 70, w: 36, h: 72 });
-    }
-    const last = { tileId: "last", x: 10 * 70, y: 0, w: 72, h: 36 };
-    tiles.push(last);
-    const frame = chainBounds(tiles, 0);
-    const reserve = { top: 70, right: 40, bottom: 40, left: 40 };
+  it("drops interior tiles once the open ends no longer fit at the floor, and keeps a playable end", () => {
+    const ends = [
+      { id: "north", x: -18, y: -900, w: 36, h: 72 },
+      { id: "south", x: -18, y: 860, w: 36, h: 72 },
+      { id: "east", x: 80, y: -18, w: 72, h: 36 },
+      { id: "west", x: -140, y: -18, w: 72, h: 36 },
+    ];
+    const frame = chainBounds(ends, 0);
+    const felt = { w: 390, h: 640 };
+    const reserve = { top: 70, right: 40, bottom: 30, left: 40 };
     const phone = followCamera({
       frame,
-      focus: actionFocus(tiles, [], "last"),
-      felt: { w: 390, h: 640 },
+      ends,
+      playableIds: ["north"],
+      felt,
       screenWidth: 390,
       reserve,
-      anchor: { x: last.x + last.w / 2, y: last.y + last.h / 2 },
     });
     expect(phone.mode).toBe("follow");
     expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    expect(phone.scale * TILE_SHORT).toBeLessThanOrEqual(READABLE_PHONE_PX + 0.5);
     const insets = clearanceInsets(reserve);
-    const ox = (390 - frame.w * phone.scale) / 2 + phone.shiftX;
-    const oy = (640 - frame.h * phone.scale) / 2 + phone.shiftY;
-    const seenX = ox + (last.x + last.w / 2 - frame.x) * phone.scale;
-    const seenY = oy + (last.y + last.h / 2 - frame.y) * phone.scale;
-    expect(seenX).toBeGreaterThanOrEqual(insets.left);
-    expect(seenX).toBeLessThanOrEqual(390 - insets.right);
-    expect(seenY).toBeGreaterThanOrEqual(insets.top);
-    expect(seenY).toBeLessThanOrEqual(640 - insets.bottom);
+    const north = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, ends[0]!);
+    expect(north.top).toBeGreaterThanOrEqual(insets.top - 0.5);
+    expect(north.bottom).toBeLessThanOrEqual(felt.h - insets.bottom + 0.5);
+    const south = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, ends[1]!);
+    const southInside = south.top >= insets.top - 0.5 && south.bottom <= felt.h - insets.bottom + 0.5;
+    expect(southInside).toBe(false);
+    expect(phone.off.top || phone.off.bottom || phone.off.left || phone.off.right).toBe(true);
+  });
+
+  it("frames every open end of the 17-tile chain clear of the seat badges", () => {
+    const layout = laid(CROWD);
+    const frame = chainBounds(layout.tiles, 0);
+    const phone = followCamera({
+      frame,
+      ends: layout.ends,
+      felt: { w: 390, h: 644 },
+      screenWidth: 390,
+      reserve: PHONE_RESERVE,
+      zones: PHONE_ZONES,
+    });
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    expect(phone.scale * TILE_SHORT).toBeLessThan(52);
+    expect(endsClear(layout.ends, frame, phone, { w: 390, h: 644 }, PHONE_ZONES)).toBe(true);
+    const fold = followCamera({
+      frame,
+      ends: layout.ends,
+      felt: { w: 920, h: 776 },
+      screenWidth: 920,
+      reserve: PHONE_RESERVE,
+      zones: FOLD_ZONES,
+    });
+    expect(fold.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_WIDE_PX - 0.5);
+    expect(fold.scale * TILE_SHORT).toBeLessThan(60);
+    expect(endsClear(layout.ends, frame, fold, { w: 920, h: 776 }, FOLD_ZONES)).toBe(true);
+  });
+
+  it("drops an arm of a chain whose ends cannot fit at the floor and keeps the playable end", () => {
+    const layout = laid(LONG);
+    const frame = chainBounds(layout.tiles, 0);
+    const phone = followCamera({
+      frame,
+      ends: layout.ends,
+      playableIds: ["north"],
+      felt: { w: 390, h: 644 },
+      screenWidth: 390,
+      reserve: PHONE_RESERVE,
+      zones: PHONE_ZONES,
+    });
+    expect(phone.mode).toBe("follow");
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    expect(phone.scale * TILE_SHORT).toBeLessThanOrEqual(READABLE_PHONE_PX + 0.5);
+    const north = layout.ends.find((end) => end.id === "north")!;
+    const seen = screenBox({ w: 390, h: 644 }, frame, phone.scale, phone.shiftX, phone.shiftY, north);
+    const insets = clearanceInsets(PHONE_RESERVE);
+    expect(seen.top).toBeGreaterThanOrEqual(insets.top - 0.5);
+    expect(seen.bottom).toBeLessThanOrEqual(644 - insets.bottom + 0.5);
+    expect(seen.left).toBeGreaterThanOrEqual(insets.left - 0.5);
+    expect(seen.right).toBeLessThanOrEqual(390 - insets.right + 0.5);
+    const outside = layout.ends.some((end) => {
+      const box = screenBox({ w: 390, h: 644 }, frame, phone.scale, phone.shiftX, phone.shiftY, end);
+      return box.top < -1 || box.bottom > 645 || box.left < -1 || box.right > 391;
+    });
+    expect(outside).toBe(true);
+    expect(phone.off.top || phone.off.bottom || phone.off.left || phone.off.right).toBe(true);
   });
 });
+
+const PHONE_RESERVE = { top: 62, right: 63, bottom: 30, left: 63 };
+
+const PHONE_ZONES = [
+  { left: 0, top: 258.4, right: 53.4, bottom: 286.4 },
+  { left: 0, top: 290.4, right: 22, bottom: 411.4 },
+  { left: 16, top: 0, right: 374, bottom: 20 },
+  { left: 168.3, top: 24, right: 221.7, bottom: 52 },
+  { left: 336.6, top: 258.4, right: 390, bottom: 286.4 },
+  { left: 368, top: 290.4, right: 390, bottom: 411.4 },
+];
+
+const FOLD_ZONES = [
+  { left: 0, top: 327, right: 53.4, bottom: 355 },
+  { left: 0, top: 359, right: 22, bottom: 480 },
+  { left: 16, top: 0, right: 904, bottom: 20 },
+  { left: 433.3, top: 24, right: 486.7, bottom: 52 },
+  { left: 866.6, top: 327, right: 920, bottom: 355 },
+  { left: 898, top: 359, right: 920, bottom: 480 },
+];
+
+const CROWD: Array<[string, string]> = [
+  ["lead", "6-6"],
+  ["west", "0-6"],
+  ["east", "1-6"],
+  ["north", "2-6"],
+  ["east", "0-1"],
+  ["west", "0-0"],
+  ["south", "3-6"],
+  ["north", "0-2"],
+  ["east", "0-3"],
+  ["west", "0-4"],
+  ["south", "1-3"],
+  ["north", "0-5"],
+  ["east", "2-3"],
+  ["west", "1-4"],
+  ["south", "1-1"],
+  ["north", "1-5"],
+  ["east", "1-2"],
+];
+
+const LONG: Array<[string, string]> = [
+  ["lead", "6-6"],
+  ["west", "1-6"],
+  ["east", "2-6"],
+  ["north", "3-6"],
+  ["south", "4-6"],
+  ["north", "0-3"],
+  ["north", "0-1"],
+  ["north", "1-2"],
+  ["south", "0-4"],
+  ["south", "0-2"],
+  ["south", "2-3"],
+  ["north", "2-4"],
+  ["north", "4-4"],
+  ["east", "2-2"],
+  ["south", "1-3"],
+  ["south", "1-1"],
+  ["west", "1-4"],
+  ["west", "3-4"],
+  ["west", "3-5"],
+  ["west", "0-5"],
+  ["west", "0-6"],
+  ["west", "5-6"],
+  ["west", "1-5"],
+];
+
+function laid(steps: Array<[string, string]>) {
+  let board = emptyBoard();
+  for (const [end, id] of steps) board = placeTile(board, end, tileById(id));
+  return layoutBoard(board);
+}
+
+function endsClear(
+  ends: readonly { x: number; y: number; w: number; h: number; id: string }[],
+  frame: { x: number; y: number; w: number; h: number },
+  shot: { scale: number; shiftX: number; shiftY: number },
+  felt: { w: number; h: number },
+  zones: readonly { left: number; top: number; right: number; bottom: number }[],
+): boolean {
+  return ends.every((end) => {
+    const box = screenBox(felt, frame, shot.scale, shot.shiftX, shot.shiftY, end);
+    if (box.left < 3 || box.top < 3 || box.right > felt.w - 3 || box.bottom > felt.h - 3) return false;
+    return zones.every((zone) => box.right <= zone.left + 1 || box.left >= zone.right - 1 || box.bottom <= zone.top + 1 || box.top >= zone.bottom - 1);
+  });
+}

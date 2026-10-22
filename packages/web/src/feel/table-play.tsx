@@ -124,6 +124,36 @@ const CROWD: Step[] = [
   ["east", "1-2"],
 ];
 
+/**
+ * Ends of this chain sit farther apart than a phone or a Fold inner can
+ * show at the readable floor, so follow has to drop an arm.
+ */
+const LONG: Step[] = [
+  ["lead", "6-6"],
+  ["west", "1-6"],
+  ["east", "2-6"],
+  ["north", "3-6"],
+  ["south", "4-6"],
+  ["north", "0-3"],
+  ["north", "0-1"],
+  ["north", "1-2"],
+  ["south", "0-4"],
+  ["south", "0-2"],
+  ["south", "2-3"],
+  ["north", "2-4"],
+  ["north", "4-4"],
+  ["east", "2-2"],
+  ["south", "1-3"],
+  ["south", "1-1"],
+  ["west", "1-4"],
+  ["west", "3-4"],
+  ["west", "3-5"],
+  ["west", "0-5"],
+  ["west", "0-6"],
+  ["west", "5-6"],
+  ["west", "1-5"],
+];
+
 function boardFrom(steps: readonly Step[]): BoardState {
   let board = emptyBoard();
   for (const [end, id] of steps) board = placeTile(board, end, tileById(id));
@@ -186,6 +216,7 @@ interface HandInput {
   between?: boolean;
   seats?: number;
   play?: { playerId: string; tileId: string; endId: string; awarded: number; seq: number } | null;
+  plays?: PlayerView["legalPlays"];
   knock?: { playerId: string; streak: number } | null;
   lastHand?: PlayerView["lastHand"];
   gamesWon?: number;
@@ -218,7 +249,7 @@ function makeView(input: HandInput): PlayerView {
     continueDeadline: input.between ? now + 20_000 : null,
     ended: null,
     prompt: "",
-    legalPlays: [],
+    legalPlays: input.plays ?? [],
     canDraw: false,
     canKnock: false,
     canStart: false,
@@ -554,15 +585,18 @@ function hitBeats(): FeelBeat[] {
 
 /** Static real table with a chain pressed toward every opponent. */
 export function crowdView(): PlayerView {
-  const seats = new URLSearchParams(location.search).get("players") === "2" ? 2 : 4;
+  const params = new URLSearchParams(location.search);
+  const seats = params.get("players") === "2" ? 2 : 4;
+  const long = params.get("chain") === "long";
   return makeView({
-    chain: CROWD,
-    hand: ["5-5"],
+    chain: long ? LONG : CROWD,
+    hand: long ? ["4-5"] : ["5-5"],
     scores: { you: 15, rio: 40, sam: 22, jordan: 10 },
     counts: { you: 1, rio: 4, sam: 5, jordan: 4 },
     turn: "you",
     handNumber: 1,
     seats,
+    plays: long ? [{ tileId: "4-5", endId: "north" }] : [],
   });
 }
 

@@ -4,14 +4,13 @@ import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
-  actionFocus,
   chainBounds,
-  clearanceInsets,
   followCamera,
   handOverPlacement,
   landedTileBox,
   zoneInsets,
   type AxisInsets,
+  type ZoneRect,
 } from "./board-scale.js";
 import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
@@ -102,7 +101,7 @@ export function Table({
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [lift, setLift] = useState(0);
-  const [reserve, setReserve] = useState<AxisInsets>({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [clip, setClip] = useState<AxisInsets>({ top: 30, right: 30, bottom: 30, left: 30 });
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [offscreen, setOffscreen] = useState({ top: false, right: false, bottom: false, left: false });
   const [camMode, setCamMode] = useState<"fit" | "follow">("fit");
@@ -111,7 +110,6 @@ export function Table({
   const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
-  const clearance = clearanceInsets(reserve);
   const shift = { x: pan.x + nudge.x, y: pan.y + nudge.y };
   const shownScale = scale * nudge.zoom;
   const armOnce = useRef(false);
@@ -124,13 +122,13 @@ export function Table({
   const handKey = `${view.gameNumber}:${view.handNumber}`;
   const handOver = view.phase === "between" || view.phase === "over";
   const lastTileId = view.lastPlay?.tileId ?? null;
+  const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
     const measure = () => {
       const nextReserve = measureReserve(viewport);
-      setReserve((current) => (sameInsets(current, nextReserve) ? current : nextReserve));
       // Hand over keeps the last scale. The sheet must not zoom the chain.
       if (frozen.current && held.current?.hand === handKey) return;
       let width = viewport.clientWidth;
@@ -149,18 +147,18 @@ export function Table({
       const bounds = chainBounds(layout.tiles, 0);
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
-      const focus = actionFocus(layout.tiles, layout.ends, lastTileId);
-      const anchorTile = layout.tiles.find((tile) => tile.tileId === lastTileId) ?? layout.tiles[layout.tiles.length - 1];
       const shot = followCamera({
         frame: bounds,
-        focus,
+        ends: layout.ends,
+        playableIds: view.legalPlays.map((play) => play.endId),
         felt: { w: width, h: height },
         screenWidth,
         reserve: nextReserve,
+        zones: measureZones(viewport),
         overview: handOver || overview,
         punch,
-        anchor: anchorTile ? { x: anchorTile.x + anchorTile.w / 2, y: anchorTile.y + anchorTile.h / 2 } : undefined,
       });
+      setClip((current) => (sameInsets(current, shot.clip) ? current : shot.clip));
       held.current = { hand: handKey, scale: shot.scale };
       frozen.current = handOver;
       setScale((current) => (Math.abs(current - shot.scale) < 0.01 ? current : shot.scale));
@@ -184,7 +182,7 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, handOver, handKey, lastTileId, overview, punch]);
+  }, [layout, handOver, handKey, lastTileId, playableKey, overview, punch]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -349,10 +347,10 @@ export function Table({
       onPointerUp={onCamUp}
       onPointerCancel={onCamUp}
       data-board-lift={String(lift)}
-      data-fit-top={clearance.top.toFixed(0)}
-      data-fit-right={clearance.right.toFixed(0)}
-      data-fit-bottom={clearance.bottom.toFixed(0)}
-      data-fit-left={clearance.left.toFixed(0)}
+      data-fit-top={clip.top.toFixed(0)}
+      data-fit-right={clip.right.toFixed(0)}
+      data-fit-bottom={clip.bottom.toFixed(0)}
+      data-fit-left={clip.left.toFixed(0)}
       data-board-frozen={handOver ? "true" : "false"}
       data-win-board="true"
       data-camera={cameraArmed ? "armed" : "hold"}
@@ -366,11 +364,15 @@ export function Table({
       {layout && frame ? (
         <div
           className="board-clip"
-          style={{ clipPath: `inset(${clearance.top}px ${clearance.right}px ${clearance.bottom}px ${clearance.left}px)` }}
+          style={{ clipPath: `inset(${clip.top}px ${clip.right}px ${clip.bottom}px ${clip.left}px)` }}
         >
         <div
           className="board-scaler"
-          style={{ width: frame.w * shownScale, height: frame.h * shownScale, transform: `translate(${shift.x}px, ${shift.y + lift}px)` }}
+          style={{
+            width: frame.w * shownScale,
+            height: frame.h * shownScale,
+            transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
+          }}
         >
           <div
             className="board-stage"
@@ -722,6 +724,23 @@ function useTileCenter(
 
 function sameInsets(a: AxisInsets, b: AxisInsets): boolean {
   return Math.abs(a.top - b.top) < 0.5 && Math.abs(a.right - b.right) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5 && Math.abs(a.left - b.left) < 0.5;
+}
+
+function measureZones(viewport: HTMLElement): ZoneRect[] {
+  const felt = viewport.getBoundingClientRect();
+  const zones: ZoneRect[] = [];
+  const app = viewport.closest(".felt-app");
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const rect = node.getBoundingClientRect();
+    const left = Math.max(rect.left, felt.left) - felt.left;
+    const top = Math.max(rect.top, felt.top) - felt.top;
+    const right = Math.min(rect.right, felt.right) - felt.left;
+    const bottom = Math.min(rect.bottom, felt.bottom) - felt.top;
+    if (right - left < 1 || bottom - top < 1) return;
+    zones.push({ left, top, right, bottom });
+  });
+  return zones;
 }
 
 function measureReserve(viewport: HTMLElement): AxisInsets {
