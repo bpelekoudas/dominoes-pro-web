@@ -2,6 +2,9 @@ import { useState } from "react";
 import { AVATARS, resolveAvatar } from "../../rules/src/avatars.js";
 import { playUiClick } from "./sound";
 
+/** Bump when portrait bytes change so phones drop a cached opaque WebP. */
+export const AVATAR_ART = "1";
+
 export function Portrait({
   id,
   size = "chip",
@@ -14,7 +17,8 @@ export function Portrait({
   if (failed) {
     return <span className={`portrait-fallback portrait-${size}`}>{avatar.slice(0, 1).toUpperCase()}</span>;
   }
-  const src = size === "chip" ? `/avatars/${avatar}-256.webp` : `/avatars/${avatar}.webp`;
+  const file = size === "chip" ? `${avatar}-256.webp` : `${avatar}.webp`;
+  const src = `/avatars/${file}?v=${AVATAR_ART}`;
   return (
     <img
       className={`portrait portrait-${size}`}

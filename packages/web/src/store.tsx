@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { StoreItem } from "../../rules/src/catalog.js";
+import { AVATAR_ART } from "./avatars";
 import { playUiClick } from "./sound";
 
 const TABS: Array<{ id: StoreItem["category"]; label: string }> = [
@@ -300,7 +301,7 @@ function Price({ item, owned, wearing }: { item: StoreItem; owned: boolean; wear
 
 function artSrc(item: StoreItem): string | null {
   if (!item.art) return null;
-  if (item.avatarId) return `/avatars/${item.avatarId}.webp`;
+  if (item.avatarId) return `/avatars/${item.avatarId}.webp?v=${AVATAR_ART}`;
   if (item.category === "table") return `/store/${item.id}.webp?v=7`;
   return `/store/${item.id}.webp`;
 }
