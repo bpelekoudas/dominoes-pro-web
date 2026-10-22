@@ -7,7 +7,7 @@
  * `npm run build:rules` first so the replay checker can import @uhoh/rules.
  */
 import { randomUUID } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { alignedFronts, createSeatSync, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
@@ -93,7 +93,12 @@ try {
   report.botKnock = await computerKnockProbe();
   console.log(`  ${report.botKnock}`);
   console.log("Restore a computer turn");
-  report.botRestore = await restoreDrill();
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  if (nodeMajor < 22) {
+    report.botRestore = `skipped on Node ${process.versions.node} (this drill boots a Node 22 server)`;
+  } else {
+    report.botRestore = await restoreDrill();
+  }
   console.log(`  ${report.botRestore}`);
   const modes = MODES.filter((mode) => mode.seats <= args.seats);
   if (modes.length === 0) throw new Error("--seats must be 2, 3, or 4.");
@@ -323,23 +328,8 @@ async function restoreDrill() {
   }
 }
 
-function serverBinary() {
-  if (Number(process.versions.node.split(".")[0]) >= 22) return process.execPath;
-  // The soak client runs on Node 20. The game server needs Node 22 for node:sqlite.
-  try {
-    const found = execFileSync("node", ["-p", "process.execPath + '\\n' + process.versions.node"], {
-      encoding: "utf8",
-    }).trim();
-    const [bin, version = ""] = found.split("\n");
-    if (bin && bin !== process.execPath && Number(version.split(".")[0]) >= 22) return bin;
-  } catch {
-    // No other Node is on PATH.
-  }
-  throw new Error("The restore check needs Node 22 to boot the server.");
-}
-
 function startRestoreServer(dir, port) {
-  const child = spawn(serverBinary(), ["--disable-warning=ExperimentalWarning", "packages/server/dist/index.js"], {
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "packages/server/dist/index.js"], {
     cwd: process.cwd(),
     env: { ...process.env, PORT: String(port), DATA_DIR: dir, BOTS_ENABLED: "0" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -1015,6 +1005,27 @@ function replayFile(file) {
   return 0;
 }
 
+async function takeUiTurn(page) {
+  const skip = page.locator("[data-action=skip-feel], [data-action=skip-win]");
+  if (await skip.count()) await skip.first().click().catch(() => undefined);
+  const playable = page.locator(".hand-tile[data-playable=true]");
+  if (await playable.count()) {
+    await playable.first().click();
+    const end = page.locator("[data-end-id][data-hot=true]");
+    if (await end.count()) await end.first().click();
+    return;
+  }
+  if (await page.locator("[data-action=draw]").count()) {
+    await page.locator("[data-action=draw]").first().click();
+    return;
+  }
+  if (await page.locator("[data-action=knock]").count()) {
+    await page.locator("[data-action=knock]").first().click();
+    return;
+  }
+  if (await page.locator("[data-action=continue]").count()) await page.locator("[data-action=continue]").first().click();
+}
+
 async function uiSmoke(origin) {
   let chromium;
   try {
@@ -1047,22 +1058,15 @@ async function uiSmoke(origin) {
     await page.locator("[data-action=solo]").click();
     await page.locator("[data-screen=mode] button", { hasText: /^4$/ }).click();
     await page.locator("[data-action=start-solo]").click();
+    // The human holds the opening tile about a third of the time. The felt stays empty until that tile is played.
+    const ready = page.locator(
+      ".table-scroll [data-board-tile], .hand-tile[data-playable=true], [data-action=draw], [data-action=knock]",
+    );
+    await ready.first().waitFor({ timeout: 25_000 });
+    if ((await page.locator(".table-scroll [data-board-tile]").count()) === 0) await takeUiTurn(page);
     await page.waitForSelector(".table-scroll [data-board-tile]", { timeout: 25_000 });
     for (let step = 0; step < 10; step += 1) {
-      const skip = page.locator("[data-action=skip-feel], [data-action=skip-win]");
-      if (await skip.count()) await skip.first().click().catch(() => undefined);
-      const playable = page.locator(".hand-tile[data-playable=true]");
-      if (await playable.count()) {
-        await playable.first().click();
-        const end = page.locator("[data-end-id][data-hot=true]");
-        if (await end.count()) await end.first().click();
-      } else if (await page.locator("[data-action=draw]").count()) {
-        await page.locator("[data-action=draw]").first().click();
-      } else if (await page.locator("[data-action=knock]").count()) {
-        await page.locator("[data-action=knock]").first().click();
-      } else if (await page.locator("[data-action=continue]").count()) {
-        await page.locator("[data-action=continue]").first().click();
-      }
+      await takeUiTurn(page);
       await page.waitForTimeout(350);
     }
     const audit = await page.evaluate(auditTable);
