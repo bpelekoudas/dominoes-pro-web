@@ -80,7 +80,9 @@ After a deploy, this plays complete headless matches against a running site and 
 npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
 ```
 
-`--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. One seat reconnects once mid-run.
+`--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. A knock on an empty boneyard that freezes the table fails on its own. One seat reconnects once mid-run.
+
+Before those matches, one soak guest sits at a 4-player computer table and knocks with an empty boneyard; the computer has to move. A second check parks that kind of turn, restarts a local server on the same database, and requires the computer to play. Build the server first so that restart has something to launch.
 
 The summary is printed and written to `soak-reports/summary.json`. A failure also writes a replay log. Rebuild that log offline with `npm run soak -- --replay soak-reports/<file>.json` after `npm run build:rules`.
 

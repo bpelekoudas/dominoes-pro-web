@@ -13,7 +13,7 @@ import {
 } from "@uhoh/rules";
 import { Store } from "./db.js";
 import { Cosmetics } from "./cosmetics.js";
-import { BOT_TURN_MS, Hub, botThinkMs, type ServerMessage } from "./hub.js";
+import { BOT_TURN_MS, BOT_WATCH_MARGIN_MS, Hub, botThinkMs, type ServerMessage } from "./hub.js";
 
 function latestView(messages: ServerMessage[]): PlayerView | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -841,6 +841,203 @@ describe("rooms", () => {
     }
   });
 });
+
+describe("computer turns after a knock or a restart", () => {
+  it("plays the next computer after a knock on an empty boneyard when its timer is gone", () => {
+    const store = new Store(`:memory:`);
+    const hub = new Hub(store, 30, () => 0);
+    const messages: ServerMessage[] = [];
+    const opened = hub.connect(
+      { type: "solo", name: "Us", playerCount: 4, boneyardMode: "draw_until", seriesLength: 3, difficulty: "easy" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!opened.ok) throw new Error(opened.error);
+    const playerId = opened.session.playerId;
+    for (let guard = 0; guard < 900; guard += 1) {
+      const view = latestView(messages);
+      if (!view || view.status === "complete" || view.status === "abandoned") break;
+      if (view.phase === "between" || view.betweenHands) {
+        hub.command(playerId, { type: "continue" });
+        continue;
+      }
+      if (view.turnPlayerId !== playerId) {
+        hub.sweepBots(Date.now() + BOT_WATCH_MARGIN_MS + 50);
+        continue;
+      }
+      if (view.canKnock && view.boneyardCount === 0) {
+        const before = actionCount(store, view.roomCode);
+        hub.command(playerId, { type: "intent", intent: { type: "knock" } });
+        const knocked = latestView(messages);
+        if (!knocked || knocked.phase === "between" || knocked.betweenHands) continue;
+        expect(knocked.lastEvent?.kind).toBe("knock");
+        expect(knocked.boneyardCount).toBe(0);
+        const bot = knocked.players.find((player) => player.id === knocked.turnPlayerId);
+        expect(bot?.bot).toBe(true);
+        hub.dropBotTimer(bot!.id);
+        hub.sweepBots(Date.now() + BOT_WATCH_MARGIN_MS + 50);
+        expect(actionCount(store, view.roomCode)).toBeGreaterThan(before + 1);
+        expect(latestView(messages)?.turnPlayerId).not.toBe(bot!.id);
+        store.db.close();
+        return;
+      }
+      const play = view.legalPlays[0];
+      if (play) hub.command(playerId, { type: "intent", intent: { type: "play", ...play } });
+      else if (view.canDraw) hub.command(playerId, { type: "intent", intent: { type: "draw" } });
+      else if (view.canKnock) hub.command(playerId, { type: "intent", intent: { type: "knock" } });
+      else throw new Error("The human had no move.");
+    }
+    store.db.close();
+    throw new Error("The table never knocked on an empty boneyard.");
+  });
+
+  it("plays a restored computer turn after the restart drops its timer", () => {
+    const found = findEmptyKnock();
+    const file = `/tmp/uhoh-bot-restore-${Date.now()}.sqlite`;
+    const store = new Store(file);
+    const now = new Date().toISOString();
+    store.insertRoom({
+      id: "r_bot",
+      code: "MBD462",
+      host_id: "p_you",
+      series_id: "s_bot",
+      player_count: 4,
+      boneyard_mode: "draw_until",
+      series_length: 3,
+      status: "playing",
+      created_at: now,
+      rules_version: RULES_VERSION,
+    });
+    const seats = [
+      { id: "p_you", name: "Us", token: "y".repeat(32), bot: 0, difficulty: null },
+      { id: "p_bones", name: "Bones", token: "b".repeat(32), bot: 1, difficulty: "medium" },
+      { id: "p_pips", name: "Pips", token: "p".repeat(32), bot: 1, difficulty: "medium" },
+      { id: "p_lucky", name: "Lucky", token: "l".repeat(32), bot: 1, difficulty: "medium" },
+    ];
+    seats.forEach((seat, index) => {
+      store.insertPlayer({
+        id: seat.id,
+        room_id: "r_bot",
+        name: seat.name,
+        token: seat.token,
+        seat: index,
+        created_at: now,
+        bot: seat.bot,
+        difficulty: seat.difficulty,
+      });
+    });
+    found.hands.forEach((hand, index) => {
+      const id = `h_bot_${index}`;
+      store.insertHand({
+        id,
+        room_id: "r_bot",
+        series_id: "s_bot",
+        game_number: hand.gameNumber,
+        hand_number: hand.handNumber,
+        seed: "ab".repeat(32),
+        deck_json: JSON.stringify(hand.deck),
+        result_json: null,
+        created_at: now,
+      });
+      hand.actions.forEach((action, seq) => {
+        store.insertAction({
+          hand_id: id,
+          seq: seq + 1,
+          player_id: action.playerId,
+          payload_json: JSON.stringify(action.intent),
+          created_at: now,
+        });
+      });
+    });
+    const before = actionCount(store, "MBD462");
+    const hub = new Hub(store, 30, () => 60_000);
+    const messages: ServerMessage[] = [];
+    const back = hub.connect(
+      { type: "reconnect", token: "y".repeat(32) },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    expect(back.ok).toBe(true);
+    const view = latestView(messages);
+    expect(view?.status).toBe("playing");
+    expect(view?.boneyardCount).toBe(0);
+    expect(view?.lastEvent?.kind).toBe("knock");
+    expect(view?.prompt).toMatch(/\(computer\)'s turn/);
+    const bot = view?.players.find((player) => player.id === view.turnPlayerId);
+    expect(bot?.bot).toBe(true);
+    hub.dropBotTimer(bot!.id);
+    expect(actionCount(store, "MBD462")).toBe(before);
+    hub.sweepBots(Date.now() + 60_000 + BOT_WATCH_MARGIN_MS + 1);
+    expect(actionCount(store, "MBD462")).toBeGreaterThan(before);
+    expect(latestView(messages)?.turnPlayerId === bot!.id && latestView(messages)?.phase === "play").toBe(false);
+    store.db.close();
+  });
+});
+
+function actionCount(store: Store, code: string): number {
+  const room = store.roomByCode(code);
+  if (!room) return 0;
+  return store.handsForSeries(room.id, room.series_id).reduce((sum, hand) => sum + store.actions(hand.id).length, 0);
+}
+
+function findEmptyKnock(): {
+  hands: Array<{
+    gameNumber: number;
+    handNumber: number;
+    deck: string[];
+    actions: Array<{ playerId: string; intent: { type: "play" | "draw" | "knock"; tileId?: string; endId?: string } }>;
+  }>;
+} {
+  const players = [
+    { id: "p_you", name: "Us" },
+    { id: "p_bones", name: "Bones" },
+    { id: "p_pips", name: "Pips" },
+    { id: "p_lucky", name: "Lucky" },
+  ];
+  const config = { boneyardMode: "draw_until" as const, seriesLength: 3 as const, targetScore: 150 };
+  let match = createMatch(players, config);
+  const hands: Array<{
+    gameNumber: number;
+    handNumber: number;
+    deck: string[];
+    actions: Array<{ playerId: string; intent: { type: "play" | "draw" | "knock"; tileId?: string; endId?: string } }>;
+  }> = [];
+  for (let deal = 1; deal <= 60 && match.phase !== "series_over"; deal += 1) {
+    const deck = shuffleWithSeed(Buffer.alloc(32, deal));
+    match = beginHand(match, deck);
+    const actions: Array<{ playerId: string; intent: { type: "play" | "draw" | "knock"; tileId?: string; endId?: string } }> = [];
+    let guard = 0;
+    while (match.hand && match.hand.phase !== "complete" && guard < 400) {
+      guard += 1;
+      const playerId = currentPlayerId(match);
+      if (!playerId) throw new Error("Nobody is up.");
+      const intents = legalIntents(match, playerId);
+      const knock = intents.find((intent) => intent.type === "knock");
+      if (knock && playerId === "p_you" && match.hand.boneyard.length === 0) {
+        const peeked = applyIntent(match, playerId, knock);
+        const botId = peeked.ok ? currentPlayerId(peeked.match) : null;
+        if (peeked.ok && peeked.match.hand && peeked.match.hand.phase !== "complete" && botId && botId !== "p_you") {
+          actions.push({ playerId, intent: knock });
+          hands.push({ gameNumber: match.gameNumber, handNumber: match.handNumber, deck, actions });
+          return { hands };
+        }
+      }
+      const intent = intents[0];
+      if (!intent) throw new Error("No move.");
+      const result = applyIntent(match, playerId, intent);
+      if (!result.ok) throw new Error(result.error);
+      match = result.match;
+      actions.push({ playerId, intent });
+    }
+    hands.push({
+      gameNumber: hands.length === 0 ? 1 : match.gameNumber,
+      handNumber: match.handNumber,
+      deck,
+      actions,
+    });
+  }
+  throw new Error("No empty-boneyard knock left the next computer to move.");
+}
 
 async function waitFor(ready: () => boolean, limitMs = 2_000): Promise<boolean> {
   const start = Date.now();

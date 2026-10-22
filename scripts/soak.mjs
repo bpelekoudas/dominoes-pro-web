@@ -6,7 +6,8 @@
  * Node 22 has a global WebSocket that can send the session cookie. Node 18 uses the `ws` package.
  * `npm run build:rules` first so the replay checker can import @uhoh/rules.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const MODES = [
@@ -72,6 +73,9 @@ const report = {
   gameWins: 0,
   durationsMs: [],
   reconnect: "pending",
+  emptyBoneyardKnocks: 0,
+  botKnock: null,
+  botRestore: null,
   failures: [],
   ui: null,
 };
@@ -80,6 +84,12 @@ let exitCode = 0;
 try {
   const cleaned = await cleanup();
   console.log(`Cleanup before the run: ${JSON.stringify(cleaned)}`);
+  console.log("Computer knock on an empty boneyard");
+  report.botKnock = await computerKnockProbe();
+  console.log(`  ${report.botKnock}`);
+  console.log("Restore a computer turn");
+  report.botRestore = await restoreDrill();
+  console.log(`  ${report.botRestore}`);
   const modes = MODES.filter((mode) => mode.seats <= args.seats);
   if (modes.length === 0) throw new Error("--seats must be 2, 3, or 4.");
   let reconnectUsed = false;
@@ -141,12 +151,327 @@ try {
 
 process.exit(exitCode);
 
+async function computerKnockProbe() {
+  const name = soakName("k");
+  const cookie = await guest(name);
+  const seat = { playerId: null, view: null, onReady: null, cookie };
+  let failure = null;
+  let done = false;
+  let closing = false;
+  let lastActivity = Date.now();
+  let knockKey = "";
+  let acted = "";
+  const socket = await openSocket(wsUrl, cookie);
+  socket.on("message", (raw) => {
+    lastActivity = Date.now();
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      failure = "The server sent a message that could not be read.";
+      return;
+    }
+    if (message.type === "error") {
+      failure = `Server error: ${message.message}`;
+      return;
+    }
+    if (message.type === "welcome") {
+      seat.playerId = message.playerId;
+      if (seat.onReady) seat.onReady();
+      return;
+    }
+    if (message.type !== "state") return;
+    seat.view = message.view;
+    if (seat.onReady) seat.onReady();
+    const view = seat.view;
+    if (
+      view.boneyardCount === 0 &&
+      view.lastEvent?.kind === "knock" &&
+      view.lastEvent.playerId === seat.playerId &&
+      view.players.some((player) => player.id === view.turnPlayerId && player.bot) &&
+      view.phase !== "between" &&
+      view.betweenHands !== true
+    ) {
+      knockKey = turnKey(view);
+    }
+    if (knockKey && turnKey(view) !== knockKey) done = true;
+  });
+  socket.on("close", () => {
+    if (!closing && !done) failure = failure ?? "The socket closed before the computer moved.";
+  });
+  const ready = waitSeat(seat);
+  socket.send(
+    JSON.stringify({
+      type: "solo",
+      name,
+      playerCount: 4,
+      boneyardMode: "draw_until",
+      seriesLength: 3,
+      difficulty: "easy",
+    }),
+  );
+  await ready;
+  const deadline = Date.now() + 90_000;
+  const limit = Math.min(args.stallMs, 12_000);
+  try {
+    while (!done && !failure && Date.now() < deadline) {
+      if (Date.now() - lastActivity > limit) {
+        failure = knockKey ? "Stalled after a knock with an empty boneyard." : "The computer table went quiet.";
+        break;
+      }
+      const view = seat.view;
+      if (view?.phase === "between" || view?.betweenHands) {
+        const key = `between:${view.lastHand?.gameNumber}-${view.lastHand?.handNumber}`;
+        if (acted !== key) {
+          acted = key;
+          socket.send(JSON.stringify({ type: "continue" }));
+        }
+      } else if (view && view.turnPlayerId === seat.playerId && (view.phase === "play" || view.phase === "draw" || view.phase === "knock")) {
+        const key = turnKey(view);
+        if (acted !== key) {
+          acted = key;
+          socket.send(JSON.stringify({ type: "intent", intent: probeIntent(view) }));
+        }
+      }
+      await sleep(40);
+    }
+  } finally {
+    closing = true;
+    try {
+      socket.close();
+    } catch {
+      // already closed
+    }
+  }
+  if (failure) throw new Error(failure);
+  if (!done) throw new Error("The computer never had to answer an empty-boneyard knock.");
+  return "the computer moved after an empty-boneyard knock";
+}
+
+function turnKey(view) {
+  return [
+    view.status,
+    view.phase,
+    view.gameNumber,
+    view.handNumber,
+    view.turnPlayerId,
+    view.boneyardCount,
+    view.lastPlay?.seq ?? 0,
+    view.lastEvent?.kind ?? "",
+    view.lastEvent?.playerId ?? "",
+    view.betweenHands ? 1 : 0,
+  ].join(":");
+}
+
+function probeIntent(view) {
+  if (view.phase === "play") {
+    const play = view.legalPlays[0];
+    if (!play) throw new Error("The turn to play had no legal tile.");
+    return { type: "play", tileId: play.tileId, endId: play.endId };
+  }
+  if (view.phase === "draw") return { type: "draw" };
+  if (!view.canKnock) throw new Error("A knock was offered while a tile could be played.");
+  return { type: "knock" };
+}
+
+function waitSeat(seat) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("The table did not send a welcome.")), 15_000);
+    const finish = () => {
+      if (seat.failed) {
+        clearTimeout(timer);
+        seat.onReady = null;
+        reject(new Error(seat.failed));
+        return;
+      }
+      if (!seat.playerId || !seat.view) return;
+      clearTimeout(timer);
+      seat.onReady = null;
+      resolve(seat);
+    };
+    seat.onReady = finish;
+    finish();
+  });
+}
+
+async function restoreDrill() {
+  const entry = path.join(process.cwd(), "packages/server/dist/index.js");
+  if (!existsSync(entry)) throw new Error("Build the server before the restore check (npm run build).");
+  const dir = path.join("/tmp", `uhoh-soak-restore-${process.pid}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const port = 8871;
+  const origin = `http://127.0.0.1:${port}`;
+  const socketUrl = `ws://127.0.0.1:${port}/ws`;
+  let child = startRestoreServer(dir, port);
+  try {
+    await waitHealth(origin, child);
+    const parked = await parkBotTurn(origin, socketUrl);
+    await stopChild(child);
+    child = startRestoreServer(dir, port);
+    await waitHealth(origin, child);
+    await expectRestoredBot(origin, socketUrl, parked);
+    return "a restored computer turn moved";
+  } finally {
+    await stopChild(child);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function startRestoreServer(dir, port) {
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", "packages/server/dist/index.js"], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: String(port), DATA_DIR: dir, BOTS_ENABLED: "0" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.resume();
+  child.stderr?.resume();
+  return child;
+}
+
+async function waitHealth(origin, child) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode != null) throw new Error("The restore server exited before it was ready.");
+    try {
+      const response = await fetch(new URL("/health", origin));
+      if (response.ok) return;
+    } catch {
+      // not up yet
+    }
+    await sleep(100);
+  }
+  throw new Error("The restore server did not become ready.");
+}
+
+async function stopChild(child) {
+  if (!child || child.exitCode != null) return;
+  child.kill("SIGTERM");
+  const deadline = Date.now() + 5_000;
+  while (child.exitCode == null && Date.now() < deadline) await sleep(50);
+  if (child.exitCode == null) child.kill("SIGKILL");
+}
+
+async function parkBotTurn(origin, socketUrl) {
+  const name = soakName("r");
+  const cookie = await guest(name, origin);
+  const seat = { playerId: null, token: null, view: null, onReady: null };
+  const socket = await openSocket(socketUrl, cookie);
+  socket.on("message", (raw) => {
+    const message = JSON.parse(String(raw));
+    if (message.type === "welcome") {
+      seat.playerId = message.playerId;
+      seat.token = message.token;
+      if (seat.onReady) seat.onReady();
+      return;
+    }
+    if (message.type === "error") {
+      seat.failed = message.message;
+      if (seat.onReady) seat.onReady();
+      return;
+    }
+    if (message.type !== "state") return;
+    seat.view = message.view;
+    if (seat.onReady) seat.onReady();
+  });
+  const ready = waitSeat(seat);
+  socket.send(
+    JSON.stringify({ type: "solo", name, playerCount: 4, boneyardMode: "draw_until", seriesLength: 3, difficulty: "easy" }),
+  );
+  await ready;
+  let acted = "";
+  const deadline = Date.now() + 60_000;
+  let parked = null;
+  while (!parked && Date.now() < deadline) {
+    const view = seat.view;
+    if (view?.phase === "between" || view?.betweenHands) {
+      const key = `between:${view.handNumber}`;
+      if (acted !== key) {
+        acted = key;
+        socket.send(JSON.stringify({ type: "continue" }));
+      }
+    } else if (view && view.turnPlayerId === seat.playerId) {
+      const key = turnKey(view);
+      if (acted !== key) {
+        acted = key;
+        socket.send(JSON.stringify({ type: "intent", intent: probeIntent(view) }));
+      }
+    } else if (view && view.players.some((player) => player.id === view.turnPlayerId && player.bot)) {
+      parked = { token: seat.token, key: turnKey(view), playerId: seat.playerId };
+      break;
+    }
+    await sleep(40);
+  }
+  if (!parked) {
+    try {
+      socket.close();
+    } catch {
+      // already closed
+    }
+    throw new Error("The restore table never reached a computer's turn.");
+  }
+  // Leave the socket open until the process dies, so a leave timer cannot abandon the hand.
+  parked.socket = socket;
+  return parked;
+}
+
+async function expectRestoredBot(origin, socketUrl, parked) {
+  const cookie = await guest(soakName("b"), origin);
+  const seat = { playerId: null, view: null, onReady: null };
+  const socket = await openSocket(socketUrl, cookie);
+  let failure = null;
+  socket.on("message", (raw) => {
+    const message = JSON.parse(String(raw));
+    if (message.type === "error") {
+      seat.failed = message.message;
+      failure = message.message;
+      if (seat.onReady) seat.onReady();
+      return;
+    }
+    if (message.type === "welcome") {
+      seat.playerId = message.playerId;
+      if (seat.onReady) seat.onReady();
+      return;
+    }
+    if (message.type !== "state") return;
+    seat.view = message.view;
+    if (seat.onReady) seat.onReady();
+  });
+  const ready = waitSeat(seat);
+  socket.send(JSON.stringify({ type: "reconnect", token: parked.token }));
+  await ready;
+  if (failure) throw new Error(failure);
+  if (seat.playerId !== parked.playerId) throw new Error("Reconnect sat a different player after the restart.");
+  if (turnKey(seat.view) !== parked.key) throw new Error("The restored table was not on the computer's turn.");
+  const deadline = Date.now() + 12_000;
+  while (Date.now() < deadline) {
+    if (turnKey(seat.view) !== parked.key) {
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+      try {
+        parked.socket?.close();
+      } catch {
+        // already closed
+      }
+      return;
+    }
+    await sleep(50);
+  }
+  throw new Error("Stalled on a restored computer turn.");
+}
+
 function humanSummary(data) {
   const lines = [
     `Soak ${data.url}`,
     `${data.matches.length} matches, ${data.hands} hands, ${data.knocks} knocks, ${data.locks} locks, ${data.dominoes} dominoes, ${data.gameWins} game wins`,
     `durations: ${data.durationsMs.map((ms) => `${(ms / 1000).toFixed(1)}s`).join(", ") || "none"}`,
     `reconnect: ${data.reconnect}`,
+    `empty-boneyard knocks: ${data.emptyBoneyardKnocks ?? 0}`,
+    `bot knock: ${data.botKnock ?? "not run"}`,
+    `bot restore: ${data.botRestore ?? "not run"}`,
     `ui: ${data.ui?.summary ?? "not run"}`,
     `failures: ${data.failures.length}`,
   ];
@@ -163,8 +488,8 @@ async function cleanup() {
   return response.json();
 }
 
-async function guest(name) {
-  const response = await fetch(new URL("/api/guest", pageUrl), {
+async function guest(name, origin = pageUrl) {
+  const response = await fetch(new URL("/api/guest", origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ displayName: name }),
@@ -360,6 +685,7 @@ async function playMatch(mode, index, options) {
       prevScores[player.id] = player.score;
     }
     if (view.lastPlay && view.lastPlay.seq > prevPlaySeq) prevPlaySeq = view.lastPlay.seq;
+    if (view.boneyardCount === 0 && view.lastEvent?.kind === "knock") report.emptyBoneyardKnocks = (report.emptyBoneyardKnocks ?? 0) + 1;
     checkSeries(view);
     if (view.status === "complete" || view.phase === "over") done = true;
   }
@@ -543,7 +869,13 @@ async function playMatch(mode, index, options) {
     const deadline = Date.now() + 60 * 60 * 1000;
     while (!done && !failure) {
       if (Date.now() > deadline) fail("The match ran longer than 60 minutes.");
-      if (Date.now() - lastActivity > args.stallMs) fail(`No state change for more than ${Math.round(args.stallMs / 1000)}s.`);
+      if (Date.now() - lastActivity > args.stallMs) {
+        const frozen = seats.map((seat) => seat.view).find(Boolean);
+        if (frozen?.boneyardCount === 0 && frozen.lastEvent?.kind === "knock") {
+          fail("Stalled after a knock with an empty boneyard.");
+        }
+        fail(`No state change for more than ${Math.round(args.stallMs / 1000)}s.`);
+      }
       if (
         options.reconnect &&
         !reconnectStarted &&

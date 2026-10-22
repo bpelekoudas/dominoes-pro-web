@@ -163,6 +163,14 @@ const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
 export const BOT_TURN_MS = 2_000;
 
 /**
+ * After the think time, this long with no tile means the timer was lost.
+ * The watchdog plays the computer instead of leaving the table on that turn.
+ */
+export const BOT_WATCH_MARGIN_MS = 2_000;
+
+const BOT_SWEEP_MS = 1_000;
+
+/**
  * A short think, a little longer when there are more legal moves.
  * One choice is under a second. A crowded hand stays inside the old two-second cap.
  */
@@ -235,6 +243,9 @@ export class Hub {
   private readonly byPlayer = new Map<string, string>();
   private readonly byCode = new Map<string, string>();
   private readonly botTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly botWatch = new Map<string, { playerId: string; startedAt: number; waitMs: number }>();
+  private readonly botDriving = new Set<string>();
+  private readonly botWarned = new Set<string>();
   private readonly turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly continueTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly botFillTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -251,6 +262,8 @@ export class Hub {
     private readonly accountBotPace: () => number = defaultAccountPace,
   ) {
     this.restore();
+    const sweep = setInterval(() => this.sweepBots(), BOT_SWEEP_MS);
+    sweep.unref?.();
   }
 
   /** Account bots that may sit at a quick table. Empty until the league starts. */
@@ -263,6 +276,30 @@ export class Hub {
   armWaitingBots(): void {
     for (const room of this.rooms.values()) {
       if (room.listed && room.status === "lobby") this.armBotFill(room);
+    }
+  }
+
+  /**
+   * Forget a computer's pending timer. The watchdog still owes that turn
+   * once the think time plus the margin has passed. Tests use this to
+   * simulate a restart that dropped the timer.
+   */
+  dropBotTimer(playerId: string): void {
+    const room = this.roomFor(playerId);
+    if (!room) return;
+    this.clearTimer(this.botTimers, room.id);
+  }
+
+  /** One pass of the computer-turn watchdog. `now` is injectable for tests. */
+  sweepBots(now = Date.now()): void {
+    for (const room of this.rooms.values()) {
+      try {
+        this.driveBot(room, now);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "The computer turn could not be driven.";
+        if (/database is not open/i.test(detail)) return;
+        console.warn(`Room ${room.code} watchdog failed (${detail}).`);
+      }
     }
   }
 
@@ -299,7 +336,7 @@ export class Hub {
           // The socket is already gone.
         }
       }
-      this.clearTimer(this.botTimers, room.id);
+      this.clearBotTurn(room.id);
       this.clearTimer(this.turnTimers, room.id);
       this.clearTimer(this.continueTimers, room.id);
       this.clearTimer(this.botFillTimers, room.id);
@@ -977,33 +1014,119 @@ export class Hub {
   }
 
   private scheduleBot(room: LiveRoom): void {
-    if (this.botTimers.has(room.id)) return;
-    if (!room.match || room.status !== "playing" || room.betweenHands || room.ended) return;
+    this.driveBot(room, Date.now());
+  }
+
+  /**
+   * Keep a computer's turn armed.
+   * A knock on an empty boneyard, or a restore after restart, used to leave
+   * the timer missing. The same turn is then due again after the think time
+   * plus the margin, and this plays it.
+   */
+  private driveBot(room: LiveRoom, now: number): void {
+    if (this.botDriving.has(room.id)) return;
+    if (!room.match || room.status !== "playing" || room.betweenHands || room.ended) {
+      this.clearBotTurn(room.id);
+      return;
+    }
     const turnId = currentPlayerId(room.match);
-    if (!turnId) return;
-    const seat = room.seats.find((candidate) => candidate.id === turnId);
-    if (!seat?.bot) return;
+    const seat = turnId ? room.seats.find((candidate) => candidate.id === turnId) : undefined;
+    if (!turnId || !seat?.bot) {
+      this.clearBotTurn(room.id);
+      return;
+    }
+    const waitMs = this.botWaitMs(room, seat, turnId);
+    let watch = this.botWatch.get(room.id);
+    if (!watch || watch.playerId !== turnId) {
+      this.clearTimer(this.botTimers, room.id);
+      watch = { playerId: turnId, startedAt: now, waitMs };
+      this.botWatch.set(room.id, watch);
+      this.botWarned.delete(room.id);
+    }
+    const elapsed = now - watch.startedAt;
+    if (elapsed > watch.waitMs + BOT_WATCH_MARGIN_MS) {
+      this.clearTimer(this.botTimers, room.id);
+      watch.startedAt = now;
+      this.botDriving.add(room.id);
+      try {
+        this.playBot(room.id, turnId);
+      } finally {
+        this.botDriving.delete(room.id);
+      }
+      // The move's own broadcast could not arm the next computer while this
+      // pass was already driving the table.
+      this.scheduleBot(room);
+      return;
+    }
+    if (!this.botTimers.has(room.id)) {
+      const remaining = watch.waitMs - elapsed;
+      this.armBotTimer(room, seat, remaining > 0 ? remaining : 0);
+    }
+  }
+
+  private botWaitMs(room: LiveRoom, seat: LiveSeat, turnId: string): number {
     const paced = seat.accountBot ? Math.max(0, this.accountBotPace()) : Math.max(0, this.botPace());
-    const choices = legalIntents(room.match, turnId).length;
-    const wait = !seat.accountBot && paced === BOT_TURN_MS ? botThinkMs(choices) : paced;
+    const choices = room.match ? legalIntents(room.match, turnId).length : 1;
+    return !seat.accountBot && paced === BOT_TURN_MS ? botThinkMs(Math.max(1, choices)) : paced;
+  }
+
+  private armBotTimer(room: LiveRoom, seat: LiveSeat, wait: number): void {
+    this.clearTimer(this.botTimers, room.id);
     const timer = setTimeout(() => {
       this.botTimers.delete(room.id);
       this.playBot(room.id, seat.id);
-    }, wait);
+    }, Math.max(0, wait));
     timer.unref?.();
     this.botTimers.set(room.id, timer);
+  }
+
+  private clearBotTurn(roomId: string): void {
+    this.clearTimer(this.botTimers, roomId);
+    this.botWatch.delete(roomId);
+    this.botWarned.delete(roomId);
   }
 
   private playBot(roomId: string, playerId: string): void {
     const room = this.rooms.get(roomId);
     const seat = room?.seats.find((candidate) => candidate.id === playerId);
     if (!room || !seat?.bot || !room.match) return;
-    if (currentPlayerId(room.match) !== playerId) return;
-    const intent = chooseBotIntent(room.match, playerId, seat.difficulty ?? "medium", Math.random);
-    if (!intent) return;
-    const before = room.match.playSeq;
-    this.intent(room, seat, intent);
-    if (room.match && room.match.playSeq > before && Math.random() < 0.12) this.botTaunt(room, seat);
+    if (currentPlayerId(room.match) !== playerId) {
+      this.scheduleBot(room);
+      return;
+    }
+    const beforeTurn = currentPlayerId(room.match);
+    const beforeLog = room.match.log.length;
+    const beforePhase = room.match.phase;
+    const beforeSeq = room.match.playSeq;
+    let intent: Intent | null = null;
+    try {
+      intent = chooseBotIntent(room.match, playerId, seat.difficulty ?? "medium", Math.random);
+      if (!intent) intent = legalIntents(room.match, playerId)[0] ?? null;
+      if (!intent) {
+        this.warnBot(room, `${seat.name} has no legal move.`);
+        return;
+      }
+      this.intent(room, seat, intent);
+      if (room.match && room.match.playSeq > beforeSeq && Math.random() < 0.12) this.botTaunt(room, seat);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The computer move failed.";
+      this.warnBot(room, detail);
+    }
+    const moved =
+      !room.match ||
+      room.betweenHands ||
+      room.status !== "playing" ||
+      room.match.phase !== beforePhase ||
+      room.match.log.length !== beforeLog ||
+      currentPlayerId(room.match) !== beforeTurn;
+    if (!moved) this.warnBot(room, `${seat.name} was up and the table did not change.`);
+  }
+
+  private warnBot(room: LiveRoom, detail: string): void {
+    if (this.botWarned.has(room.id)) return;
+    if (/database is not open/i.test(detail)) return;
+    this.botWarned.add(room.id);
+    console.warn(`Room ${room.code}: ${detail}`);
   }
 
   private botTaunt(room: LiveRoom, seat: LiveSeat): void {
@@ -1029,7 +1152,7 @@ export class Hub {
   }
 
   private dropRoom(room: LiveRoom): void {
-    this.clearTimer(this.botTimers, room.id);
+    this.clearBotTurn(room.id);
     this.clearTimer(this.turnTimers, room.id);
     this.clearTimer(this.continueTimers, room.id);
     this.clearTimer(this.botFillTimers, room.id);
