@@ -105,6 +105,7 @@ function assertLaidOut(board: BoardState, label: string, phone: boolean): void {
   assertArmsSeparated(board, layout, label);
   assertDoublesCentered(board, layout, label);
   assertPinwheel(board, layout, label);
+  assertJoined(board, layout, label);
 }
 
 /** First tiles of each arm meet beside the spinner, so the gap rule starts after them. */
@@ -152,9 +153,9 @@ function perpendicular(a: string, b: string): boolean {
 }
 
 /**
- * An arm leaves along its own direction, then turns 90 degrees at most
- * twice. It may come back across the open felt. It may not reverse into
- * the tile it just left.
+ * An arm leaves along its own direction, then turns 90 degrees. Two
+ * bends cross the open felt. Later bends wrap away from a collision.
+ * It may not reverse into the tile it just left.
  */
 function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): void {
   for (const arm of ARM_IDS) {
@@ -171,8 +172,36 @@ function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): 
     }
     if (dirs.length === 0) continue;
     expect(dirs[0], `${label} ${arm} left the spinner ${dirs.join(">")}`).toBe(arm);
-    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(3);
+    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(6);
   }
+}
+
+/** Each tile meets its parent with a short gap and a real shared edge. */
+function assertJoined(board: BoardState, layout: BoardLayout, label: string): void {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  const center = board.center ? byId.get(board.center.tileId) : undefined;
+  for (const arm of ARM_IDS) {
+    const chain = board.arms[arm];
+    for (let index = 0; index < chain.length; index += 1) {
+      const tile = byId.get(chain[index]!.tileId);
+      const parent = index === 0 ? center : byId.get(chain[index - 1]!.tileId);
+      expect(tile && parent, `${label} ${chain[index]!.tileId} parent`).toBeTruthy();
+      if (!tile || !parent) continue;
+      const edge = sharedEdge(parent, tile);
+      expect(Math.abs(edge.gap - TILE_GAP), `${label} ${parent.tileId}>${tile.tileId} gap ${edge.gap}`).toBeLessThan(0.5);
+      expect(edge.along, `${label} ${parent.tileId}>${tile.tileId} along ${edge.along}`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+    }
+  }
+}
+
+function sharedEdge(a: LayoutBox, b: LayoutBox): { gap: number; along: number } {
+  const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const gapX = Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w), 0);
+  const gapY = Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h), 0);
+  if (gapY === 0 && gapX > 0) return { gap: gapX, along: yOverlap };
+  if (gapX === 0 && gapY > 0) return { gap: gapY, along: xOverlap };
+  return { gap: Math.hypot(gapX, gapY), along: 0 };
 }
 
 /**
@@ -566,6 +595,48 @@ describe("board layout", () => {
     expect(boxesOverlap(spinner, layout.tiles.find((tile) => tile.tileId === "5-6")!)).toBe(false);
     assertLaidOut(board, "crosswise double", false);
   });
+
+  it("keeps long games joined, with every arm clear of the others", () => {
+    let crowded = 0;
+    for (const players of [2, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 40; seed += 1) {
+          for (const board of playHand(players, mode, seed)) {
+            const layout = layoutBoard(board);
+            const label = `long ${players} ${mode} seed ${seed}`;
+            assertJoined(board, layout, label);
+            for (let i = 0; i < layout.tiles.length; i += 1) {
+              for (let j = i + 1; j < layout.tiles.length; j += 1) {
+                expect(boxesOverlap(layout.tiles[i]!, layout.tiles[j]!), `${label} overlap`).toBe(false);
+              }
+            }
+            for (const end of layout.ends) {
+              const slot = layout.previews[end.id];
+              expect(slot, `${label} preview ${end.id}`).toBeTruthy();
+              if (!slot) continue;
+              for (const tile of layout.tiles) {
+                expect(boxesOverlap(slot, tile), `${label} preview ${end.id} on ${tile.tileId}`).toBe(false);
+              }
+              const tip = [...layout.tiles].reverse().find((tile) => tile.arm === end.id)
+                ?? layout.tiles.find((tile) => tile.arm === null);
+              expect(tip, `${label} tip ${end.id}`).toBeTruthy();
+              if (!tip) continue;
+              const edge = sharedEdge(tip, slot);
+              expect(Math.abs(edge.gap - TILE_GAP), `${label} preview gap`).toBeLessThan(0.5);
+              expect(edge.along, `${label} preview along`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+            }
+            const count = layout.tiles.length;
+            const arms = ARM_IDS.filter((arm) => board.arms[arm].length > 0).length;
+            if (count >= 20 && arms === 4) {
+              crowded += 1;
+              assertLaidOut(board, `${label} n=${count}`, false);
+            }
+          }
+        }
+      }
+    }
+    expect(crowded).toBeGreaterThan(10);
+  }, 20_000);
 
   it("reports a fit box with a margin around the tiles", () => {
     const board = boardFromChain(chainFrom(tileById("3-3"), 4), "west");

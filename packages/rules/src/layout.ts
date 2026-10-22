@@ -21,7 +21,9 @@ import { ARM_IDS, openEnds } from "./board.js";
  * to keep going outward, but turns back across the open felt when that
  * uses the empty half of the table and still keeps a full tile of
  * clearance. The chain does not fold onto another arm or onto itself.
- * If neither bend fits, the arm stays straight and the felt zooms out.
+ * When the next straight step would overlap another arm or the spinner
+ * row, the chain bends again and wraps away. A clear step just outside
+ * the phone is allowed, and the view scales that picture down.
  *
  * A double sits crosswise to the chain. The next tile continues in the
  * same direction, its short end centred on the double's long side.
@@ -82,11 +84,18 @@ export interface BoardLayout {
   ends: PlacedEnd[];
   /** Box the view scales. Every tile and end cap sits inside it. */
   fit: LayoutBox;
+  /**
+   * Where the next ordinary tile on an open arm would sit.
+   * Not part of the fit, so a ghost slot does not shrink the chain.
+   */
+  previews: Partial<Record<ArmId, LayoutBox>>;
 }
 
 interface Occupant {
   box: LayoutBox;
   arm: ArmId | null;
+  /** Kept open for the tile that has to follow a double. */
+  reserved?: boolean;
 }
 
 interface Cursor {
@@ -98,7 +107,7 @@ interface Cursor {
 
 export function layoutBoard(board: BoardState): BoardLayout {
   if (!board.center) {
-    return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 } };
+    return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
   }
 
   const center = centerBox(board.center);
@@ -117,25 +126,41 @@ export function layoutBoard(board: BoardState): BoardLayout {
     cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high, bends: 0 });
   }
 
+  // Grow the arms together. A finished arm must not cross a lane another
+  // arm still has to walk, including the tile that follows a double.
+  const nextIndex = new Map<ArmId, number>();
   for (const arm of ARM_IDS) {
-    let cursor = cursors.get(arm);
-    const chain = board.arms[arm];
-    if (!cursor || chain.length < 2) continue;
-    for (let index = 1; index < chain.length; index += 1) {
+    const cursor = cursors.get(arm);
+    if (!cursor) continue;
+    holdAhead(arm, cursor, occupants, centre);
+    nextIndex.set(arm, 1);
+  }
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const arm of ARM_IDS) {
+      const index = nextIndex.get(arm);
+      const chain = board.arms[arm];
+      const cursor = cursors.get(arm);
+      if (index === undefined || !cursor || index >= chain.length) continue;
+      releaseHold(arm, occupants);
       const upcoming = chain.slice(index);
       const tile = upcoming[0]!;
       const choice = chooseStep(tile, upcoming, cursor, arm, occupants, centre);
       const placed = toTile(tile, choice.box, choice.dir, arm);
       tiles.push(placed);
       occupants.push({ box: placed, arm });
-      cursor = {
+      const nextCursor: Cursor = {
         box: placed,
         dir: choice.dir,
         prevDouble: tile.low === tile.high,
         bends: choice.bends,
       };
+      cursors.set(arm, nextCursor);
+      nextIndex.set(arm, index + 1);
+      holdAhead(arm, nextCursor, occupants, centre);
+      grew = true;
     }
-    cursors.set(arm, cursor);
   }
 
   const ends: PlacedEnd[] = [];
@@ -146,7 +171,15 @@ export function layoutBoard(board: BoardState): BoardLayout {
     ends.push({ ...cap, id: end.id, match: end.match, scorePips: end.scorePips });
   }
 
-  return { tiles, ends, fit: fitAround([...tiles, ...ends]) };
+  const previews: Partial<Record<ArmId, LayoutBox>> = {};
+  for (const end of ends) {
+    const cursor = cursors.get(end.id);
+    previews[end.id] = cursor
+      ? chooseStep(PREVIEW_TILE, [PREVIEW_TILE], cursor, end.id, occupants, centre).box
+      : straightBox(center, end.id, false);
+  }
+
+  return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews };
 }
 
 /**
@@ -181,32 +214,173 @@ function chooseStep(
     && roomForDouble(upcoming, cursor.dir, straight, home, occupants, centre, true);
   if (straightOk) return keep;
 
-  if (cursor.bends >= 2) return keep;
   // First bend: clockwise, or the other way when that side is open.
   // Second bend: further outward, or back across the empty felt.
-  const preferred: LayoutDir = cursor.dir === home ? clockwise(home) : home;
-  const alternate = opposite(preferred);
-  const secondBend = cursor.bends >= 1;
+  // A third bend is not chosen here. The two-bend search assumes the
+  // arm is still on its first corner, and a later turn is handled below.
+  if (cursor.bends < 2) {
+    const preferred: LayoutDir = cursor.dir === home ? clockwise(home) : home;
+    const alternate = opposite(preferred);
+    const secondBend = cursor.bends >= 1;
+    let best: { box: LayoutBox; dir: LayoutDir; score: number } | null = null;
+    for (const turn of [preferred, alternate]) {
+      const pinwheel = turn === preferred;
+      const choices = bendChoices(cursor.box, cursor.dir, turn, isDouble);
+      for (let slide = 0; slide < choices.length; slide += 1) {
+        const box = choices[slide]!;
+        // The outward turn stays in the arm's quadrant. The turn toward
+        // open felt may cross the midline, but not another chain.
+        if (!fits(box, home, occupants, centre, true, cursor.box, pinwheel)) continue;
+        if (secondBend && pinwheel && !pointsAway(box, turn)) continue;
+        if (secondBend && !laneFitsDouble(turn, box, home, occupants, centre, pinwheel)) continue;
+        if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false, pinwheel)) continue;
+        const score = projectedImbalance(box, turn, upcoming, occupants, centre)
+          - (pinwheel ? TURN_BIAS : 0)
+          + slide * 4;
+        if (!best || score < best.score) best = { box, dir: turn, score };
+      }
+    }
+    if (best) return { box: best.box, dir: best.dir, bends: cursor.bends + 1 };
+  }
+
+  // Straight is off the phone, but it still clears every other tile.
+  // The view scales down. Wrapping is only for a real collision.
+  if (isClear(straight, occupants, centre, cursor.box) && runFits(upcoming, cursor.dir, straight, home, occupants, centre)) {
+    return keep;
+  }
+
+  const escaped = escapeStep(tile, upcoming, cursor, home, occupants, centre);
+  if (escaped) return escaped;
+  return keep;
+}
+
+/**
+ * The straight step would land on another arm. Turn to either side,
+ * including a third bend, and take the first clear spot. Leaving the
+ * phone is cheaper than crossing a chain: the felt zooms out.
+ */
+function escapeStep(
+  tile: OrientedTile,
+  upcoming: readonly OrientedTile[],
+  cursor: Cursor,
+  home: ArmId,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+): { box: LayoutBox; dir: LayoutDir; bends: number } | null {
+  const isDouble = tile.low === tile.high;
+  const turns = sideTurns(cursor.dir);
   let best: { box: LayoutBox; dir: LayoutDir; score: number } | null = null;
-  for (const turn of [preferred, alternate]) {
-    const pinwheel = turn === preferred;
-    const choices = bendChoices(cursor.box, cursor.dir, turn, isDouble);
+  for (const turn of turns) {
+    const choices = bendCandidates(cursor.box, cursor.dir, turn, isDouble);
     for (let slide = 0; slide < choices.length; slide += 1) {
       const box = choices[slide]!;
-      // The outward turn stays in the arm's quadrant. The turn toward
-      // open felt may cross the midline, but not another chain.
-      if (!fits(box, home, occupants, centre, true, cursor.box, pinwheel)) continue;
-      if (secondBend && pinwheel && !pointsAway(box, turn)) continue;
-      if (secondBend && !laneFitsDouble(turn, box, home, occupants, centre, pinwheel)) continue;
-      if (!roomForDouble(upcoming, turn, box, home, occupants, centre, false, pinwheel)) continue;
-      const score = projectedImbalance(box, turn, upcoming, occupants, centre)
-        - (pinwheel ? TURN_BIAS : 0)
-        + slide * 4;
+      if (!isClear(box, occupants, centre, cursor.box)) continue;
+      if (!runFits(upcoming, turn, box, home, occupants, centre)) continue;
+      const score = (insidePhone(box) ? 0 : 80_000)
+        + (inQuadrant(box, home) ? 0 : 8_000)
+        + (pointsAway(box, turn) ? 0 : 2_000)
+        + (turn === turns[0] ? 0 : 400)
+        + slide * 4
+        + projectedImbalance(box, turn, upcoming, occupants, centre);
       if (!best || score < best.score) best = { box, dir: turn, score };
     }
   }
-  if (!best) return keep;
+  if (!best) return null;
   return { box: best.box, dir: best.dir, bends: cursor.bends + 1 };
+}
+
+/** A placement that touches its parent and misses every other tile. */
+function isClear(
+  box: LayoutBox,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+  prev: LayoutBox,
+): boolean {
+  if (!insideHard(box)) return false;
+  if (overlapsAny(box, placedBoxes(occupants))) return false;
+  if (hitsHold(box, occupants)) return false;
+  if (intersectsBox(box, centre)) return false;
+  for (const other of occupants) {
+    if (other.reserved || other.arm === null || sameBox(other.box, prev)) continue;
+    if (boxGap(box, other.box) < ARM_GAP) return false;
+  }
+  return true;
+}
+
+const PREVIEW_TILE: OrientedTile = { tileId: "preview", low: 0, high: 1, inward: 0, outward: 1 };
+
+function holdAhead(arm: ArmId, cursor: Cursor, occupants: Occupant[], centre: LayoutBox): void {
+  releaseHold(arm, occupants);
+  if (cursor.prevDouble) {
+    const follower = straightBox(cursor.box, cursor.dir, false);
+    if (!isClear(follower, occupants, centre, cursor.box)) return;
+    occupants.push({ box: follower, arm, reserved: true });
+    const beyond: Cursor = { box: follower, dir: cursor.dir, prevDouble: false, bends: cursor.bends };
+    const exit = chooseStep(PREVIEW_TILE, [PREVIEW_TILE], beyond, arm, occupants, centre).box;
+    if (isClear(exit, occupants, centre, follower)) occupants.push({ box: exit, arm, reserved: true });
+    return;
+  }
+  const exit = chooseStep(PREVIEW_TILE, [PREVIEW_TILE], cursor, arm, occupants, centre).box;
+  if (isClear(exit, occupants, centre, cursor.box)) occupants.push({ box: exit, arm, reserved: true });
+}
+
+function releaseHold(arm: ArmId, occupants: Occupant[]): void {
+  for (let index = occupants.length - 1; index >= 0; index -= 1) {
+    const item = occupants[index]!;
+    if (item.reserved && item.arm === arm) occupants.splice(index, 1);
+  }
+}
+
+/**
+ * Tiles that cannot turn (a double, and the tile centred on it) have to
+ * fit straight ahead. A normal tile after that run can bend later.
+ */
+function runFits(
+  upcoming: readonly OrientedTile[],
+  dir: LayoutDir,
+  box: LayoutBox,
+  home: ArmId,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+): boolean {
+  const owned: Occupant[] = [...occupants, { box, arm: home }];
+  let prev = box;
+  let prevDouble = upcoming[0]!.low === upcoming[0]!.high;
+  for (let index = 1; index < upcoming.length; index += 1) {
+    const next = upcoming[index]!;
+    const nextDouble = next.low === next.high;
+    if (!prevDouble && !nextDouble) return true;
+    const nextBox = straightBox(prev, dir, nextDouble);
+    if (!isClear(nextBox, owned, centre, prev)) return false;
+    owned.push({ box: nextBox, arm: home });
+    prev = nextBox;
+    prevDouble = nextDouble;
+  }
+  if (prevDouble) {
+    const follower = straightBox(prev, dir, false);
+    if (!isClear(follower, owned, centre, prev)) return false;
+    owned.push({ box: follower, arm: home });
+    prev = follower;
+  }
+  if (upcoming[0]?.tileId === "preview") return true;
+  return hasExit(prev, dir, owned, centre);
+}
+
+function sideTurns(dir: LayoutDir): [LayoutDir, LayoutDir] {
+  const clock = clockwise(dir);
+  return [clock, opposite(clock)];
+}
+
+/** The tile just placed still has a clear next step, straight or around a corner. */
+function hasExit(box: LayoutBox, dir: LayoutDir, occupants: readonly Occupant[], centre: LayoutBox): boolean {
+  const straight = straightBox(box, dir, false);
+  if (isClear(straight, occupants, centre, box)) return true;
+  for (const turn of sideTurns(dir)) {
+    for (const candidate of bendCandidates(box, dir, turn, false)) {
+      if (isClear(candidate, occupants, centre, box)) return true;
+    }
+  }
+  return false;
 }
 
 /** How far the chain's box sits from the spinner after a short run this way. */
@@ -280,16 +454,27 @@ function roomForDouble(
   phone: boolean,
   quadrant = true,
 ): boolean {
-  const next = upcoming[1];
-  if (!next || next.low !== next.high) return true;
   const owned: Occupant[] = [...occupants, { box, arm: home }];
-  const doubleBox = straightBox(box, dir, true);
-  if (!fits(doubleBox, home, owned, centre, phone, box, quadrant)) return false;
-  const after = upcoming[2];
-  if (!after) return true;
-  const afterBox = straightBox(doubleBox, dir, after.low === after.high);
-  const withDouble: Occupant[] = [...owned, { box: doubleBox, arm: home }];
-  return fits(afterBox, home, withDouble, centre, phone, doubleBox, quadrant);
+  let prev = box;
+  let prevDouble = upcoming[0]!.low === upcoming[0]!.high;
+  for (let index = 1; index < upcoming.length; index += 1) {
+    const next = upcoming[index]!;
+    const nextDouble = next.low === next.high;
+    if (!prevDouble && !nextDouble) return true;
+    const nextBox = straightBox(prev, dir, nextDouble);
+    if (!fits(nextBox, home, owned, centre, phone, prev, quadrant)) return false;
+    owned.push({ box: nextBox, arm: home });
+    prev = nextBox;
+    prevDouble = nextDouble;
+  }
+  if (prevDouble) {
+    const follower = straightBox(prev, dir, false);
+    if (!fits(follower, home, owned, centre, phone, prev, quadrant)) return false;
+    owned.push({ box: follower, arm: home });
+    prev = follower;
+  }
+  if (upcoming[0]?.tileId === "preview") return true;
+  return hasExit(prev, dir, owned, centre);
 }
 
 /**
@@ -307,10 +492,11 @@ function laneFitsDouble(
 ): boolean {
   const doubleBox = straightBox(box, dir, true);
   if ((quadrant && !inQuadrant(doubleBox, home)) || !insideHard(doubleBox)) return false;
-  if (overlapsAny(doubleBox, occupants.map((item) => item.box))) return false;
+  if (overlapsAny(doubleBox, placedBoxes(occupants))) return false;
+  if (hitsHold(doubleBox, occupants)) return false;
   if (intersectsBox(doubleBox, centre)) return false;
   for (const other of occupants) {
-    if (other.arm === null || sameBox(other.box, box)) continue;
+    if (other.reserved || other.arm === null || sameBox(other.box, box)) continue;
     if (boxGap(doubleBox, other.box) < ARM_GAP) return false;
   }
   return true;
@@ -351,10 +537,11 @@ function fits(
 ): boolean {
   if (!insideHard(box) || (quadrant && !inQuadrant(box, home))) return false;
   if (phone && !insidePhone(box)) return false;
-  if (overlapsAny(box, occupants.map((item) => item.box))) return false;
+  if (overlapsAny(box, placedBoxes(occupants))) return false;
+  if (hitsHold(box, occupants)) return false;
   if (intersectsBox(box, centre)) return false;
   for (const other of occupants) {
-    if (other.arm === null || sameBox(other.box, prev)) continue;
+    if (other.reserved || other.arm === null || sameBox(other.box, prev)) continue;
     if (boxGap(box, other.box) < ARM_GAP) return false;
   }
   return true;
@@ -501,6 +688,19 @@ export function boxGap(a: LayoutBox, b: LayoutBox): number {
 
 function overlapsAny(box: LayoutBox, others: readonly LayoutBox[]): boolean {
   return others.some((other) => boxesOverlap(box, other));
+}
+
+function placedBoxes(occupants: readonly Occupant[]): LayoutBox[] {
+  return occupants.filter((item) => !item.reserved).map((item) => item.box);
+}
+
+/** A held follower cell may be taken only by that exact follower. */
+function hitsHold(box: LayoutBox, occupants: readonly Occupant[]): boolean {
+  for (const other of occupants) {
+    if (!other.reserved || sameBox(other.box, box)) continue;
+    if (boxesOverlap(box, other.box) || boxGap(box, other.box) < ARM_GAP) return true;
+  }
+  return false;
 }
 
 function fitAround(boxes: LayoutBox[]): LayoutBox {

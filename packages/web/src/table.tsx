@@ -178,11 +178,12 @@ export function Table({
   const hotEnds = new Set(armed ? focusPlays.map((play) => play.endId) : []);
   const dropLead = dragTileId !== null && hotEnds.has("lead");
   const slotKey = armed ? [...hotEnds].sort().join(",") : "";
+  const previewDouble = Boolean(focusTile && focusTile.split("-")[0] === focusTile.split("-")[1]);
   const slotBoxes = useMemo(() => {
     if (!layout || !slotKey) return NO_SLOTS;
     const ids = new Set(slotKey.split(","));
-    return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end), id: end.id }));
-  }, [layout, slotKey]);
+    return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end, previewDouble), id: end.id }));
+  }, [layout, slotKey, previewDouble]);
   const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
   const pop = useScorePop(view.lastPlay);
   const popAt = useAnchor(stageRef, layout, frame, scale, pop?.tileId ?? null, pop?.endId ?? null);
@@ -295,12 +296,17 @@ export function Table({
   }
 }
 
-function nextSlotBox(layout: BoardLayout, end: PlacedEnd): LayoutBox {
+function nextSlotBox(layout: BoardLayout, end: PlacedEnd, isDouble: boolean): LayoutBox {
   const tip = [...layout.tiles].reverse().find((tile) => tile.arm === end.id);
-  if (tip) return straightBox(tip, tip.direction, false);
-  const center = layout.tiles[0];
-  if (!center) return end;
-  return straightBox(center, end.id, false);
+  if (!tip) {
+    const center = layout.tiles[0];
+    if (!center) return end;
+    return straightBox(center, end.id, isDouble);
+  }
+  // A double, and the tile played on a double, stay on the current line.
+  const tipIsDouble = tip.direction === "north" || tip.direction === "south" ? tip.w > tip.h : tip.h > tip.w;
+  if (isDouble || tipIsDouble) return straightBox(tip, tip.direction, isDouble);
+  return layout.previews[end.id] ?? straightBox(tip, tip.direction, false);
 }
 
 interface ScreenBox {
