@@ -3,6 +3,7 @@ import {
   applyIntent,
   beginHand,
   chooseBotIntent,
+  legalIntents,
   skipTurn,
   createMatch,
   currentPlayerId,
@@ -156,6 +157,15 @@ const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
 
 /** Computers wait this long before they play, so a person can watch the tile. */
 export const BOT_TURN_MS = 2_000;
+
+/**
+ * A short think, a little longer when there are more legal moves.
+ * One choice is under a second. A crowded hand stays inside the old two-second cap.
+ */
+export function botThinkMs(choices: number): number {
+  const extra = Math.max(0, Math.floor(choices) - 1);
+  return Math.min(BOT_TURN_MS, 980 + extra * 130);
+}
 
 /** How long a quick table waits before it offers to fill empty seats with computers. */
 export const QUICK_WAIT_MS = 60_000;
@@ -916,7 +926,9 @@ export class Hub {
     if (!turnId) return;
     const seat = room.seats.find((candidate) => candidate.id === turnId);
     if (!seat?.bot) return;
-    const wait = seat.accountBot ? Math.max(0, this.accountBotPace()) : Math.max(0, this.botPace());
+    const paced = seat.accountBot ? Math.max(0, this.accountBotPace()) : Math.max(0, this.botPace());
+    const choices = legalIntents(room.match, turnId).length;
+    const wait = !seat.accountBot && paced === BOT_TURN_MS ? botThinkMs(choices) : paced;
     const timer = setTimeout(() => {
       this.botTimers.delete(room.id);
       this.playBot(room.id, seat.id);

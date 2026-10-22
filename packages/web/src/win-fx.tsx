@@ -257,7 +257,9 @@ export function useHandCelebration(
           }, Math.max(0, lastLandMs(planNow))),
         );
       }
-      timers.current.push(window.setTimeout(goBannerOrSheet, planNow.holdMs));
+      const land = lastLandMs(planNow);
+      const bannerAt = land >= 0 ? land + 200 : planNow.holdMs;
+      timers.current.push(window.setTimeout(goBannerOrSheet, bannerAt));
     };
     startPipsRef.current = startPips;
 
@@ -267,7 +269,9 @@ export function useHandCelebration(
         const lock = handNow.reason === "locked";
         playFeel(lock ? "lock" : "domino", reducedNow ? 0 : 150);
         feelPulse(lock ? [18, 40, 18, 50, 24] : [28, 36, 40]);
-        timers.current.push(window.setTimeout(startPips, spokenMs));
+        // The word confirms the moment. The board reaction starts while it is still up.
+        const boardAt = reducedNow ? 0 : Math.min(460, spokenMs);
+        timers.current.push(window.setTimeout(startPips, boardAt));
         return;
       }
       startPips();

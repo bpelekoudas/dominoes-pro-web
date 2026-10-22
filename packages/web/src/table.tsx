@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
-  boardShift,
-  cameraScale,
+  actionFocus,
   chainBounds,
   clearanceInsets,
+  followCamera,
   handOverPlacement,
   landedTileBox,
   zoneInsets,
@@ -103,13 +103,24 @@ export function Table({
   const [scale, setScale] = useState(1);
   const [lift, setLift] = useState(0);
   const [reserve, setReserve] = useState<AxisInsets>({ top: 0, right: 0, bottom: 0, left: 0 });
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [offscreen, setOffscreen] = useState({ top: false, right: false, bottom: false, left: false });
+  const [camMode, setCamMode] = useState<"fit" | "follow">("fit");
+  const [overview, setOverview] = useState(false);
+  const [punch, setPunch] = useState(1);
+  const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
+  const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
   const clearance = clearanceInsets(reserve);
-  const shift = boardShift(clearance);
+  const shift = { x: pan.x + nudge.x, y: pan.y + nudge.y };
+  const shownScale = scale * nudge.zoom;
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
   const frozen = useRef(false);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const handKey = `${view.gameNumber}:${view.handNumber}`;
   const handOver = view.phase === "between" || view.phase === "over";
   const lastTileId = view.lastPlay?.tileId ?? null;
@@ -138,18 +149,28 @@ export function Table({
       const bounds = chainBounds(layout.tiles, 0);
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
-      const newHand = held.current?.hand !== handKey;
-      const next = cameraScale({
-        bounds,
+      const focus = actionFocus(layout.tiles, layout.ends, lastTileId);
+      const anchorTile = layout.tiles.find((tile) => tile.tileId === lastTileId) ?? layout.tiles[layout.tiles.length - 1];
+      const shot = followCamera({
+        frame: bounds,
+        focus,
         felt: { w: width, h: height },
         screenWidth,
-        previous: newHand ? null : (held.current?.scale ?? null),
-        newHand,
         reserve: nextReserve,
+        overview: handOver || overview,
+        punch,
+        anchor: anchorTile ? { x: anchorTile.x + anchorTile.w / 2, y: anchorTile.y + anchorTile.h / 2 } : undefined,
       });
-      held.current = { hand: handKey, scale: next };
+      held.current = { hand: handKey, scale: shot.scale };
       frozen.current = handOver;
-      setScale((current) => (Math.abs(current - next) < 0.01 ? current : next));
+      setScale((current) => (Math.abs(current - shot.scale) < 0.01 ? current : shot.scale));
+      setPan((current) => (Math.abs(current.x - shot.shiftX) < 0.5 && Math.abs(current.y - shot.shiftY) < 0.5 ? current : { x: shot.shiftX, y: shot.shiftY }));
+      setCamMode(shot.mode);
+      setOffscreen((current) =>
+        current.top === shot.off.top && current.right === shot.off.right && current.bottom === shot.off.bottom && current.left === shot.off.left
+          ? current
+          : shot.off,
+      );
       if (!armOnce.current) {
         armOnce.current = true;
         requestAnimationFrame(() => setCameraArmed(true));
@@ -163,7 +184,7 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, handOver, handKey]);
+  }, [layout, handOver, handKey, lastTileId, overview, punch]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -230,17 +251,85 @@ export function Table({
     }
     return faces;
   }, [layout, focusTile, slotBoxes]);
-  const slots = useScreenBoxes(stageRef, frame, scale, slotBoxes);
+  const slots = useScreenBoxes(stageRef, frame, shownScale, slotBoxes);
   const feel = useLiveFeel(view);
   const pop = useScorePop(view.lastPlay);
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
-  const landed = useTileCenter(viewportRef, layout, frame, scale, shift.x, shift.y + lift, lastTileId);
+  const landed = useTileCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, lastTileId);
+  const endsAt = useEndCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, (pop?.awarded ?? 0) >= 10);
   // Keep the state object. A fresh literal would restart the shatter on every render.
   const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
-  const popAt = pop && landed && pop.tileId === lastTileId ? { left: landed.x, top: landed.y, place: "tile" as const } : null;
+  const popFrom = endsAt ?? landed;
+  const popAt = pop && popFrom && pop.tileId === lastTileId ? { left: popFrom.x, top: popFrom.y, place: "tile" as const } : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
+
+  useEffect(() => {
+    const awarded = view.lastPlay?.awarded ?? 0;
+    if (awarded < 10) return;
+    setPunch(awarded >= 25 ? 1.12 : 1.06);
+    const timer = window.setTimeout(() => setPunch(1), 720);
+    return () => window.clearTimeout(timer);
+  }, [view.lastPlay?.seq, view.lastPlay?.awarded]);
+
+  useEffect(() => {
+    if (!overview) return;
+    const timer = window.setTimeout(() => setOverview(false), 1700);
+    return () => window.clearTimeout(timer);
+  }, [overview]);
+
+  function onCamDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (target instanceof Element && target.closest("button, a, .end-cap")) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) drag.current = { x: event.clientX, y: event.clientY, moved: false };
+    if (pointers.current.size >= 2) {
+      const pts = [...pointers.current.values()];
+      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
+      pinch.current = { dist, zoom: nudge.zoom };
+    }
+  }
+
+  function onCamMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!pointers.current.has(event.pointerId)) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size >= 2 && pinch.current) {
+      const pts = [...pointers.current.values()];
+      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
+      const zoom = Math.min(1.85, Math.max(0.55, pinch.current.zoom * (dist / pinch.current.dist)));
+      setUserCam("drag");
+      setNudge((current) => ({ ...current, zoom }));
+      return;
+    }
+    const start = drag.current;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (!start.moved && Math.hypot(dx, dy) < 8) return;
+    start.moved = true;
+    setUserCam("drag");
+    setNudge({ x: dx, y: dy, zoom: nudge.zoom });
+  }
+
+  function onCamUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = drag.current;
+    pointers.current.delete(event.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size > 0) return;
+    drag.current = null;
+    if (start && !start.moved) {
+      setNudge({ x: 0, y: 0, zoom: 1 });
+      setUserCam("follow");
+      setOverview((value) => !value);
+      return;
+    }
+    if (!start?.moved) return;
+    window.setTimeout(() => {
+      setNudge({ x: 0, y: 0, zoom: 1 });
+      setUserCam("follow");
+    }, 1500);
+  }
 
   return (
     <div
@@ -251,7 +340,14 @@ export function Table({
       data-open-total={view.openTotal}
       data-knock-streak={view.knockStreak}
       data-table-id={view.tableId}
-      data-board-scale={scale.toFixed(2)}
+      data-board-scale={shownScale.toFixed(2)}
+      data-tile-px={(TILE_SHORT * shownScale).toFixed(0)}
+      data-cam-mode={handOver || overview ? "overview" : camMode}
+      data-cam-user={userCam}
+      onPointerDown={onCamDown}
+      onPointerMove={onCamMove}
+      onPointerUp={onCamUp}
+      onPointerCancel={onCamUp}
       data-board-lift={String(lift)}
       data-fit-top={clearance.top.toFixed(0)}
       data-fit-right={clearance.right.toFixed(0)}
@@ -263,15 +359,23 @@ export function Table({
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
+      {offscreen.top ? <i className="cam-edge cam-n" aria-hidden="true" /> : null}
+      {offscreen.right ? <i className="cam-edge cam-e" aria-hidden="true" /> : null}
+      {offscreen.bottom ? <i className="cam-edge cam-s" aria-hidden="true" /> : null}
+      {offscreen.left ? <i className="cam-edge cam-w" aria-hidden="true" /> : null}
       {layout && frame ? (
         <div
+          className="board-clip"
+          style={{ clipPath: `inset(${clearance.top}px ${clearance.right}px ${clearance.bottom}px ${clearance.left}px)` }}
+        >
+        <div
           className="board-scaler"
-          style={{ width: frame.w * scale, height: frame.h * scale, transform: `translate(${shift.x}px, ${shift.y + lift}px)` }}
+          style={{ width: frame.w * shownScale, height: frame.h * shownScale, transform: `translate(${shift.x}px, ${shift.y + lift}px)` }}
         >
           <div
             className="board-stage"
             ref={stageRef}
-            style={{ width: frame.w, height: frame.h, transform: `scale(${scale})` }}
+            style={{ width: frame.w, height: frame.h, transform: `scale(${shownScale})` }}
           >
             {layout.tiles.map((tile) => (
               <div
@@ -301,6 +405,7 @@ export function Table({
               );
             })}
           </div>
+        </div>
         </div>
       ) : null}
       {moment && anchor ? (
@@ -530,6 +635,43 @@ function useBigMoment(
     setMoment({ key: `demo-${replayToken}`, awarded: demoAward(), tileId: tileRef.current, effect: "glass" });
   }, [replayToken]);
   return { moment, dismissMoment: dismiss };
+}
+
+function useEndCenter(
+  viewportRef: { current: HTMLDivElement | null },
+  layout: BoardLayout | null,
+  frame: LayoutBox | null,
+  scale: number,
+  shiftX: number,
+  shiftY: number,
+  active: boolean,
+): { x: number; y: number } | null {
+  const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!active || !viewport || !layout || !frame || layout.ends.length === 0) {
+      setSpot(null);
+      return;
+    }
+    const felt = viewport.getBoundingClientRect();
+    let x = 0;
+    let y = 0;
+    for (const end of layout.ends) {
+      const box = landedTileBox(
+        { left: felt.left, top: felt.top, width: felt.width, height: felt.height },
+        frame,
+        scale,
+        shiftX,
+        shiftY,
+        end,
+      );
+      x += box.x;
+      y += box.y;
+    }
+    const next = { x: x / layout.ends.length, y: y / layout.ends.length };
+    setSpot((current) => (current && Math.abs(current.x - next.x) < 0.5 && Math.abs(current.y - next.y) < 0.5 ? current : next));
+  }, [viewportRef, layout, frame, scale, shiftX, shiftY, active]);
+  return spot;
 }
 
 function useTileCenter(

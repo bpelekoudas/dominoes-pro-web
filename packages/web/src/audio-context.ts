@@ -1,5 +1,7 @@
 let context: AudioContext | null = null;
 let unlocked = false;
+let master: GainNode | null = null;
+let tap: MediaStreamAudioDestinationNode | null = null;
 
 function createContext(): AudioContext | null {
   if (context) return context;
@@ -21,4 +23,25 @@ export function getAudioContext(): AudioContext | null {
 export function unlockAudio(): AudioContext | null {
   unlocked = true;
   return getAudioContext();
+}
+
+/** Game effects share this node, so a recording tap hears the same clock as the speakers. */
+export function masterOut(ctx: AudioContext): GainNode {
+  if (!master || master.context !== ctx) {
+    master = ctx.createGain();
+    master.gain.value = 1;
+    master.connect(ctx.destination);
+    tap = null;
+  }
+  return master;
+}
+
+/** A copy of the game-effect bus. Music stays on the speakers only. */
+export function attachAudioTap(ctx: AudioContext): MediaStream {
+  const output = masterOut(ctx);
+  if (!tap || tap.context !== ctx) {
+    tap = ctx.createMediaStreamDestination();
+    output.connect(tap);
+  }
+  return tap.stream;
 }

@@ -1,4 +1,4 @@
-import { getAudioContext, unlockAudio } from "./audio-context.js";
+import { getAudioContext, masterOut, unlockAudio } from "./audio-context.js";
 import { SOUND_FILES, type Cue, type SoundId, cuesForPlay } from "./cues.js";
 import { duckMusic } from "./music.js";
 
@@ -100,7 +100,7 @@ function startCue(cue: Cue): void {
   const wobble = cue.vary === "none" ? 1 : 0.86 + Math.random() * 0.28;
   gain.gain.value = base * wobble;
   source.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(masterOut(ctx));
   source.start(ctx.currentTime + cue.delay);
 }
 
@@ -124,7 +124,7 @@ export function playUiClick(): void {
   gain.gain.exponentialRampToValueAtTime(0.045, start + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.07);
   osc.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(masterOut(ctx));
   osc.start(start);
   osc.stop(start + 0.08);
 }
@@ -167,7 +167,7 @@ export function playWinSting(kind: "hand" | "game" | "match" | "lineup"): void {
       gain.gain.exponentialRampToValueAtTime(peak, at + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, at + hold);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(masterOut(ctx));
       osc.start(at);
       osc.stop(at + hold + 0.02);
     }

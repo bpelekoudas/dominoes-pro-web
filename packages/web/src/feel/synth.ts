@@ -1,4 +1,4 @@
-import { getAudioContext } from "../audio-context.js";
+import { getAudioContext, masterOut } from "../audio-context.js";
 import { isMuted } from "../sound.js";
 import type { FeelSound } from "./ladder.js";
 
@@ -16,7 +16,7 @@ function tone(context: AudioContext, freq: number, at: number, dur: number, type
   gain.gain.exponentialRampToValueAtTime(peak, at + 0.012);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   osc.connect(gain);
-  gain.connect(context.destination);
+  gain.connect(masterOut(context));
   osc.start(at);
   osc.stop(at + dur + 0.02);
 }
@@ -41,7 +41,7 @@ function noise(context: AudioContext, at: number, dur: number, peak: number, fre
   gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   source.connect(filter);
   filter.connect(gain);
-  gain.connect(context.destination);
+  gain.connect(masterOut(context));
   source.start(at);
   source.stop(at + dur + 0.02);
 }
@@ -63,10 +63,11 @@ export function playFeel(sound: FeelSound, silenceMs = 0): void {
       return;
     }
     if (sound === "knock") {
-      noise(context, start, 0.07, 0.34, 280);
-      tone(context, 140, start, 0.08, "sine", 0.08);
-      noise(context, start + 0.16, 0.07, 0.3, 240);
-      tone(context, 120, start + 0.16, 0.09, "sine", 0.07);
+      // Contacts match the seat knock: down at 80ms, again at 240ms.
+      noise(context, start + 0.08, 0.07, 0.34, 280);
+      tone(context, 140, start + 0.08, 0.08, "sine", 0.08);
+      noise(context, start + 0.24, 0.07, 0.3, 240);
+      tone(context, 120, start + 0.24, 0.09, "sine", 0.07);
       return;
     }
     if (sound === "score") {

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { attachAudioTap, getAudioContext } from "../audio-context";
+import { unlockSound } from "../sound";
 import type { PlayerView } from "@uhoh/rules";
 import { emptyBoard, openEnds, openScore, placeTile, type BoardState } from "../../../rules/src/board.js";
 import { scoreDomino, scoreLocked } from "../../../rules/src/score.js";
@@ -7,7 +9,11 @@ import { tileById } from "../../../rules/src/tiles.js";
 /** Real-table debug reel. Off unless the page is opened with ?feel=play, hit, or seats. */
 export function feelTableRequested(): boolean {
   const feel = new URLSearchParams(location.search).get("feel");
-  return feel === "play" || feel === "hit" || feel === "seats";
+  return feel === "play" || feel === "hit" || feel === "seats" || feel === "pass";
+}
+
+export function feelPassRequested(): boolean {
+  return new URLSearchParams(location.search).get("feel") === "pass";
 }
 
 export function feelHitRequested(): boolean {
@@ -560,9 +566,82 @@ export function crowdView(): PlayerView {
   });
 }
 
+const SEATS: Array<keyof Cast> = ["you", "rio", "sam", "jordan"];
+
+/** Ordinary growth, then a score, a lock, and a domino that crosses the target. */
+export function passBeats(): FeelBeat[] {
+  const beats: FeelBeat[] = [];
+  const scores: Cast = { you: 20, rio: 35, sam: 15, jordan: 10 };
+  const counts: Cast = { you: 5, rio: 5, sam: 4, jordan: 4 };
+  for (let index = 1; index <= CROWD.length; index += 1) {
+    const chain = CROWD.slice(0, index);
+    const step = chain[index - 1]!;
+    const actor = SEATS[(index - 1) % SEATS.length]!;
+    const at = (index - 1) * 1400;
+    beats.push({
+      at,
+      scene: index === CROWD.length ? "chain" : "grow",
+      view: makeView({
+        chain,
+        hand: ["5-5", "4-4"],
+        scores,
+        counts,
+        turn: SEATS[index % SEATS.length]!,
+        handNumber: 1,
+        play: { playerId: actor, tileId: step[1], endId: step[0], awarded: 0, seq: index },
+      }),
+    });
+  }
+  const base = CROWD.length * 1400;
+  const drama = feelBeats().filter((beat) => beat.scene !== "table");
+  const shift = base - (drama[0]?.at ?? 0);
+  for (const beat of drama) {
+    beats.push({ ...beat, at: beat.at + shift });
+  }
+  return beats;
+}
+
 export function useFeelPlay(): FeelBeat {
-  const beats = useMemo(() => (feelHitRequested() ? hitBeats() : feelBeats()), []);
+  const beats = useMemo(() => (feelHitRequested() ? hitBeats() : feelPassRequested() ? passBeats() : feelBeats()), []);
   const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("audio") !== "1") return;
+    let dead = false;
+    let rec: MediaRecorder | null = null;
+    const chunks: Blob[] = [];
+    const start = () => {
+      if (dead || rec) return;
+      unlockSound();
+      const ctx = getAudioContext();
+      if (!ctx || ctx.state !== "running" || typeof MediaRecorder === "undefined") return;
+      rec = new MediaRecorder(attachAudioTap(ctx));
+      rec.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      rec.start(250);
+    };
+    start();
+    const timer = window.setInterval(start, 200);
+    const host = window as unknown as { __uhohAudio?: () => Promise<string> };
+    host.__uhohAudio = () =>
+      new Promise((resolve) => {
+        const finish = () => {
+          const blob = new Blob(chunks, { type: rec?.mimeType || "audio/webm" });
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? ""));
+          reader.readAsDataURL(blob);
+        };
+        if (rec && rec.state !== "inactive") {
+          rec.onstop = finish;
+          rec.stop();
+        } else finish();
+      });
+    return () => {
+      dead = true;
+      window.clearInterval(timer);
+      delete host.__uhohAudio;
+    };
+  }, [beats]);
   useEffect(() => {
     document.documentElement.dataset.feelPlay = "1";
     const timers = beats.map((beat, beatIndex) => window.setTimeout(() => setIndex(beatIndex), beat.at));

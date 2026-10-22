@@ -99,7 +99,8 @@ export function useLiveFeel(view: PlayerView): LiveFeel {
     if (awarded >= 10) {
       setScoring(true);
       window.setTimeout(() => setScoring(false), 520);
-      if (feelTier !== "score-rare") playFeel(reaction.spec.sound, reaction.spec.silenceMs);
+      // The recorded cha-ching is the reward, timed to the chip. The rare
+      // score's glass already has that ching, so it is not played twice.
       pulse(reaction.haptic);
       const seat = document.querySelector<HTMLElement>(`.seat-chip[data-player-id="${CSS.escape(play?.playerId ?? "")}"]`);
       seat?.setAttribute("data-feel", "score");

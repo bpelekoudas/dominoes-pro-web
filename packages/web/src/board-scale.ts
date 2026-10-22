@@ -1,4 +1,4 @@
-import { FIT_MARGIN, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
+import { FIT_MARGIN, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -91,6 +91,14 @@ export function clearanceInsets(reserve: AxisInsets, floor = CAMERA_EDGE): AxisI
     left: Math.max(reserve.left, floor),
   };
 }
+
+/**
+ * Short side of a tile, in screen pixels, once a chain no longer fits
+ * at a comfortable size. Phone and Fold stay in this range so a long
+ * snake is followed instead of watched from above.
+ */
+export const READABLE_PHONE_PX = 34;
+export const READABLE_WIDE_PX = 44;
 
 /** Move a felt-centered chain into an asymmetric safe rect. */
 export function boardShift(insets: AxisInsets): { x: number; y: number } {
@@ -221,6 +229,106 @@ export function cameraScale(input: CameraInput): number {
   // Still clear of the edge. Hold, including after the felt grows.
   if (previous <= dangerFit + 1e-6) return Math.min(previous, edgeFit);
   return Math.min(previous, target);
+}
+
+export interface FollowResult {
+  scale: number;
+  shiftX: number;
+  shiftY: number;
+  /** "fit" shows the whole chain. "follow" keeps the action large and pans. */
+  mode: "fit" | "follow";
+  off: { top: boolean; right: boolean; bottom: boolean; left: boolean };
+}
+
+/** Tiles and open ends clustered around the play. The rest can leave the frame. */
+export function actionFocus(
+  tiles: readonly { x: number; y: number; w: number; h: number; tileId?: string }[],
+  ends: readonly { x: number; y: number; w: number; h: number }[],
+  lastTileId: string | null,
+): { x: number; y: number; w: number; h: number } {
+  if (tiles.length === 0) return { x: -40, y: -40, w: 80, h: 80 };
+  const last = tiles.find((tile) => tile.tileId === lastTileId) ?? tiles[tiles.length - 1]!;
+  const cx = last.x + last.w / 2;
+  const cy = last.y + last.h / 2;
+  // A tight cluster. A wider net made the play shrink so the whole neighborhood fit.
+  const reach = TILE_LONG * 1.8;
+  const near = tiles.filter((tile) => Math.hypot(tile.x + tile.w / 2 - cx, tile.y + tile.h / 2 - cy) <= reach);
+  const nearEnds = ends.filter((end) => Math.hypot(end.x + end.w / 2 - cx, end.y + end.h / 2 - cy) <= reach + TILE_LONG);
+  return chainBounds(nearEnds.length > 0 ? [...near, ...nearEnds] : near, 8);
+}
+
+/**
+ * Keep the action large. When the whole chain still fits at a readable
+ * size, show it. Otherwise hold that size and pan so the last play and
+ * the nearby open ends sit in the safe rect (felt minus seat badges).
+ * Overview pulls back to the whole chain. Punch scales up slightly.
+ */
+export function followCamera(input: {
+  frame: { x: number; y: number; w: number; h: number };
+  focus: { x: number; y: number; w: number; h: number };
+  felt: FeltSize;
+  screenWidth: number;
+  reserve?: AxisInsets;
+  overview?: boolean;
+  punch?: number;
+  /** Screen-space point, in chain coordinates, that follow mode keeps in frame. */
+  anchor?: { x: number; y: number };
+}): FollowResult {
+  const reserve = input.reserve ?? NO_INSET;
+  const insets = clearanceInsets(reserve);
+  const screen = Math.max(1, input.screenWidth);
+  const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const readable = (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) / TILE_SHORT;
+  const full = scaleForAxis(input.frame, input.felt, insets);
+  const focusFit = scaleForAxis(input.focus, input.felt, insets);
+  const overview = input.overview === true;
+  let mode: "fit" | "follow" = "follow";
+  let scale: number;
+  if (overview || full >= readable * 0.98) {
+    mode = "fit";
+    scale = Math.min(open, full);
+  } else {
+    // Hold a readable tile. If the cluster cannot fit at that size, the
+    // extra tiles leave the frame instead of shrinking the play.
+    scale = Math.min(open, Math.max(readable, Math.min(focusFit, open)));
+  }
+  const punch = input.punch ?? 1;
+  if (!overview && punch > 1) scale = Math.min(open * 1.15, scale * punch);
+
+  const focusBox = mode === "fit" ? input.frame : input.focus;
+  const focusCx = mode === "follow" && input.anchor ? input.anchor.x : focusBox.x + focusBox.w / 2;
+  const focusCy = mode === "follow" && input.anchor ? input.anchor.y : focusBox.y + focusBox.h / 2;
+  const chainW = input.frame.w * scale;
+  const chainH = input.frame.h * scale;
+  const safeCx = insets.left + (input.felt.w - insets.left - insets.right) / 2;
+  const safeCy = insets.top + (input.felt.h - insets.top - insets.bottom) / 2;
+  let ox = safeCx - (focusCx - input.frame.x) * scale;
+  let oy = safeCy - (focusCy - input.frame.y) * scale;
+  const safeW = input.felt.w - insets.left - insets.right;
+  const safeH = input.felt.h - insets.top - insets.bottom;
+  if (chainW <= safeW) ox = safeCx - chainW / 2;
+  else ox = Math.min(insets.left, Math.max(input.felt.w - insets.right - chainW, ox));
+  if (chainH <= safeH) oy = safeCy - chainH / 2;
+  else oy = Math.min(insets.top, Math.max(input.felt.h - insets.bottom - chainH, oy));
+  const seenX = ox + (focusCx - input.frame.x) * scale;
+  const seenY = oy + (focusCy - input.frame.y) * scale;
+  const margin = 8;
+  if (seenX < insets.left + margin) ox += insets.left + margin - seenX;
+  if (seenX > input.felt.w - insets.right - margin) ox -= seenX - (input.felt.w - insets.right - margin);
+  if (seenY < insets.top + margin) oy += insets.top + margin - seenY;
+  if (seenY > input.felt.h - insets.bottom - margin) oy -= seenY - (input.felt.h - insets.bottom - margin);
+  return {
+    scale,
+    shiftX: ox - (input.felt.w - chainW) / 2,
+    shiftY: oy - (input.felt.h - chainH) / 2,
+    mode,
+    off: {
+      left: ox < insets.left - 1,
+      right: ox + chainW > input.felt.w - insets.right + 1,
+      top: oy < insets.top - 1,
+      bottom: oy + chainH > input.felt.h - insets.bottom + 1,
+    },
+  };
 }
 
 /** Gold ring clearance between the last tile and the hand-over sheet. */

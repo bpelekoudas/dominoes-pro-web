@@ -495,7 +495,11 @@ export function Game({
     const play = view.lastPlay;
     // 20+ is the UH-OH moment, which plays the slam, the glass, and the cha-ching together.
     if (!play || bigMomentLevel(play.awarded)) return;
-    playCues(cuesForPlay(play.awarded, play.tileId));
+    const opponent = play.playerId !== view.yourId;
+    const cues = cuesForPlay(play.awarded, play.tileId).map((cue) =>
+      opponent && (cue.id === "clack" || cue.id === "clack-heavy") ? { ...cue, delay: cue.delay + 0.42 } : cue,
+    );
+    playCues(cues);
   }, [view.lastPlay?.seq]);
   useEffect(() => {
     if (yourTurn) playCues(cuesForTurn());
@@ -528,9 +532,14 @@ export function Game({
           </button>
         ) : null}
         <p className="series-line">
-          {playing
-            ? `Bo${view.settings.seriesLength} · G${view.gameNumber} · H${view.handNumber} · to ${view.settings.targetScore}`
-            : "Lobby"}
+          {playing ? (
+            <>
+              {`Bo${view.settings.seriesLength} · G${view.gameNumber} · H${view.handNumber} · to `}
+              <SeriesTarget view={view} />
+            </>
+          ) : (
+            "Lobby"
+          )}
         </p>
         {accountUser ? (
           <AccountChip compact user={accountUser} onOpen={onAccount} />
@@ -963,6 +972,14 @@ function EdgeBadge({
       {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
     </div>
   );
+}
+
+/** The target lights when a counted chip crosses it, in step with the readout. */
+function SeriesTarget({ view }: { view: PlayerView }) {
+  const players = [...view.players].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const shown = players.map((player) => useShownScore(player.id, player.score).score);
+  const hot = shown.some((score) => score >= view.settings.targetScore);
+  return <em data-hot={hot ? "true" : "false"}>{view.settings.targetScore}</em>;
 }
 
 function SeatChip({

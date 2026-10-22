@@ -13,7 +13,7 @@ import {
 } from "@uhoh/rules";
 import { Store } from "./db.js";
 import { Cosmetics } from "./cosmetics.js";
-import { BOT_TURN_MS, Hub, type ServerMessage } from "./hub.js";
+import { BOT_TURN_MS, Hub, botThinkMs, type ServerMessage } from "./hub.js";
 
 function latestView(messages: ServerMessage[]): PlayerView | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -316,6 +316,9 @@ describe("rooms", () => {
 
   it("waits two seconds before a computer plays", () => {
     expect(BOT_TURN_MS).toBe(2_000);
+    expect(botThinkMs(1)).toBe(980);
+    expect(botThinkMs(4)).toBe(980 + 3 * 130);
+    expect(botThinkMs(20)).toBe(2_000);
   });
 
   it("only accepts a preset line, and only one every two seconds", () => {

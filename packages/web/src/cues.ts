@@ -1,5 +1,6 @@
 import { SLAM_MS } from "./glass.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
+import { scorePopWindow } from "./feel/score-time.js";
 
 /** Recorded samples in public/sounds. See SOUNDS.md. */
 export const SOUND_FILES = {
@@ -34,14 +35,15 @@ function isDouble(tileId: string): boolean {
  */
 export function cuesForPlay(awarded: number, tileId: string): Cue[] {
   if (bigMomentLevel(awarded)) {
+    const land = scorePopWindow(awarded).land / 1000;
     return [
       { id: "clack-heavy", delay: IMPACT_S, vary: "heavy" },
       { id: "glass", delay: IMPACT_S, vary: "none" },
-      { id: "ching", delay: IMPACT_S + 0.04, vary: "none" },
+      { id: "ching", delay: Math.max(IMPACT_S, land), vary: "none" },
     ];
   }
   const cues: Cue[] = [{ id: isDouble(tileId) ? "clack-heavy" : "clack", delay: 0, vary: isDouble(tileId) ? "heavy" : "light" }];
-  if (awarded > 0) cues.push({ id: "ching", delay: 0.04, vary: "none" });
+  if (awarded > 0) cues.push({ id: "ching", delay: scorePopWindow(awarded).land / 1000, vary: "none" });
   return cues;
 }
 

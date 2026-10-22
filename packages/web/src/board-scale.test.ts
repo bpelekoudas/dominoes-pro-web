@@ -10,8 +10,11 @@ import {
   FELT_PAD_Y,
   fitScale,
   handOverPlacement,
+  actionFocus,
+  followCamera,
   landedTileBox,
   MIN_TILE_FRAC,
+  READABLE_PHONE_PX,
   nextBoardScale,
   OPEN_TILE_FRAC,
   PHONE_SCALE_CAP,
@@ -228,5 +231,73 @@ describe("board scale", () => {
     expect(bounds.x).toBeLessThanOrEqual(tiles[0]!.x - FIT_MARGIN);
     expect(bounds.y).toBeLessThanOrEqual(-36 - FIT_MARGIN);
     expect(chainBounds([]).w).toBe(80);
+  });
+
+  it("follows a long chain at a readable size and keeps the play inside the badge clearance", () => {
+    const chain = Array.from({ length: 18 }, (_, index) => ({
+      tileId: `t${index}`,
+      x: 0,
+      y: -index * 72,
+      w: 36,
+      h: 72,
+    }));
+    const frame = chainBounds(chain, 0);
+    const focus = actionFocus(chain, [], "t17");
+    const phone = followCamera({
+      frame,
+      focus,
+      felt: { w: 390, h: 640 },
+      screenWidth: 390,
+      reserve: { top: 70, right: 0, bottom: 0, left: 0 },
+    });
+    expect(phone.mode).toBe("follow");
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    const insets = clearanceInsets({ top: 70, right: 0, bottom: 0, left: 0 });
+    const chainH = frame.h * phone.scale;
+    const oy = (640 - chainH) / 2 + phone.shiftY;
+    const focusCy = focus.y + focus.h / 2;
+    const seenY = oy + (focusCy - frame.y) * phone.scale;
+    expect(seenY).toBeGreaterThanOrEqual(insets.top);
+    expect(seenY).toBeLessThanOrEqual(640 - insets.bottom);
+    const wide = followCamera({
+      frame,
+      focus,
+      felt: { w: 390, h: 640 },
+      screenWidth: 390,
+      overview: true,
+    });
+    expect(wide.mode).toBe("fit");
+    expect(wide.scale).toBeLessThan(phone.scale);
+  });
+
+  it("holds a readable tile on a wide chain and keeps the last tile in the safe rect", () => {
+    const tiles = [];
+    for (let index = 0; index < 10; index += 1) {
+      tiles.push({ tileId: `h${index}`, x: index * 70, y: 0, w: 72, h: 36 });
+      tiles.push({ tileId: `v${index}`, x: 0, y: -index * 70, w: 36, h: 72 });
+    }
+    const last = { tileId: "last", x: 10 * 70, y: 0, w: 72, h: 36 };
+    tiles.push(last);
+    const frame = chainBounds(tiles, 0);
+    const reserve = { top: 70, right: 40, bottom: 40, left: 40 };
+    const phone = followCamera({
+      frame,
+      focus: actionFocus(tiles, [], "last"),
+      felt: { w: 390, h: 640 },
+      screenWidth: 390,
+      reserve,
+      anchor: { x: last.x + last.w / 2, y: last.y + last.h / 2 },
+    });
+    expect(phone.mode).toBe("follow");
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    const insets = clearanceInsets(reserve);
+    const ox = (390 - frame.w * phone.scale) / 2 + phone.shiftX;
+    const oy = (640 - frame.h * phone.scale) / 2 + phone.shiftY;
+    const seenX = ox + (last.x + last.w / 2 - frame.x) * phone.scale;
+    const seenY = oy + (last.y + last.h / 2 - frame.y) * phone.scale;
+    expect(seenX).toBeGreaterThanOrEqual(insets.left);
+    expect(seenX).toBeLessThanOrEqual(390 - insets.right);
+    expect(seenY).toBeGreaterThanOrEqual(insets.top);
+    expect(seenY).toBeLessThanOrEqual(640 - insets.bottom);
   });
 });
