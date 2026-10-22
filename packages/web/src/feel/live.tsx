@@ -85,9 +85,15 @@ export function useLiveFeel(view: PlayerView): LiveFeel {
       setKnock({ playerId: event.playerId, streak: view.knockStreak, key });
       playFeel(reaction.spec.sound, reaction.spec.silenceMs);
       pulse(reaction.haptic);
-      const seat = document.querySelector<HTMLElement>(`[data-player-id="${CSS.escape(event.playerId)}"]`);
-      seat?.setAttribute("data-feel", view.knockStreak >= 3 ? "knock-tight" : "knock");
-      window.setTimeout(() => seat?.removeAttribute("data-feel"), 420);
+      const feelName = view.knockStreak >= 3 ? "knock-tight" : "knock";
+      const nodes = document.querySelectorAll<HTMLElement>(`[data-player-id="${CSS.escape(event.playerId)}"]`);
+      nodes.forEach((node) => node.setAttribute("data-feel", feelName));
+      const hand = event.playerId === view.yourId ? document.querySelector<HTMLElement>(".hand") : null;
+      hand?.setAttribute("data-feel", feelName);
+      window.setTimeout(() => {
+        nodes.forEach((node) => node.removeAttribute("data-feel"));
+        hand?.removeAttribute("data-feel");
+      }, 640);
       return;
     }
     if (awarded >= 10) {
@@ -95,9 +101,9 @@ export function useLiveFeel(view: PlayerView): LiveFeel {
       window.setTimeout(() => setScoring(false), 520);
       if (feelTier !== "score-rare") playFeel(reaction.spec.sound, reaction.spec.silenceMs);
       pulse(reaction.haptic);
-      const seat = document.querySelector<HTMLElement>(`[data-player-id="${CSS.escape(play?.playerId ?? "")}"]`);
+      const seat = document.querySelector<HTMLElement>(`.seat-chip[data-player-id="${CSS.escape(play?.playerId ?? "")}"]`);
       seat?.setAttribute("data-feel", "score");
-      window.setTimeout(() => seat?.removeAttribute("data-feel"), 360);
+      window.setTimeout(() => seat?.removeAttribute("data-feel"), 420);
     }
   }, [key]);
 
@@ -108,11 +114,11 @@ export function FeelRipple({ knock }: { knock: LiveFeel["knock"] }) {
   const [box, setBox] = useState<{ left: number; top: number; streak: number } | null>(null);
   useEffect(() => {
     if (!knock) return;
-    const seat = document.querySelector<HTMLElement>(`[data-player-id="${CSS.escape(knock.playerId)}"]`);
+    const seat = document.querySelector<HTMLElement>(`.seat-chip[data-player-id="${CSS.escape(knock.playerId)}"]`);
     const rect = seat?.getBoundingClientRect();
     if (!rect) return;
     setBox({ left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, streak: knock.streak });
-    const timer = window.setTimeout(() => setBox(null), 420);
+    const timer = window.setTimeout(() => setBox(null), 680);
     return () => window.clearTimeout(timer);
   }, [knock]);
   if (!box) return null;

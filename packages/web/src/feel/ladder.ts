@@ -66,7 +66,7 @@ const SPECS: Record<FeelTier, TierSpec> = {
   "score-rare": { tier: "score-rare", blockMs: 0, pauseMs: 180, impactMs: 640, word: null, shake: 5, dim: 0.08, haptic: [22, 30, 26], sound: "score-rare", silenceMs: 40 },
   domino: { tier: "domino", blockMs: 0, pauseMs: 200, impactMs: 700, word: "DOMINO!", shake: 6, dim: 0.12, haptic: [28, 36, 40], sound: "domino", silenceMs: 150 },
   locked: { tier: "locked", blockMs: 0, pauseMs: 220, impactMs: 880, word: "UH OH.", shake: 4, dim: 0.28, haptic: [18, 40, 18, 50, 24], sound: "lock", silenceMs: 150 },
-  hand: { tier: "hand", blockMs: 0, pauseMs: 200, impactMs: 1100, word: "HAND WON", shake: 6, dim: 0.16, haptic: [30, 36, 34, 28, 48], sound: "hand", silenceMs: 150 },
+  hand: { tier: "hand", blockMs: 0, pauseMs: 200, impactMs: 1500, word: "HAND WON", shake: 6, dim: 0.16, haptic: [30, 36, 34, 28, 48], sound: "hand", silenceMs: 150 },
   game: { tier: "game", blockMs: 0, pauseMs: 240, impactMs: 2400, word: "YOU WIN", shake: 8, dim: 0.34, haptic: [36, 40, 36, 40, 70], sound: "game", silenceMs: 150 },
   match: { tier: "match", blockMs: 0, pauseMs: 280, impactMs: 2500, word: null, shake: 10, dim: 0.4, haptic: [40, 48, 40, 48, 40, 90], sound: "match", silenceMs: 150 },
 };

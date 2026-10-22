@@ -20,7 +20,7 @@ export function FeelCall({
     const timer = window.setTimeout(() => {
       setBeat("hand");
       playFeel("hand");
-    }, 480);
+    }, 560);
     return () => window.clearTimeout(timer);
   }, [kind, reduced]);
   const text = beat === "uh" ? "UH OH." : beat === "hand" ? "HAND WON" : "DOMINO!";

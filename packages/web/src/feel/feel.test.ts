@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { detectContext, WIRED_CONTEXT, type FeelSnap } from "./context.js";
 import { direct } from "./director.js";
 import { FEEL_TIERS, ROUTINE_TURN_MS, scoreTier, specFor, tierRank } from "./ladder.js";
+import { scorePopWindow } from "./score-time.js";
 import { handTally } from "./tally.js";
 import { knockStreakOf } from "../../../rules/src/view.js";
 
@@ -42,6 +43,11 @@ describe("feel ladder", () => {
     expect(ROUTINE_TURN_MS.after.blocked).toBe(0);
     expect(ROUTINE_TURN_MS.after.opponentArrive).toBe(ROUTINE_TURN_MS.before.opponentArrive);
     expect(ROUTINE_TURN_MS.after.scoreHide).toBeLessThanOrEqual(ROUTINE_TURN_MS.before.scoreHide);
+    const routine = scorePopWindow(10);
+    expect(routine.show).toBe(ROUTINE_TURN_MS.after.scoreShow);
+    expect(routine.hide).toBe(ROUTINE_TURN_MS.after.scoreHide);
+    expect(routine.land).toBeLessThan(routine.hide);
+    expect(scorePopWindow(25).land).toBeGreaterThan(routine.land);
   });
 });
 
@@ -86,10 +92,10 @@ describe("feel context", () => {
       winnerIds: ["you"],
       awards: { you: 25, rio: 0, sam: 0, jordan: 0 },
     });
-    expect(domino.equation).toBe("6 + 9 + 12");
+    expect(domino.equation).toBe("12 + 9 + 6");
     expect(domino.raw).toBe(27);
     expect(domino.awarded).toBe(25);
-    expect(domino.lines).toEqual(["6 + 9 + 12", "27", "25"]);
+    expect(domino.lines).toEqual(["12 + 9 + 6", "27", "25"]);
 
     const locked = handTally({
       reason: "locked",

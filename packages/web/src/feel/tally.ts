@@ -26,9 +26,8 @@ export function handTally(input: {
   awards: Record<string, number>;
 }): HandTally {
   const winners = new Set(input.winnerIds);
-  const everyone = Object.entries(input.pipCounts)
-    .map(([id, pips]) => ({ id, pips }))
-    .sort((a, b) => a.pips - b.pips || (a.id < b.id ? -1 : 1));
+  // Seat order, so the line reads the way the hands were just shown.
+  const everyone = Object.entries(input.pipCounts).map(([id, pips]) => ({ id, pips }));
   const parts = input.reason === "locked" ? everyone : everyone.filter((part) => !winners.has(part.id));
   const pot = input.reason === "locked"
     ? everyone.filter((part) => !winners.has(part.id)).reduce((sum, part) => sum + part.pips, 0)

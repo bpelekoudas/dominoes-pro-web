@@ -18,7 +18,9 @@ import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
 import { FeelCall, FeelTally } from "./feel/overlay";
 import { FeelPreview, feelPreviewRequested } from "./feel/preview";
-import { useHandCelebration, useWinScore, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
+import { feelTableRequested, useFeelPlay } from "./feel/table-play";
+import { ScoreChaseContext, useScoreChase, useShownScore } from "./feel/score";
+import { useHandCelebration, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 
 interface ChatLine {
   id: number;
@@ -132,7 +134,7 @@ export function App() {
       connect();
     };
 
-    if (sessionStorage.getItem(RESUME_KEY) === "1" && localStorage.getItem(TOKEN_KEY)) connect();
+    if (!feelTableRequested() && sessionStorage.getItem(RESUME_KEY) === "1" && localStorage.getItem(TOKEN_KEY)) connect();
     return () => {
       stopped = true;
       attempt += 1;
@@ -221,6 +223,7 @@ export function App() {
   };
 
   const winMode = winPreviewRequested();
+  if (feelTableRequested()) return <FeelPlayScreen />;
   if (feelPreviewRequested() && !view) return <FeelPreview />;
   if (winMode && !view) {
     return <WinPreview mode={winMode} />;
@@ -359,7 +362,36 @@ function Choice<T extends string | number>({
   );
 }
 
-function Game({
+function FeelPlayScreen() {
+  const beat = useFeelPlay();
+  return (
+    <div className="feel-play-root" data-screen="feel-play" data-feel-scene={beat.scene}>
+      <Game
+        view={beat.view}
+        chat={[]}
+        error={null}
+        status="live"
+        selectedTile={null}
+        chatOpen={false}
+        dismissedHand={null}
+        leaveArmed={false}
+        onSelect={() => undefined}
+        onToggleChat={() => undefined}
+        onDismiss={() => undefined}
+        onLeaveArm={() => undefined}
+        onLeave={() => undefined}
+        onLeaveMatch={() => undefined}
+        onCancelQuick={() => undefined}
+        iris={false}
+        onSend={() => undefined}
+        accountUser={null}
+        onAccount={() => undefined}
+      />
+    </div>
+  );
+}
+
+export function Game({
   view,
   chat,
   error,
@@ -441,14 +473,21 @@ function Game({
 
   const playing = view.status !== "lobby";
   const win = useHandCelebration(view);
-  const showingResult = win.sheet;
+  const chase = useScoreChase(view);
+  const feelPlay = feelTableRequested();
+  const showingResult = win.sheet && !feelPlay;
+  const showCounts = Boolean(view.lastHand && win.stage === "pips");
+  const gameFocus = win.stage === "banner" && win.banner?.kind === "game" ? win.banner.winnerId : null;
   return (
     <WinScoreContext.Provider value={win.scores}>
+    <ScoreChaseContext.Provider value={chase}>
     <main
       className={`felt-app${chatOpen ? " chat-open" : ""}${iris ? " iris-play" : ""}${showingResult ? " showing-result" : ""}`}
       data-skin="ivory"
       data-tile-skin={tileSkin}
       data-win-stage={win.stage}
+      data-win-kind={win.stage === "banner" && win.banner ? win.banner.kind : undefined}
+      data-screen={feelPlay ? "feel-play" : undefined}
     >
       <div className="felt-column">
       <header className="playbar">
@@ -519,7 +558,7 @@ function Game({
           </div>
         </section>
       ) : null}
-      {win.sheet && view.lastHand && !view.ended ? (
+      {win.sheet && view.lastHand && !view.ended && !feelPlay ? (
         <HandSummary
           view={view}
           onContinue={() => onSend({ type: "continue" })}
@@ -565,6 +604,9 @@ function Game({
                   bubble={bubbleText(bubble, seat.player.id)}
                   notice={notice?.playerId === seat.player.id ? notice.text : null}
                   view={view}
+                  pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
+                  low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
+                  forward={gameFocus === seat.player.id}
                 />
               ))}
             </div>
@@ -572,7 +614,15 @@ function Game({
           <div className="hand-tray">
             <div className="tray-notices">
               <div className="you-float">
-                {you ? <SeatChip player={you.player} view={view} /> : null}
+                {you ? (
+                  <SeatChip
+                    player={you.player}
+                    view={view}
+                    pips={showCounts ? view.lastHand?.pipCounts[you.player.id] ?? null : null}
+                    low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(you.player.id)}
+                    forward={gameFocus === you.player.id}
+                  />
+                ) : null}
                 {you && bubbleText(bubble, you.player.id) ? (
                   <p className="talk-bubble">{bubbleText(bubble, you.player.id)}</p>
                 ) : null}
@@ -653,6 +703,7 @@ function Game({
         />
       ) : null}
     </main>
+    </ScoreChaseContext.Provider>
     </WinScoreContext.Provider>
   );
 }
@@ -783,12 +834,18 @@ function EdgeSeat({
   bubble,
   notice,
   view,
+  pips,
+  low,
+  forward,
 }: {
   edge: Exclude<SeatEdge, "bottom">;
   player: PlayerView["players"][number];
   bubble: string | null;
   notice: string | null;
   view: PlayerView;
+  pips: number | null;
+  low: boolean;
+  forward: boolean;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
   const [gap, setGap] = useState(3);
@@ -824,7 +881,7 @@ function EdgeSeat({
       data-tiles={count}
       data-skin={player.tileSkin || "ivory"}
     >
-      {edge === "top" ? null : <EdgeBadge player={player} view={view} />}
+      {edge === "top" ? null : <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} />}
       <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">
         {Array.from({ length: count }, (_, index) => (
           <i
@@ -834,7 +891,7 @@ function EdgeSeat({
           />
         ))}
       </div>
-      {edge === "top" ? <EdgeBadge player={player} view={view} /> : null}
+      {edge === "top" ? <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} /> : null}
       {bubble ? <p className="talk-bubble">{bubble}</p> : null}
       {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
       <span className="sr-only">
@@ -844,34 +901,60 @@ function EdgeSeat({
   );
 }
 
-function EdgeBadge({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
+function EdgeBadge({
+  player,
+  view,
+  pips,
+  low,
+  forward,
+}: {
+  player: PlayerView["players"][number];
+  view: PlayerView;
+  pips: number | null;
+  low: boolean;
+  forward: boolean;
+}) {
   const clock = useServerNow(view.serverNow);
-  const live = useWinScore(player.id, player.score);
+  const live = useShownScore(player.id, player.score);
   const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
+  const over = live.score >= view.settings.targetScore;
   return (
-    <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}`} data-player-id={player.id}>
+    <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`} data-player-id={player.id}>
       <AvatarFace
         id={player.avatarId}
         bot={player.bot && !player.accountBot}
         frameId={player.frameId}
         timer={player.isTurn && view.turnDeadline ? ratio : null}
       />
-      <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id}>
+      <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
         {live.score}
       </strong>
+      {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
     </div>
   );
 }
 
-function SeatChip({ player, view }: { player: PlayerView["players"][number]; view: PlayerView }) {
+function SeatChip({
+  player,
+  view,
+  pips = null,
+  low = false,
+  forward = false,
+}: {
+  player: PlayerView["players"][number];
+  view: PlayerView;
+  pips?: number | null;
+  low?: boolean;
+  forward?: boolean;
+}) {
   const clock = useServerNow(view.serverNow);
-  const live = useWinScore(player.id, player.score);
+  const live = useShownScore(player.id, player.score);
   const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
   const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div
-      className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}${live.hot ? " win-hot" : ""}`}
+      className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`}
       data-account-bot={player.accountBot ? "true" : "false"}
       data-player-id={player.id}
       data-turn={player.isTurn ? "true" : "false"}
@@ -890,9 +973,14 @@ function SeatChip({ player, view }: { player: PlayerView["players"][number]; vie
           {!player.connected && !player.bot ? <em className="away"> away</em> : null}
         </span>
         <span className="chip-meta">
-          <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id}>
+          <strong
+            className={live.pulse ? "is-scoring" : undefined}
+            data-win-score={player.id}
+            data-over={live.score >= view.settings.targetScore ? "true" : "false"}
+          >
             {live.score}
           </strong>
+          {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
           {player.rank ? (
             <RankLine
               tierId={player.rank.tierId}

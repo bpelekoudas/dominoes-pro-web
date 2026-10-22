@@ -7,7 +7,7 @@ export const HAND_HOLD_MS = 2400;
 export const GAME_BANNER_MS = 2400;
 export const MATCH_BANNER_MS = 2500;
 /** Domino, then HAND WON, before the pip tally. Shorter when the UH-OH slam already played. */
-export const HAND_CALL_MS = 1100;
+export const HAND_CALL_MS = 1500;
 export const HAND_CALL_AFTER_UHOH_MS = 420;
 export const LOCK_CALL_MS = 880;
 export const PIP_START_MS = 420;

@@ -554,16 +554,21 @@ export function WinShow({
     return () => cancelAnimationFrame(frame);
   }, [stage, frozenAt, reduced]);
 
-  const bitCount = banner?.kind === "match" ? 46 : 18;
+  const bitCount = banner?.kind === "match" ? 46 : 8;
   return (
     <div className="win-layer" data-win-stage={stage} data-win-kind={banner?.kind ?? ""} ref={rootRef}>
       {reveals.map((seat) => (
         <div key={seat.playerId} className="win-reveal" data-win-reveal={seat.playerId} data-edge={seat.edge}>
-          {seat.tiles.map((tile) => (
-            <span key={tile.id} data-win-tile={`${seat.playerId}:${tile.id}`}>
-              <Domino a={tile.low} b={tile.high} orientation="vertical" />
-            </span>
-          ))}
+          <span className="win-faces">
+            {seat.tiles.map((tile) => (
+              <span key={tile.id} data-win-tile={`${seat.playerId}:${tile.id}`}>
+                <Domino a={tile.low} b={tile.high} orientation="vertical" />
+              </span>
+            ))}
+          </span>
+          <em className="win-count" data-win-count={seat.tiles.reduce((sum, tile) => sum + tile.low + tile.high, 0)}>
+            {seat.tiles.reduce((sum, tile) => sum + tile.low + tile.high, 0)}
+          </em>
         </div>
       ))}
       {stage === "pips" && !reduced
@@ -583,7 +588,7 @@ export function WinShow({
           <div className={`win-banner ${banner.kind}`} ref={popRef}>
             {banner.kind === "game" && !reduced ? (
               <div className="feel-topple" aria-hidden="true">
-                <i /><i /><i /><i /><i />
+                <i /><i /><i /><i /><i /><i /><i /><i />
               </div>
             ) : null}
             <div className="win-banner-pop">

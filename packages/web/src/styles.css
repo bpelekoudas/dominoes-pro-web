@@ -860,15 +860,17 @@ input {
   letter-spacing: 0.04em;
   line-height: 1;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
-  transform: translate(-50%, 0);
-  animation: score-fade 0.65s ease-out forwards;
+  transform: translate(-50%, -50%);
+  animation: score-in 100ms ease-out;
 }
-.score-pop[data-place="beside"] { transform: none; }
-@keyframes score-fade {
-  0% { opacity: 0; }
-  14% { opacity: 1; }
-  70% { opacity: 1; }
-  100% { opacity: 0; }
+.score-pop[data-fly="1"] {
+  z-index: 86;
+  transition-property: left, top;
+  transition-timing-function: cubic-bezier(0.16, 0.84, 0.32, 1);
+}
+@keyframes score-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 body.is-dragging,
 body.is-dragging .hand { touch-action: none; overflow: hidden; }
@@ -1471,7 +1473,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .tier-up { animation: none; }
   .win-pip, .win-bit, .win-flash, .win-shock { display: none; }
   .chip-meta strong.is-scoring { animation: none; }
-  .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-topple i, .feel-landing, .seat-chip[data-feel] { animation: none; }
+  .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-topple i, .feel-landing, .seat-chip[data-feel],
+  .rail[data-feel] .sliver, .hand[data-feel] .hand-tile, .board-tile.last-move,
+  .felt-app[data-win-kind="game"] .board-tile, .felt-app[data-win-stage="call"] .board-tile { animation: none; }
 }
 
 .rank-line {
@@ -2085,8 +2089,20 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
   position: absolute;
   z-index: 2;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 4px;
   pointer-events: none;
+}
+.win-faces { display: flex; gap: 4px; }
+.win-count {
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-style: normal;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #fff6d8;
+  text-shadow: 0 2px 0 #1a090c;
 }
 .win-reveal .domino { width: 32px; height: 64px; border-radius: 5px; }
 .win-reveal .half { padding: 2px; }
@@ -2504,29 +2520,123 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
 .feel-ripple {
   position: fixed;
   z-index: 28;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
-  border: 2px solid rgba(239, 224, 190, 0.85);
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  border: 3px solid rgba(239, 224, 190, 0.95);
   border-radius: 50%;
   pointer-events: none;
-  animation: feel-ripple 420ms ease-out forwards;
+  animation: feel-ripple 640ms ease-out forwards;
 }
-.feel-ripple[data-streak="3"] { border-color: #e31e26; animation-duration: 520ms; }
+.feel-ripple[data-streak="3"] { border-color: #e31e26; animation-duration: 720ms; }
 @keyframes feel-ripple {
-  from { transform: scale(0.4); opacity: 0.9; }
-  to { transform: scale(6); opacity: 0; }
+  from { transform: scale(0.35); opacity: 0.95; }
+  to { transform: scale(7); opacity: 0; }
 }
-.seat-chip[data-feel="score"] { animation: feel-pulse 360ms ease-out; }
+.seat-chip[data-feel="score"] { animation: feel-pulse 420ms ease-out; }
 .seat-chip[data-feel="knock"],
-.seat-chip[data-feel="knock-tight"] { animation: feel-knock 280ms ease-out; }
+.seat-chip[data-feel="knock-tight"] { animation: feel-knock 520ms ease-out; }
+.rail[data-feel="knock"] .sliver,
+.rail[data-feel="knock-tight"] .sliver,
+.hand[data-feel="knock"] .hand-tile,
+.hand[data-feel="knock-tight"] .hand-tile { animation: feel-rack 520ms ease-out; }
 @keyframes feel-pulse {
-  40% { transform: scale(1.06); }
+  40% { transform: scale(1.12); }
   100% { transform: none; }
 }
 @keyframes feel-knock {
-  30% { transform: translateY(3px) rotate(-2deg); }
+  35% { transform: translateY(7px) scale(0.92) rotate(-3deg); }
   100% { transform: none; }
+}
+@keyframes feel-rack {
+  35% { transform: translateY(7px) scale(0.9); }
+  100% { transform: none; }
+}
+.table-scroll[data-knock-streak="2"] { filter: brightness(0.9); }
+.table-scroll[data-knock-streak="3"] { filter: brightness(0.68); }
+.board-tile.last-move[data-feel="score"],
+.board-tile.last-move[data-feel="score-strong"],
+.board-tile.last-move[data-feel="score-rare"] {
+  animation: feel-land 280ms cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+@keyframes feel-land {
+  0% { transform: translateY(-14px) scale(1.08); }
+  65% { transform: translateY(2px) scale(0.96); }
+  100% { transform: none; }
+}
+.seat-pips {
+  position: absolute;
+  left: 50%;
+  bottom: -16px;
+  transform: translateX(-50%);
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-style: normal;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #fff6d8;
+  background: #1a090c;
+  border: 1px solid #d5a336;
+  border-radius: 999px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.seat-pips.low { background: #e31e26; border-color: #fff6d8; }
+.seat-chip.you strong[data-over="true"] {
+  color: #fff6d8;
+  text-shadow: 0 0 10px rgba(227, 30, 38, 0.85);
+}
+.felt-app[data-win-stage="call"] .board-tile { animation: chain-nudge 340ms ease-out both; }
+.felt-app[data-win-stage="call"] .board-tile:nth-child(2) { animation-delay: 40ms; }
+.felt-app[data-win-stage="call"] .board-tile:nth-child(3) { animation-delay: 80ms; }
+.felt-app[data-win-stage="call"] .board-tile:nth-child(4) { animation-delay: 120ms; }
+.felt-app[data-win-stage="call"] .board-tile.last-move {
+  filter: drop-shadow(0 0 10px rgba(213, 163, 54, 0.95));
+  animation: feel-land 320ms cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+@keyframes chain-nudge {
+  40% { transform: translateY(4px) rotate(4deg); }
+  100% { transform: none; }
+}
+.felt-app[data-win-kind="game"] .table-frame { filter: brightness(0.55); }
+.felt-app[data-win-kind="game"] .rail .seat-chip {
+  transform: scale(0.86);
+  opacity: 0.42;
+  filter: saturate(0.25) brightness(0.75);
+}
+.felt-app[data-win-kind="game"] .seat-chip.win-forward {
+  position: relative;
+  z-index: 47;
+  opacity: 1;
+  filter: none;
+  transform: scale(1.22) translateY(-8px);
+}
+.felt-app[data-win-kind="game"] .seat-chip.win-forward::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: 220px;
+  height: 260px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(255, 244, 214, 0.72), rgba(255, 244, 214, 0.12) 42%, transparent 70%);
+  z-index: -1;
+  pointer-events: none;
+}
+.felt-app[data-win-kind="game"] .board-tile {
+  animation: board-tip 780ms ease-in forwards;
+  transform-origin: center bottom;
+}
+.felt-app[data-win-kind="game"] .board-tile:nth-child(2) { animation-delay: 70ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(3) { animation-delay: 140ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(4) { animation-delay: 210ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(5) { animation-delay: 280ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(6) { animation-delay: 350ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(7) { animation-delay: 420ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(8) { animation-delay: 490ms; }
+.felt-app[data-win-kind="game"] .board-tile:nth-child(9) { animation-delay: 560ms; }
+@keyframes board-tip {
+  to { transform: rotate(76deg); }
 }
 html[data-feel-cues~="near-target"] .seat-chip.you .chip-meta strong {
   color: #fff1c4;
@@ -2575,14 +2685,18 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 .feel-topple {
   display: flex;
   justify-content: center;
-  gap: 6px;
-  margin-bottom: 8px;
+  gap: 5px;
+  margin-bottom: 10px;
 }
 .feel-topple i {
-  width: 10px;
-  height: 20px;
-  border-radius: 2px;
-  background: #f6f1e6;
+  width: 18px;
+  height: 36px;
+  border-radius: 3px;
+  background:
+    radial-gradient(circle at 50% 30%, #1a1a1a 1.6px, transparent 1.7px),
+    radial-gradient(circle at 50% 72%, #1a1a1a 1.6px, transparent 1.7px),
+    #f6f1e6;
+  box-shadow: inset 0 0 0 1px #d7ccb8;
   transform-origin: center bottom;
   animation: feel-tip 700ms ease-in forwards;
 }
@@ -2593,6 +2707,7 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 @keyframes feel-tip {
   to { transform: rotate(78deg); }
 }
+.feel-play-root { display: contents; }
 .feel-reel {
   min-height: 100dvh;
   background: #14080a;

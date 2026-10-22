@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import { cameraScale, chainBounds, handOverPlacement } from "./board-scale.js";
 import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
@@ -227,6 +228,7 @@ export function Table({
       data-shake={shake ?? "off"}
       ref={viewportRef}
       data-open-total={view.openTotal}
+      data-knock-streak={view.knockStreak}
       data-table-id={view.tableId}
       data-board-scale={scale.toFixed(2)}
       data-board-lift={String(lift)}
@@ -314,20 +316,9 @@ export function Table({
       })}
       <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
       <FeelRipple knock={feel.knock} />
-      {pop && popAt
-        ? createPortal(
-            <p
-              className="score-pop"
-              style={{ left: popAt.left, top: popAt.top }}
-              data-awarded={pop.awarded}
-              data-tier={scoreTier(pop.awarded)}
-              data-place={popAt.place}
-            >
-              +{pop.awarded}
-            </p>,
-            document.body,
-          )
-        : null}
+      {pop && popAt ? (
+        <FlyingScore pop={pop} at={popAt} />
+      ) : null}
     </div>
   );
 
@@ -544,28 +535,72 @@ function faceOf(tileId: string | null): { a: number; b: number } {
   return { a: Number.isFinite(low) ? low! : 6, b: Number.isFinite(high) ? high! : 6 };
 }
 
-function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string } | null {
-  const big = bigMomentLevel(lastPlay?.awarded ?? 0) !== null;
-  const seq = lastPlay && lastPlay.awarded > 0 && !big ? lastPlay.seq : -1;
+function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null {
   const awarded = lastPlay?.awarded ?? 0;
+  const seq = lastPlay && awarded >= 10 ? lastPlay.seq : -1;
   const tileId = lastPlay?.tileId ?? "";
   const endId = lastPlay?.endId ?? "";
-  const [pop, setPop] = useState<{ seq: number; awarded: number; tileId: string; endId: string } | null>(null);
+  const playerId = lastPlay?.playerId ?? "";
+  const [pop, setPop] = useState<{ seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null>(null);
   useEffect(() => {
-    if (seq < 0 || awarded <= 0) {
+    if (seq < 0 || awarded < 10) {
       setPop(null);
       return;
     }
-    // The camera eases for 240ms and an opponent tile is in flight for 420ms.
-    // Wait until that tile has landed, then show the award beside it.
-    const show = window.setTimeout(() => setPop({ seq, awarded, tileId, endId }), 460);
-    const hide = window.setTimeout(() => setPop(null), 1100);
+    // A routine award still appears at 460ms and leaves at 1100ms.
+    // The flight into the chip happens inside that window.
+    const timing = scorePopWindow(awarded);
+    const show = window.setTimeout(() => setPop({ seq, awarded, tileId, endId, playerId }), timing.show);
+    const hide = window.setTimeout(() => setPop(null), timing.hide);
     return () => {
       window.clearTimeout(show);
       window.clearTimeout(hide);
     };
-  }, [seq, awarded, tileId, endId]);
+  }, [seq, awarded, tileId, endId, playerId]);
   return pop;
+}
+
+function FlyingScore({
+  pop,
+  at,
+}: {
+  pop: { seq: number; awarded: number; playerId: string };
+  at: { left: number; top: number; place: "above" | "beside" };
+}) {
+  const [spot, setSpot] = useState(at);
+  const [fly, setFly] = useState(false);
+  useLayoutEffect(() => {
+    setSpot(at);
+    setFly(false);
+    let frame = 0;
+    const wait = scorePopWindow(pop.awarded).fly;
+    const timer = window.setTimeout(() => {
+      const chip = document.querySelector<HTMLElement>(`[data-win-score="${CSS.escape(pop.playerId)}"]`);
+      const rect = chip?.getBoundingClientRect();
+      if (!rect || rect.width < 1) return;
+      frame = window.requestAnimationFrame(() => {
+        setFly(true);
+        setSpot({ left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, place: "above" });
+      });
+    }, wait);
+    return () => {
+      window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [pop.seq, pop.awarded, pop.playerId, at.left, at.top, at.place]);
+  return createPortal(
+    <p
+      className="score-pop"
+      style={{ left: spot.left, top: spot.top, transitionDuration: fly ? `${SCORE_FLY_MS}ms` : "0ms" }}
+      data-awarded={pop.awarded}
+      data-tier={scoreTier(pop.awarded)}
+      data-place={fly ? "fly" : at.place}
+      data-fly={fly ? "1" : "0"}
+    >
+      +{pop.awarded}
+    </p>,
+    document.body,
+  );
 }
 
 function useAnchor(
