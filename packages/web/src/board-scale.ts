@@ -63,9 +63,10 @@ export const CAMERA_DANGER = 28;
 export const CAMERA_COMFORT = 72;
 /**
  * Hard inset. Clears the opponent slivers that peek in from the felt edge
- * (about 14px) with a little air, even when a long chain is at the floor.
+ * (22px on the sides, 20px across the top) with a little air, even when a
+ * long chain is at the floor.
  */
-export const CAMERA_EDGE = 18;
+export const CAMERA_EDGE = 30;
 /** Ease-out on the felt. No overshoot. */
 export const CAMERA_EASE_MS = 240;
 

@@ -399,6 +399,13 @@ function Game({
   const cosmetics = useMatchCosmetics();
   const tableArt = view.tableId ? `/store/${view.tableId}.webp?v=7` : null;
   const tileSkin = cosmetics.skin || "ivory";
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.tileSkin = tileSkin;
+    return () => {
+      if (root.dataset.tileSkin === tileSkin) delete root.dataset.tileSkin;
+    };
+  }, [tileSkin]);
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
   const bubble = useTalkBubble(chat);
@@ -757,7 +764,7 @@ function EdgeSeat({
 }) {
   const railRef = useRef<HTMLDivElement>(null);
   const [gap, setGap] = useState(3);
-  const along = edge === "top" ? 16 : 18;
+  const along = edge === "top" ? 26 : 28;
   const count = player.tileCount;
   useLayoutEffect(() => {
     const rail = railRef.current;
