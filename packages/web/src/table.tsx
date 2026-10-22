@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { cameraScale, chainBounds, handOverPlacement } from "./board-scale.js";
+import { handFit } from "./hand-fit.js";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer, type HitBox } from "./moment.js";
@@ -661,6 +662,37 @@ export function Hand({
   onDragRef.current = onDragTile;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const handRef = useRef<HTMLDivElement>(null);
+  const count = view.you.hand.length;
+
+  useLayoutEffect(() => {
+    const el = handRef.current;
+    const frame = el?.parentElement;
+    if (!el || !frame) return;
+    const natural = () =>
+      window.matchMedia("(min-width: 880px) and (min-height: 640px)").matches
+        ? 68
+        : window.matchMedia("(min-width: 720px)").matches
+          ? 58
+          : 44;
+    const apply = () => {
+      const next = handFit(el.clientWidth, count, natural());
+      el.style.setProperty("--hand-tile", `${next.tile}px`);
+      el.style.setProperty("--hand-gap", `${next.gap}px`);
+      el.dataset.scroll = next.scroll ? "true" : "false";
+      const hidden = el.scrollWidth - el.clientWidth - el.scrollLeft;
+      frame.dataset.fadeStart = next.scroll && el.scrollLeft > 4 ? "true" : "false";
+      frame.dataset.fadeEnd = next.scroll && hidden > 4 ? "true" : "false";
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    el.addEventListener("scroll", apply, { passive: true });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", apply);
+    };
+  }, [count]);
 
   useEffect(() => () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
@@ -679,7 +711,8 @@ export function Hand({
   }, [liftedId]);
 
   return (
-    <div className="hand" role="list">
+    <div className="hand-frame">
+    <div className="hand" role="list" ref={handRef} data-count={count} data-scroll="false">
       {view.you.hand.map((tile) => {
         const plays = view.legalPlays.filter((play) => play.tileId === tile.id);
         const playable = mine && plays.length > 0;
@@ -742,6 +775,7 @@ export function Hand({
             document.body,
           )
         : null}
+    </div>
     </div>
   );
 

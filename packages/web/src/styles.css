@@ -698,20 +698,51 @@ input {
   background: #2a2a2a;
   padding: 2px 6px calc(4px + env(safe-area-inset-bottom));
 }
+.hand-frame {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.hand-frame[data-fade-end="true"]::after,
+.hand-frame[data-fade-start="true"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  z-index: 2;
+  pointer-events: none;
+}
+.hand-frame[data-fade-end="true"]::after {
+  right: 0;
+  background: linear-gradient(90deg, rgba(42, 42, 42, 0), #2a2a2a 78%);
+}
+.hand-frame[data-fade-start="true"]::before {
+  left: 0;
+  background: linear-gradient(90deg, #2a2a2a 22%, rgba(42, 42, 42, 0));
+}
 .hand {
+  --hand-tile: 44px;
+  --hand-gap: 8px;
   display: flex;
-  gap: 8px;
-  overflow-x: auto;
+  gap: var(--hand-gap);
+  width: 100%;
+  overflow-x: hidden;
   overflow-y: hidden;
   scrollbar-width: none;
   padding-top: 8px;
   justify-content: safe center;
   touch-action: pan-x;
-  flex: 1;
   min-width: 0;
+}
+.hand[data-scroll="true"] {
+  overflow-x: auto;
+  justify-content: flex-start;
 }
 .hand::-webkit-scrollbar { display: none; }
 .hand-tile {
+  flex: 0 0 auto;
+  width: var(--hand-tile, 44px);
   border: 0;
   background: transparent;
   padding: 0;
@@ -843,7 +874,16 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.55);
 }
 .domino.horizontal { width: 84px; height: 42px; flex-direction: row; }
-.hand-tile .domino { width: 44px; height: 88px; }
+.hand-tile .domino {
+  width: 100%;
+  height: calc(var(--hand-tile, 44px) * 2);
+  border-radius: calc(var(--hand-tile, 44px) * 0.16);
+}
+.hand-tile .half { padding: calc(var(--hand-tile, 44px) * 0.09); }
+.hand-tile .half i {
+  width: calc(var(--hand-tile, 44px) * 0.16);
+  height: calc(var(--hand-tile, 44px) * 0.16);
+}
 .domino.face-down {
   background:
     repeating-linear-gradient(-32deg, #141414, #141414 5px, #2a1517 5px, #2a1517 6px);
@@ -1387,11 +1427,11 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .fx-board[data-shake="big"] { animation-name: uhoh-shake-big; }
 
 @media (min-width: 720px) {
-  .hand-tile .domino { width: 58px; height: 116px; }
+  .hand { --hand-tile: 58px; }
   .bone-pile { width: 64px; min-height: 104px; }
 }
 @media (min-width: 880px) and (min-height: 640px) {
-  .hand-tile .domino { width: 68px; height: 136px; }
+  .hand { --hand-tile: 68px; }
   .bone-pile { width: 72px; min-height: 120px; }
 }
 
