@@ -281,7 +281,53 @@ export async function createApp(options: AppOptions = {}) {
     return { status: response.statusCode, ms: Math.round(performance.now() - started) };
   });
 
+  if (!options.store && process.env.DATA_DIR) dumpRoomHistory(app, store, "6DD8A2");
   return { app, store, accounts, hub, bots };
+}
+
+/** One-shot read of a live room so a reported score can be replayed. Tokens stay out. */
+function dumpRoomHistory(app: { log: { info: (obj: unknown, msg?: string) => void } }, store: Store, code: string): void {
+  const room = store.roomByCode(code);
+  if (!room) {
+    app.log.info({ roomdump: code }, "ROOMDUMP missing");
+    return;
+  }
+  const players = store.players(room.id).map((player) => ({
+    id: player.id,
+    name: player.name,
+    seat: player.seat,
+    bot: player.bot,
+  }));
+  app.log.info(
+    {
+      roomdump: {
+        id: room.id,
+        code: room.code,
+        seriesId: room.series_id,
+        mode: room.boneyard_mode,
+        seriesLength: room.series_length,
+        rules: room.rules_version,
+        status: room.status,
+        players,
+      },
+    },
+    "ROOMDUMP room",
+  );
+  for (const hand of store.handsForSeries(room.id, room.series_id)) {
+    app.log.info(
+      {
+        roomdump: {
+          g: hand.game_number,
+          h: hand.hand_number,
+          seed: hand.seed,
+          deck: JSON.parse(hand.deck_json) as string[],
+          result: hand.result_json ? (JSON.parse(hand.result_json) as unknown) : null,
+          actions: store.actions(hand.id).map((action) => ({ p: action.playerId, i: action.intent })),
+        },
+      },
+      "ROOMDUMP hand",
+    );
+  }
 }
 
 function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {
