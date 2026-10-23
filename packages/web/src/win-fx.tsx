@@ -343,7 +343,7 @@ export function useHandCelebration(
   };
 
   const onLand = (id: string, winnerId: string, value: number) => {
-    if (freeze || landed.current.has(id)) return;
+    if (!keyRef.current || freeze || landed.current.has(id)) return;
     landed.current.add(id);
     setShown((prev) => {
       const running = prev[winnerId] ?? baseRef.current[winnerId] ?? 0;

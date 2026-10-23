@@ -263,9 +263,20 @@ export function App() {
           onCreate={(name, playerCount, boneyardMode, seriesLength) =>
             void begin({ type: "create", name, playerCount, boneyardMode, seriesLength })
           }
-          onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) =>
-            void begin({ type: "solo", name, playerCount, boneyardMode, seriesLength, difficulty })
-          }
+          onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) => {
+            const reel =
+              new URLSearchParams(location.search).get("reel") === "score" &&
+              name.trim().toLowerCase().startsWith("soak-");
+            void begin({
+              type: "solo",
+              name,
+              playerCount,
+              boneyardMode,
+              seriesLength,
+              difficulty,
+              ...(reel ? { fixture: "score-reel" } : {}),
+            });
+          }}
           onJoin={(name, code) => void begin({ type: "join", name, code })}
           onQuick={(name, size) => void begin({ type: "quick", name, size })}
           onGuest={(name) => void account.ensureGuest(name)}
@@ -710,6 +721,7 @@ export function Game({
       {win.stage === "call" && win.call ? <FeelCall kind={win.call} reduced={win.reduced} onSkip={win.skip} /> : null}
       {win.stage === "pips" && view.lastHand ? (
         <FeelTally
+          key={`${view.gameNumber}:${view.handNumber}:${view.lastHand.reason}`}
           reason={view.lastHand.reason}
           pipCounts={view.lastHand.pipCounts}
           winnerIds={view.lastHand.winnerIds}

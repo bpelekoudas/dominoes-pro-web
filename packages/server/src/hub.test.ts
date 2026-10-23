@@ -1569,6 +1569,123 @@ function playSeries(
   return latestView(players[0]?.messages ?? []);
 }
 
+describe("soak fixtures", () => {
+  it("refuses a fixture on a normal table and an unknown fixture", () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0);
+    const normal: ServerMessage[] = [];
+    const ada = hub.connect(
+      {
+        type: "solo",
+        name: "Ada",
+        playerCount: 2,
+        boneyardMode: "draw_until",
+        seriesLength: 3,
+        fixture: "empty-knock",
+      },
+      (message) => normal.push(message),
+      () => undefined,
+    );
+    if (!ada.ok) throw new Error(ada.error);
+    expect(latestView(normal)?.status).toBe("lobby");
+    expect(normal.some((message) => message.type === "error" && message.message === "That setup is only for a soak table.")).toBe(true);
+
+    const unknown: ServerMessage[] = [];
+    const soak = hub.connect(
+      {
+        type: "solo",
+        name: "soak-ada",
+        playerCount: 2,
+        boneyardMode: "draw_until",
+        seriesLength: 3,
+        fixture: "not-a-deal",
+      },
+      (message) => unknown.push(message),
+      () => undefined,
+    );
+    if (!soak.ok) throw new Error(soak.error);
+    expect(latestView(unknown)?.status).toBe("lobby");
+    expect(unknown.some((message) => message.type === "error" && message.message === "That setup isn't a soak deal.")).toBe(true);
+  });
+
+  it("deals an empty-boneyard knock and the computer answers", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 20_000, () => 0);
+    const messages: ServerMessage[] = [];
+    const opened = hub.connect(
+      {
+        type: "solo",
+        name: "soak-ada",
+        playerCount: 2,
+        boneyardMode: "draw_until",
+        seriesLength: 3,
+        difficulty: "easy",
+        fixture: "empty-knock",
+      },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!opened.ok) throw new Error(opened.error);
+    const view = latestView(messages);
+    expect(view?.phase).toBe("knock");
+    expect(view?.boneyardCount).toBe(0);
+    expect(view?.canKnock).toBe(true);
+    expect(view?.status).toBe("playing");
+    hub.command(opened.session.playerId, { type: "intent", intent: { type: "knock" } });
+    const answered = await waitForView(
+      messages,
+      (next) => next.lastPlay !== null && next.lastPlay.playerId !== opened.session.playerId,
+    );
+    expect(answered.lastPlay?.playerId).not.toBe(opened.session.playerId);
+    expect(answered.lastEvent?.kind).toBe("play");
+    expect(answered.phase).not.toBe("between");
+  });
+
+  it("plays 15, then a quiet 14, then takes 25", async () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 20_000, () => 0);
+    const messages: ServerMessage[] = [];
+    const opened = hub.connect(
+      {
+        type: "solo",
+        name: "soak-reel",
+        playerCount: 2,
+        boneyardMode: "draw_until",
+        seriesLength: 3,
+        difficulty: "easy",
+        fixture: "score-reel",
+      },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!opened.ok) throw new Error(opened.error);
+    const dealt = latestView(messages);
+    expect(dealt?.you.hand.map((tile) => tile.id).sort()).toEqual(["1-3", "2-4"]);
+    expect(dealt?.openTotal).toBe(13);
+    expect(dealt?.lastPlay).toBeNull();
+    hub.command(opened.session.playerId, { type: "intent", intent: { type: "play", tileId: "1-3", endId: "west" } });
+    const scored = latestView(messages);
+    expect(scored?.lastPlay).toMatchObject({ tileId: "1-3", total: 15, awarded: 15 });
+    const quiet = await waitForView(messages, (next) => next.lastPlay?.tileId === "2-3");
+    expect(quiet.lastPlay).toMatchObject({ tileId: "2-3", total: 14, awarded: 0 });
+    expect(quiet.openEquation?.replaceAll(" ", "")).toBe("2+12=14");
+    hub.command(opened.session.playerId, { type: "intent", intent: { type: "play", tileId: "2-4", endId: "west" } });
+    const ended = latestView(messages);
+    expect(ended?.lastPlay?.awarded).toBe(0);
+    expect(ended?.lastHand?.leftoverAwards[opened.session.playerId]).toBe(25);
+    expect(ended?.betweenHands).toBe(true);
+  });
+});
+
+async function waitForView(messages: ServerMessage[], ready: (view: PlayerView) => boolean): Promise<PlayerView> {
+  for (let step = 0; step < 40; step += 1) {
+    const view = latestView(messages);
+    if (view && ready(view)) return view;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("The table did not reach the expected play.");
+}
+
 function boardIds(view: PlayerView | null): string[] {
   if (!view?.board) return [];
   const ids: string[] = [];

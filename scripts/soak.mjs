@@ -213,13 +213,18 @@ async function computerKnockProbe() {
     JSON.stringify({
       type: "solo",
       name,
-      playerCount: 4,
+      playerCount: 2,
       boneyardMode: "draw_until",
       seriesLength: 3,
       difficulty: "easy",
+      fixture: "empty-knock",
     }),
   );
   await ready;
+  const opened = seat.view;
+  if (!failure && (!opened || opened.boneyardCount !== 0 || opened.phase !== "knock" || opened.canKnock !== true)) {
+    failure = "The knock fixture did not put an empty boneyard on your turn.";
+  }
   const deadline = Date.now() + 90_000;
   const limit = Math.min(args.stallMs, 12_000);
   try {

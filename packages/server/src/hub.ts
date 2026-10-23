@@ -1,8 +1,13 @@
 import { randomBytes } from "node:crypto";
 import {
+  allTileIds,
   applyIntent,
   beginHand,
   chooseBotIntent,
+  cleanSoakFixture,
+  emptyBoneyardKnock,
+  scoreReel,
+  unknownSoakFixture,
   legalIntents,
   skipTurn,
   createMatch,
@@ -30,6 +35,7 @@ import {
   type PlayerView,
   type RankRecap,
   type SeriesLength,
+  type SoakFixture,
   type TableMeta,
 } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
@@ -86,6 +92,8 @@ export type ClientMessage =
       boneyardMode?: string;
       seriesLength?: number;
       difficulty?: string;
+      /** Soak tables only. A normal solo game leaves this off. */
+      fixture?: string;
     }
   | { type: "add-bot"; difficulty?: string }
   | { type: "remove-bot"; playerId: string };
@@ -651,7 +659,7 @@ export class Hub {
     return { ok: true, session: { playerId: seat.id, generation } };
   }
 
-  private start(room: LiveRoom, seat: LiveSeat): void {
+  private start(room: LiveRoom, seat: LiveSeat, fixture: SoakFixture | null = null): void {
     if (seat.id !== room.hostId) {
       this.tell(seat, { type: "error", message: "Only the host can start." });
       return;
@@ -673,13 +681,18 @@ export class Hub {
     room.status = "playing";
     this.store.updateRoom(room.id, { status: "playing" });
     try {
-      this.openHand(room, match);
-    } catch {
+      if (fixture) this.openFixture(room, match, fixture);
+      else this.openHand(room, match);
+    } catch (error) {
       room.status = "lobby";
       room.match = null;
       this.store.updateRoom(room.id, { status: "lobby" });
       this.armBotFill(room);
-      this.tell(seat, { type: "error", message: "The deal didn't go through. Try again." });
+      const message =
+        fixture && error instanceof Error && error.message
+          ? error.message
+          : "The deal didn't go through. Try again.";
+      this.tell(seat, { type: "error", message });
       return;
     }
     this.broadcast(room);
@@ -924,6 +937,29 @@ export class Hub {
     room.handSeed = seed.toString("hex");
   }
 
+  /** A fixed soak deal. The hand seed stays hidden because the deck is not a shuffle. */
+  private openFixture(room: LiveRoom, match: MatchState, fixture: SoakFixture): void {
+    const next = fixture === "empty-knock" ? emptyBoneyardKnock(match) : scoreReel(match);
+    const handId = makeId("h");
+    const deck = allTileIds();
+    this.store.insertHand({
+      id: handId,
+      room_id: room.id,
+      series_id: room.seriesId,
+      game_number: next.gameNumber,
+      hand_number: next.handNumber,
+      seed: randomBytes(32).toString("hex"),
+      deck_json: JSON.stringify(deck),
+      result_json: null,
+      created_at: nowIso(),
+    });
+    room.match = next;
+    room.handId = handId;
+    room.actionSeq = 0;
+    room.recap = null;
+    room.handSeed = null;
+  }
+
   private solo(
     message: Extract<ClientMessage, { type: "solo" }>,
     send: (message: ServerMessage) => void,
@@ -951,7 +987,16 @@ export class Hub {
     if (!room || !seat) return { ok: false, error: "The table didn't open." };
     const difficulty = asDifficulty(message.difficulty);
     for (let count = 1; count < playerCount; count += 1) this.addBot(room, seat, difficulty);
-    this.start(room, seat);
+    if (unknownSoakFixture(message.fixture)) {
+      this.tell(seat, { type: "error", message: "That setup isn't a soak deal." });
+      return opened;
+    }
+    const fixture = cleanSoakFixture(message.fixture);
+    if (fixture && !room.soak) {
+      this.tell(seat, { type: "error", message: "That setup is only for a soak table." });
+      return opened;
+    }
+    this.start(room, seat, fixture);
     return opened;
   }
 

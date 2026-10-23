@@ -121,14 +121,20 @@ export function FeelTally({
   reduced: boolean;
 }) {
   const tally = handTally({ reason, pipCounts, winnerIds, awards });
+  const lineKey = tally.lines.join("\n");
   const [step, setStep] = useState(reduced ? tally.lines.length - 1 : 0);
+  const [seen, setSeen] = useState(lineKey);
+  if (seen !== lineKey) {
+    setSeen(lineKey);
+    setStep(reduced ? tally.lines.length - 1 : 0);
+  }
   useEffect(() => {
     if (reduced) return;
     const timers = tally.lines.map((_, index) => window.setTimeout(() => setStep(index), index * 700));
     return () => {
       for (const timer of timers) window.clearTimeout(timer);
     };
-  }, [reason, tally.lines.length, reduced]);
+  }, [lineKey, reduced]);
   const text = tally.lines[Math.min(step, tally.lines.length - 1)] ?? "";
   if (!text) return null;
   return (

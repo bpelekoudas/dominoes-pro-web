@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   chainBounds,
@@ -276,7 +277,12 @@ export function Table({
   // Keep the state object. A fresh literal would restart the shatter on every render.
   const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
   const popFrom = endsAt ?? landed;
-  const popAt = pop && popFrom && pop.tileId === lastTileId ? { left: popFrom.x, top: popFrom.y, place: "tile" as const } : null;
+  const livePopup = scorePopupText(view.lastPlay?.awarded ?? 0);
+  const popup = scorePopupForPlay(view.lastPlay, pop);
+  const popAt =
+    popup && pop && popFrom && pop.tileId === lastTileId
+      ? { left: popFrom.x, top: popFrom.y, place: "tile" as const }
+      : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
   useEffect(() => {
@@ -426,7 +432,7 @@ export function Table({
         </div>
         </div>
       ) : null}
-      {moment && anchor ? (
+      {moment && anchor && livePopup && livePopup === scorePopupText(moment.awarded) ? (
         <MomentLayer
           token={moment.key}
           awarded={moment.awarded}
@@ -464,8 +470,8 @@ export function Table({
       })}
       <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
       <FeelRipple knock={feel.knock} />
-      {pop && popAt ? (
-        <FlyingScore pop={pop} at={popAt} />
+      {popup && pop && popAt ? (
+        <FlyingScore pop={pop} text={popup.text} at={popAt} />
       ) : null}
     </div>
   );
@@ -633,16 +639,21 @@ function useBigMoment(
   moment: { key: string; awarded: number; tileId: string | null; effect: FxId } | null;
   dismissMoment: () => void;
 } {
-  const liveKey = lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}` : "";
+  const liveKey =
+    lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}:${lastPlay.awarded}` : "";
   const skip = useRef(liveKey);
   const playersRef = useRef(players);
   playersRef.current = players;
   const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null; effect: FxId } | null>(null);
+  if (moment && moment.key.startsWith("play-") && moment.key !== liveKey) setMoment(null);
   const dismiss = () => setMoment(null);
   useEffect(() => {
     if (liveKey === skip.current) return;
     skip.current = liveKey;
-    if (!liveKey || !lastPlay) return;
+    if (!liveKey || !lastPlay) {
+      setMoment((prev) => (prev && prev.key.startsWith("play-") ? null : prev));
+      return;
+    }
     const scorer = playersRef.current.find((player) => player.id === lastPlay.playerId);
     setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId, effect: normalizeFx(scorer?.effectId) });
   }, [liveKey, lastPlay]);
@@ -778,35 +789,45 @@ function faceOf(tileId: string | null): { a: number; b: number } {
 }
 
 function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null {
-  const awarded = lastPlay?.awarded ?? 0;
-  const seq = lastPlay && awarded >= 10 ? lastPlay.seq : -1;
+  const label = scoreDeltaLabel(lastPlay?.awarded ?? 0);
+  const liveKey = lastPlay && label != null ? `${lastPlay.seq}:${label}` : "";
   const tileId = lastPlay?.tileId ?? "";
   const endId = lastPlay?.endId ?? "";
   const playerId = lastPlay?.playerId ?? "";
   const [pop, setPop] = useState<{ seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null>(null);
+  const keyRef = useRef(liveKey);
+  keyRef.current = liveKey;
+  if (pop && `${pop.seq}:${pop.awarded}` !== liveKey) setPop(null);
   useEffect(() => {
-    if (seq < 0 || awarded < 10) {
-      setPop(null);
-      return;
-    }
+    if (!liveKey || label == null) return;
     // A routine award still appears at 460ms and leaves at 1100ms.
     // The flight into the chip happens inside that window.
-    const timing = scorePopWindow(awarded);
-    const show = window.setTimeout(() => setPop({ seq, awarded, tileId, endId, playerId }), timing.show);
-    const hide = window.setTimeout(() => setPop(null), timing.hide);
+    const timing = scorePopWindow(label);
+    const token = liveKey;
+    const awarded = label;
+    const seq = Number(liveKey.slice(0, liveKey.indexOf(":")));
+    const show = window.setTimeout(() => {
+      if (keyRef.current !== token) return;
+      setPop({ seq, awarded, tileId, endId, playerId });
+    }, timing.show);
+    const hide = window.setTimeout(() => {
+      setPop((prev) => (prev && `${prev.seq}:${prev.awarded}` === token ? null : prev));
+    }, timing.hide);
     return () => {
       window.clearTimeout(show);
       window.clearTimeout(hide);
     };
-  }, [seq, awarded, tileId, endId, playerId]);
-  return pop;
+  }, [liveKey, label, tileId, endId, playerId]);
+  return pop && `${pop.seq}:${pop.awarded}` === liveKey ? pop : null;
 }
 
 function FlyingScore({
   pop,
+  text,
   at,
 }: {
   pop: { seq: number; awarded: number; playerId: string };
+  text: string;
   at: { left: number; top: number; place: "tile" | "above" | "beside" };
 }) {
   const [spot, setSpot] = useState(at);
@@ -839,7 +860,7 @@ function FlyingScore({
       data-place={fly ? "fly" : at.place}
       data-fly={fly ? "1" : "0"}
     >
-      +{pop.awarded}
+      {text}
     </p>,
     document.body,
   );

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
+import { scorePopupText } from "./feel/score-delta.js";
 import { playUhOh, unlockSound } from "./sound.js";
 
 const SHAKE_MS = 400;
@@ -210,9 +211,9 @@ export function MomentLayer({
             <span>OH</span>
           </div>
         ) : (
-          <div className="uhoh-word">+{awarded}</div>
+          <div className="uhoh-word">{scorePopupText(awarded)}</div>
         )}
-        {cry ? <p className="uhoh-points">+{awarded}</p> : null}
+        {cry ? <p className="uhoh-points">{scorePopupText(awarded)}</p> : null}
       </div>
     </>
   );
