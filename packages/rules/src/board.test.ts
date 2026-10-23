@@ -299,4 +299,57 @@ describe("spinner", () => {
     expect(replaced.equation).toBe("0 + 2 + 0 + 0 = 2");
     expect(replaced.awarded).toBe(0);
   });
+
+  it("scores the live double-blank board as 5 + 2 and awards nothing", () => {
+    // Room with scores 100 and 75. The 2 is the tile past the 0-3, off the right of the picture.
+    const board = play([
+      ["lead", "0-0"],
+      ["east", "0-3"],
+      ["west", "0-5"],
+      ["east", "2-3"],
+    ]);
+    expect(board.center?.tileId).toBe("0-0");
+    expect(board.spinnerOpen).toBe(true);
+    expect(board.arms.west.map((tile) => tile.tileId)).toEqual(["0-5"]);
+    expect(board.arms.east.map((tile) => tile.tileId)).toEqual(["0-3", "2-3"]);
+    const scored = openScore(board);
+    expect(scored.parts).toEqual([5, 2]);
+    expect(scored.equation).toBe("5 + 2 = 7");
+    expect(scored.total).toBe(7);
+    expect(scored.awarded).toBe(0);
+  });
+
+  it("scores the live one-arm double-six as 2 + 12 and does not also add the 6", () => {
+    // Scores 65 and 75. The double-six still has one long side empty, so that side is 12 once.
+    const board = play([
+      ["lead", "6-6"],
+      ["west", "1-6"],
+      ["west", "1-3"],
+      ["west", "2-3"],
+    ]);
+    expect(board.center?.tileId).toBe("6-6");
+    expect(board.spinnerOpen).toBe(false);
+    expect(board.arms.east).toHaveLength(0);
+    const scored = openScore(board);
+    expect(scored.parts).toEqual([2, 12]);
+    expect(scored.equation).toBe("2 + 12 = 14");
+    expect(scored.total).toBe(14);
+    expect(scored.awarded).toBe(0);
+    expect(scored.parts).not.toContain(6);
+  });
+
+  it("counts a double at the end of an arm once, not as 12 and as 6", () => {
+    const board = play([
+      ["lead", "3-3"],
+      ["west", "2-3"],
+      ["east", "3-6"],
+      ["east", "6-6"],
+    ]);
+    expect(board.spinnerOpen).toBe(true);
+    expect(board.arms.east.at(-1)?.tileId).toBe("6-6");
+    const scored = openScore(board);
+    expect(scored.parts).toEqual([2, 12]);
+    expect(scored.equation).toBe("2 + 12 = 14");
+    expect(scored.awarded).toBe(0);
+  });
 });

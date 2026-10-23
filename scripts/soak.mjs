@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { alignedFronts, createSeatSync, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
+import { alignedFronts, createSeatSync, exposedTotal, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
 
 const runId = randomUUID();
 
@@ -42,7 +42,6 @@ const {
   boardAward,
   createMatch,
   gameWinnerId,
-  openScore,
   scoreDomino,
   scoreLocked,
   shuffleWithSeed,
@@ -717,8 +716,10 @@ async function playMatch(mode, index, options) {
       if (view.openTotal !== 0) throw new Error("An empty board reported open points.");
       return;
     }
-    const scored = openScore(view.board);
-    if (view.openTotal !== scored.total) throw new Error(`openTotal ${view.openTotal} is not the open-end sum ${scored.total}.`);
+    const exposed = exposedTotal(view.board);
+    if (view.openTotal !== exposed) {
+      throw new Error(`openTotal ${view.openTotal} is not the exposed-end total ${exposed}.`);
+    }
     if (view.lastPlay && view.lastPlay.awarded !== boardAward(view.lastPlay.total)) {
       throw new Error("The last play awarded points that are not the board award.");
     }

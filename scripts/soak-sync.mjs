@@ -75,6 +75,53 @@ export function handCountsMatch(fronts) {
   return true;
 }
 
+/**
+ * Pips on the open ends, walked from the tiles.
+ * A double's stored outward and the server's ends list are not read.
+ * A terminal double counts both halves once. An empty long side of a
+ * spinner that still has the other long side empty counts both halves
+ * once. After both long sides are played, an arm nobody has played adds nothing.
+ */
+export function exposedTotal(board) {
+  const center = board?.center;
+  if (!center) return 0;
+  const spinner = center.low === center.high;
+  const face = (dir) => (spinner || dir === "west" || dir === "north" ? center.low : center.high);
+  const west = board.arms?.west ?? [];
+  const east = board.arms?.east ?? [];
+  const opened = spinner && west.length > 0 && east.length > 0;
+  const dirs = opened ? ["west", "east", "north", "south"] : ["west", "east"];
+  let total = 0;
+  for (const dir of dirs) {
+    const arm = board.arms?.[dir] ?? [];
+    if (arm.length === 0) {
+      if (opened) continue;
+      const bare = spinner && west.length === 0 && east.length === 0;
+      total += !spinner || bare ? face(dir) : face(dir) * 2;
+      continue;
+    }
+    let match = face(dir);
+    let exposed = 0;
+    for (const tile of arm) {
+      if (tile.low !== match && tile.high !== match) {
+        throw new Error(`The ${dir} arm breaks at ${tile.tileId ?? "a tile"}.`);
+      }
+      if (tile.low === tile.high) {
+        exposed = tile.low * 2;
+        match = tile.low;
+      } else if (tile.low === match) {
+        exposed = tile.high;
+        match = tile.high;
+      } else {
+        exposed = tile.low;
+        match = tile.low;
+      }
+    }
+    total += exposed;
+  }
+  return total;
+}
+
 /** Points this public update should add for one player, given what was already checked. */
 export function scoreMove(player, view, before, prevPlaySeq, endedNow) {
   let expected = 0;

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   alignedFronts,
   createSeatSync,
+  exposedTotal,
   handCountsMatch,
   ingest,
   publicSignature,
@@ -164,6 +165,50 @@ test("a lobby update the joiner never saw does not block the deal", () => {
   assert.equal(fronts[0].handNumber, 1);
   assert.equal(handCountsMatch(fronts), true);
   assert.equal(host.queue.length, 1);
+});
+
+function bone(id, low, high) {
+  // Outward is deliberately wrong. The total has to come from which half is free.
+  return { tileId: id, low, high, inward: 9, outward: 9 };
+}
+
+test("the live double-blank board exposes 7, not 20", () => {
+  const board = {
+    center: { tileId: "0-0", low: 0, high: 0, westValue: 9, eastValue: 9 },
+    spinnerOpen: false,
+    arms: {
+      west: [bone("0-5", 0, 5)],
+      east: [bone("0-3", 0, 3), bone("2-3", 2, 3)],
+      north: [],
+      south: [],
+    },
+  };
+  assert.equal(exposedTotal(board), 7);
+});
+
+test("the live one-arm double-six exposes 14, and a terminal double-six is not also a 6", () => {
+  const oneArm = {
+    center: { tileId: "6-6", low: 6, high: 6, westValue: 0, eastValue: 0 },
+    spinnerOpen: true,
+    arms: {
+      west: [bone("1-6", 1, 6), bone("1-3", 1, 3), bone("2-3", 2, 3)],
+      east: [],
+      north: [],
+      south: [],
+    },
+  };
+  assert.equal(exposedTotal(oneArm), 14);
+
+  const terminal = {
+    center: { tileId: "3-3", low: 3, high: 3 },
+    arms: {
+      west: [bone("2-3", 2, 3)],
+      east: [bone("3-6", 3, 6), bone("6-6", 6, 6)],
+      north: [],
+      south: [],
+    },
+  };
+  assert.equal(exposedTotal(terminal), 14);
 });
 
 test("another player's hand is not queued as this seat's update", () => {
