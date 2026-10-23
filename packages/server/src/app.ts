@@ -281,63 +281,7 @@ export async function createApp(options: AppOptions = {}) {
     return { status: response.statusCode, ms: Math.round(performance.now() - started) };
   });
 
-  if (!options.store && process.env.DATA_DIR) dumpRoomHistory(app, store, "6DD8A2");
   return { app, store, accounts, hub, bots };
-}
-
-/** One-shot read so the reported 6-0 score can be replayed. Tokens stay out. */
-function dumpRoomHistory(app: { log: { info: (obj: unknown, msg?: string) => void } }, store: Store, code: string): void {
-  const room = store.roomByCode(code);
-  const rooms = store.db.prepare(`SELECT code, id, status, created_at FROM rooms ORDER BY created_at DESC LIMIT 30`).all();
-  const names = store.db
-    .prepare(`SELECT id, display_name FROM users WHERE display_name LIKE '%ryan%' OR display_name LIKE '%Bryan%'`)
-    .all();
-  app.log.info({ roomdump: { code, found: Boolean(room), rooms, names } }, "ROOMDUMP index");
-  const hits = store.db
-    .prepare(
-      `SELECT DISTINCT h.room_id AS roomId, h.series_id AS seriesId
-       FROM hands h
-       JOIN actions a ON a.hand_id = h.id
-       WHERE h.created_at >= '2026-10-22T12:00:00.000Z'
-         AND (a.payload_json LIKE '%"0-6"%' OR IFNULL(h.result_json, '') LIKE '%130%')`,
-    )
-    .all() as Array<{ roomId: string; seriesId: string }>;
-  app.log.info({ roomdump: { hits: hits.length } }, "ROOMDUMP hits");
-  for (const hit of hits) {
-    const saved = store.db
-      .prepare(`SELECT code, boneyard_mode, series_length, rules_version, player_count, status FROM rooms WHERE id = ?`)
-      .get(hit.roomId) as
-      | { code: string; boneyard_mode: string; series_length: number; rules_version: number | null; player_count: number; status: string }
-      | undefined;
-    const hands = store.handsForSeries(hit.roomId, hit.seriesId);
-    const interesting = hands.some((hand) => {
-      const actions = store.actions(hand.id);
-      const played = actions.some((action) => action.intent.type === "play" && action.intent.tileId === "0-6");
-      const scored = (hand.result_json ?? "").includes("130");
-      return played || scored;
-    });
-    if (!interesting) continue;
-    app.log.info(
-      { roomdump: { roomId: hit.roomId, seriesId: hit.seriesId, saved: saved ?? null, hands: hands.length } },
-      "ROOMDUMP series",
-    );
-    for (const hand of hands) {
-      app.log.info(
-        {
-          roomdump: {
-            roomId: hit.roomId,
-            g: hand.game_number,
-            h: hand.hand_number,
-            seed: hand.seed,
-            deck: JSON.parse(hand.deck_json) as string[],
-            result: hand.result_json ? (JSON.parse(hand.result_json) as unknown) : null,
-            actions: store.actions(hand.id).map((action) => ({ p: action.playerId, i: action.intent })),
-          },
-        },
-        "ROOMDUMP hand",
-      );
-    }
-  }
 }
 
 function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {

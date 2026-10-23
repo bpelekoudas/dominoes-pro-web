@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { boardAward } from "./score.js";
 import { tileById } from "./tiles.js";
 import { emptyBoard, openEnds, openEquation, openScore, openTotal, placeTile, tilesOnBoard } from "./board.js";
+import { layoutBoard } from "./layout.js";
 
 function play(ids: Array<[string, string]>): ReturnType<typeof emptyBoard> {
   let board = emptyBoard();
@@ -256,5 +257,46 @@ describe("spinner", () => {
     ]);
     expect(openTotal(board)).toBe(14);
     expect(openEquation(board)).toBe("8 + 6 = 14");
+  });
+
+  it("scores the live turned-up 6-0 board as 8 and awards nothing", () => {
+    // The saved hand behind the reported screenshot. The 6 on the arm that
+    // has turned upward is the 6-0 itself, played onto a blank.
+    const before = play([
+      ["lead", "4-4"],
+      ["west", "4-6"],
+      ["west", "3-6"],
+      ["east", "3-4"],
+      ["south", "1-4"],
+      ["west", "0-3"],
+      ["south", "1-1"],
+      ["south", "0-1"],
+      ["north", "2-4"],
+      ["north", "0-2"],
+      ["east", "2-3"],
+    ]);
+    expect(before.arms.south.map((tile) => tile.tileId)).toEqual(["1-4", "1-1", "0-1"]);
+    const beforeScore = openScore(before);
+    expect(beforeScore.parts).toEqual([0, 2, 0, 0]);
+    expect(beforeScore.equation).toBe("0 + 2 + 0 + 0 = 2");
+    expect(beforeScore.awarded).toBe(0);
+
+    const shot = placeTile(before, "west", tileById("0-6"));
+    const scored = openScore(shot);
+    expect(scored.parts).toEqual([6, 2, 0, 0]);
+    expect(scored.equation).toBe("6 + 2 + 0 + 0 = 8");
+    expect(scored.awarded).toBe(0);
+    expect(openEnds(shot).find((end) => end.id === "south")?.scorePips).toBe(0);
+
+    const westTip = layoutBoard(shot).tiles.filter((tile) => tile.arm === "west").at(-1)!;
+    expect(westTip.tileId).toBe("0-6");
+    expect(westTip.direction).toBe("north");
+    expect(westTip.a).toBe(6);
+
+    // Playing a 6-0 onto that 6, the other reading of the same picture, leaves 2.
+    const onTheSix = placeTile(shot, "west", tileById("0-6"));
+    const replaced = openScore(onTheSix);
+    expect(replaced.equation).toBe("0 + 2 + 0 + 0 = 2");
+    expect(replaced.awarded).toBe(0);
   });
 });
