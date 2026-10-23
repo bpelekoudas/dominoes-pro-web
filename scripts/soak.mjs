@@ -1,7 +1,7 @@
 /**
  * Post-deploy soak. Plays full matches as headless guests against a live server.
  *
- *   npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
+ *   npm run soak -- --url https://uhohdominoes.com --matches 8 --seats 4
  *
  * Node 22 has a global WebSocket that can send the session cookie. Node 20 uses the `ws` package.
  * `npm run build:rules` first so the replay checker can import @uhoh/rules.
@@ -56,7 +56,7 @@ if (args.replay) {
 }
 
 if (!args.url) {
-  console.error("Pass --url https://host . Example: npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4");
+  console.error("Pass --url https://host . Example: npm run soak -- --url https://uhohdominoes.com --matches 8 --seats 4");
   process.exit(1);
 }
 

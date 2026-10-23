@@ -77,7 +77,7 @@ That serves the site and the socket on port 8787. The database file is `data/uho
 After a deploy, this plays complete headless matches against a running site and checks the rules on every update. It uses guest accounts whose names start with `soak-`. The server marks those accounts and their private tables, skips their stats, hides them from both leaderboards, and deletes them when that run cleans up. Each run has its own id, and cleanup only drops that id, so two soaks can be in flight without ending each other's games.
 
 ```bash
-npm run soak -- --url https://uhoh-dominoes.onrender.com --matches 8 --seats 4
+npm run soak -- --url https://uhohdominoes.com --matches 8 --seats 4
 ```
 
 `--seats 4` includes 2-, 3-, and 4-player tables. The eight matches cover draw-until and draw-one, and best of 3, 5, and 7, all to 150. The run is sequential. Every public update stays queued until all seats have it, so a fast computer turn cannot hide a score or a deal from a slower socket, and a reconnect ignores the socket it replaced. It fails if a move is illegal, a score disagrees with the open ends or the end-of-hand award, a tile is duplicated or missing, the turn order skips, a knock happens while a tile can be played, the target or the series length is wrong, the table goes quiet for more than 20 seconds, or the server returns an error, a disconnect, or a 5xx. A knock on an empty boneyard that freezes the table fails on its own. One seat reconnects once mid-run. Node 22 uses the built-in WebSocket. Node 20, and `SOAK_WS=ws` on newer Node, use the `ws` package. The restore drill boots a local Node 22 server. On Node 20 that drill is skipped and named on its own line, so it is not a soak failure.
@@ -90,7 +90,9 @@ Add `--no-ui` to skip the browser check. Without that flag, the run opens the si
 
 While a hand is going, a scoring play floats `+N` in gold from that end for about a second. The addition across the open ends, such as `2+2+6+5=15`, stays on by default as a compact line so a test table can be checked by eye. To hide the addition, set `SHOW_SCORE_MATH` to `0` (`false`, `off`, and `no` also hide it) and restart the server. Unset, empty, or `1` leaves it on. The page reads the flag from `/config.js` when it loads, so changing it does not need a rebuild.
 
-The copy link uses that same `/config.js` address: `PUBLIC_URL` if you set it, otherwise the host the request came in on. A phone on the Render table copies an `onrender.com` link. Set `PUBLIC_URL` only when that host header is not the address friends should open (a tunnel, for example).
+The copy link uses that same `/config.js` address. `PUBLIC_URL` wins when it is set. Otherwise the public site publishes `https://uhohdominoes.com`, including when the request came in on `www` or `uhoh-dominoes.onrender.com`. A local table still copies the host you opened. Set `PUBLIC_URL` for a tunnel.
+
+`https://uhoh-dominoes.onrender.com` and `www.uhohdominoes.com` answer with a 301 to `https://uhohdominoes.com`, except `/health`, `/api/…`, and `/ws`. The soak can keep using the Render hostname for those. Its phone step follows the redirect onto the custom domain.
 
 ## Deploy
 
@@ -124,7 +126,7 @@ The free service is $0, and it is the wrong place for this test. It cannot have 
 3. In the Render dashboard, choose **New**, then **Blueprint**.
 4. Pick the `dominoes-pro-web` repository, then pick the branch `cursor/multiplayer-rebuild-238c`. After that branch is merged, pick `main` instead.
 5. Render shows the service from `render.yaml`. The name is `uhoh-dominoes`, the plan is the $7 instance, and the disk is 1 GB. Apply it. The first build takes a few minutes.
-6. When the service says it is live, open the `onrender.com` address Render shows. Create a room on your phone and send the link.
+6. When the service says it is live, open `https://uhohdominoes.com`. Create a room on your phone and send the link. The `onrender.com` address redirects there.
 
 A new deploy stops the old copy for a few seconds before the new one starts. That is how a disk stays consistent. Phones show "Reconnecting…" and sit back down by themselves. The game file lives on the disk at `/var/data`, so rooms survive that restart.
 

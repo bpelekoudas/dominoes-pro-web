@@ -311,6 +311,15 @@ describe("accounts", () => {
     });
     expect(foreign.statusCode).toBe(403);
 
+    const fromCanonical = await app.inject({
+      method: "POST",
+      url: "/api/guest",
+      headers: { origin: "https://uhohdominoes.com", host: "uhoh-dominoes.onrender.com" },
+      payload: { displayName: "Canonical" },
+    });
+    expect(fromCanonical.statusCode).toBe(200);
+    expect(String(fromCanonical.headers["set-cookie"])).not.toContain("Domain=");
+
     const google = await app.inject({ method: "POST", url: "/api/auth/google", payload: { idToken: "x" } });
     expect(google.statusCode).toBe(503);
     expect(google.json().error).toBe("Google sign-in is not configured yet.");
@@ -326,6 +335,19 @@ describe("accounts", () => {
     expect(mailed.statusCode).toBe(200);
     const devLink = mailed.json().devLink as string;
     expect(devLink.startsWith("http://127.0.0.1:8901/?email-token=")).toBe(true);
+
+    const previousPublic = process.env.PUBLIC_URL;
+    delete process.env.PUBLIC_URL;
+    const aliasMail = await app.inject({
+      method: "POST",
+      url: "/api/auth/email",
+      headers: { host: "uhoh-dominoes.onrender.com" },
+      payload: { email: "alias@example.com" },
+    });
+    if (previousPublic === undefined) delete process.env.PUBLIC_URL;
+    else process.env.PUBLIC_URL = previousPublic;
+    expect(aliasMail.statusCode).toBe(200);
+    expect(String(aliasMail.json().devLink).startsWith("https://uhohdominoes.com/?email-token=")).toBe(true);
     const token = new URL(devLink).searchParams.get("email-token");
     const consumed = await app.inject({
       method: "POST",
@@ -341,6 +363,41 @@ describe("accounts", () => {
     expect(signedOut.statusCode).toBe(200);
     const after = await app.inject({ method: "GET", url: "/api/me", headers: { cookie: pair } });
     expect(after.statusCode).toBe(401);
+    const home = await app.inject({
+      method: "GET",
+      url: "/r/AB12CD",
+      headers: { host: "uhoh-dominoes.onrender.com" },
+    });
+    expect(home.statusCode).toBe(301);
+    expect(home.headers.location).toBe("https://uhohdominoes.com/r/AB12CD");
+
+    const wwwHealth = await app.inject({
+      method: "GET",
+      url: "/health",
+      headers: { host: "www.uhohdominoes.com" },
+    });
+    expect(wwwHealth.statusCode).toBe(200);
+
+    const api = await app.inject({
+      method: "POST",
+      url: "/api/guest",
+      headers: { host: "uhoh-dominoes.onrender.com" },
+      payload: { displayName: "Still here" },
+    });
+    expect(api.statusCode).toBe(200);
+
+    const savedPublic = process.env.PUBLIC_URL;
+    delete process.env.PUBLIC_URL;
+    const canonicalHome = await app.inject({
+      method: "GET",
+      url: "/config.js",
+      headers: { host: "uhohdominoes.com", "x-forwarded-proto": "https" },
+    });
+    if (savedPublic === undefined) delete process.env.PUBLIC_URL;
+    else process.env.PUBLIC_URL = savedPublic;
+    expect(canonicalHome.statusCode).toBe(200);
+    expect(canonicalHome.body).toContain('"publicUrl":"https://uhohdominoes.com"');
+
     await app.close();
   });
 });

@@ -3,8 +3,8 @@ import { tableLink } from "./link.js";
 
 describe("tableLink", () => {
   it("prefers the public URL over a loopback origin", () => {
-    expect(tableLink("AB12CD", "https://uhoh-dominoes.onrender.com/", "http://127.0.0.1:8787")).toBe(
-      "https://uhoh-dominoes.onrender.com/r/AB12CD",
+    expect(tableLink("AB12CD", "https://uhohdominoes.com/", "http://127.0.0.1:8787")).toBe(
+      "https://uhohdominoes.com/r/AB12CD",
     );
   });
 

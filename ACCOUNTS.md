@@ -27,22 +27,23 @@ Paste these in the Render service. Do not commit the values.
 | `APPLE_KEY_ID` | Sign in with Apple |
 | `APPLE_PRIVATE_KEY` | Sign in with Apple (the whole `.p8` PEM, including the BEGIN and END lines) |
 | `RESEND_API_KEY` | Emailing the magic link |
-| `EMAIL_FROM` | The From address Resend is allowed to send as |
+| `EMAIL_FROM` | The From address Resend is allowed to send as. Use `play@uhohdominoes.com` once that domain shows verified |
+| `PUBLIC_URL` | Optional. Set to `https://uhohdominoes.com` so every link uses that address even if a proxy sends another host |
 
 `SHOW_SCORE_MATH` stays as it is. Do not set `NODE_ENV` in `render.yaml`.
 
 ## Google
 
-1. In Google Cloud Console, create an OAuth client of type **Web application**.
-2. Under **Authorized JavaScript origins**, add `https://uhoh-dominoes.onrender.com`. When the custom domain is ready, add `https://uhohdominoes.com` as well.
-3. Copy the client id into `GOOGLE_CLIENT_ID`.
+1. In Google Cloud Console, open the OAuth client of type **Web application** whose id is `GOOGLE_CLIENT_ID`.
+2. Under **Authorized JavaScript origins**, add `https://uhohdominoes.com`. The button runs on that origin. Keep `https://uhoh-dominoes.onrender.com` only if you still open the game there.
+3. This sign-in does not use a redirect URI. If the console requires one, set `https://uhohdominoes.com`.
 
 The server checks Google's signed ID token. It does not need a client secret for this.
 
 ## Apple
 
 1. In the Apple Developer account, turn on Sign in with Apple and create a Services ID. That Services ID is `APPLE_CLIENT_ID`.
-2. Register the domain and set the return URL to `https://uhoh-dominoes.onrender.com/` (and later `https://uhohdominoes.com/`).
+2. Register the domain `uhohdominoes.com` and set the return URL to `https://uhohdominoes.com/`. That is the exact `redirectURI` the page sends.
 3. Create a Sign in with Apple key. The key id is `APPLE_KEY_ID`. The team id is `APPLE_TEAM_ID`. Download the `.p8` file once and paste its PEM text into `APPLE_PRIVATE_KEY`.
 
 All four values have to be present or the Apple button stays in the "not configured" state. This version checks Apple's ID token with Apple's public keys. The private key is stored so the setup is complete; it is not written to the log.
@@ -50,7 +51,7 @@ All four values have to be present or the Apple button stays in the "not configu
 ## Email (Resend)
 
 1. Create a Resend API key and set `RESEND_API_KEY`.
-2. Verify the domain you will send from, then set `EMAIL_FROM` to an address on that domain.
+2. Verify `uhohdominoes.com` in Resend, then set `EMAIL_FROM` to `play@uhohdominoes.com`. Until that domain is verified, leave `EMAIL_FROM` empty so a failed send does not replace the test link.
 
 Until both are set, production with score math off refuses email sign-in. The live site currently has score math on, so the test link is shown until Resend is filled in. When Resend is set, the link is not returned to the browser and is not printed in the log.
 

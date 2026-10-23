@@ -18,7 +18,7 @@ import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, 
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
-import { publicBase } from "./public-url.js";
+import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
 
 export interface AppOptions {
   store?: Store;
@@ -59,6 +59,11 @@ export async function createApp(options: AppOptions = {}) {
     trustProxy: true,
   });
   await app.register(websocket);
+
+  app.addHook("onRequest", async (request, reply) => {
+    const target = aliasRedirect(requestHost(request), request.url);
+    if (target) return reply.redirect(target, 301);
+  });
 
   app.get("/health", async () => ({ ok: true }));
 
@@ -210,6 +215,10 @@ export async function createApp(options: AppOptions = {}) {
   });
 
   app.get("/ws", { websocket: true }, (socket, request) => {
+    if (!originOk(request)) {
+      socket.close(1008, "That request came from somewhere else.");
+      return;
+    }
     let session: { playerId: string; generation: number } | null = null;
     const accountUserId = accounts.userFromCookieHeader(request.headers.cookie)?.id ?? null;
     let sawPong = true;
@@ -268,8 +277,12 @@ export async function createApp(options: AppOptions = {}) {
     const webDist = path.resolve(here, "../../web/dist");
     if (existsSync(webDist)) {
       await app.register(fastifyStatic, { root: webDist });
+      const indexFile = path.join(webDist, "index.html");
       app.setNotFoundHandler((request, reply) => {
-        if (request.method === "GET" && !request.url.startsWith("/ws")) return reply.sendFile("index.html");
+        if (request.method === "GET" && !request.url.startsWith("/ws") && existsSync(indexFile)) {
+          reply.type("text/html; charset=utf-8").header("cache-control", "no-cache");
+          return reply.send(withCanonical(readFileSync(indexFile, "utf8"), canonicalPage(request.url)));
+        }
         return reply.code(404).send({ error: "Not found" });
       });
     }
@@ -298,15 +311,16 @@ function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInRe
 function originOk(request: FastifyRequest): boolean {
   const origin = request.headers.origin;
   if (!origin || Array.isArray(origin)) return !origin;
-  let host = "";
+  let parsed: URL;
   try {
-    host = new URL(origin).host;
+    parsed = new URL(origin);
   } catch {
     return false;
   }
+  if ((PUBLISHED_ORIGINS as readonly string[]).includes(parsed.origin)) return true;
   const forwarded = request.headers["x-forwarded-host"];
   const forwardedHost = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
-  return host === request.headers.host || (!!forwardedHost && host === forwardedHost);
+  return parsed.host === request.headers.host || (!!forwardedHost && parsed.host === forwardedHost);
 }
 
 function requestHost(request: FastifyRequest): string {
