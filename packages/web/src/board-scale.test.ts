@@ -413,6 +413,51 @@ describe("board scale", () => {
     }
     expect(checked).toBeGreaterThan(40);
   }, 40_000);
+
+  it("keeps a settled 4-seat chain off the badges while the camera ease can still cross one", () => {
+    const tables = [
+      { name: "phone", felt: { w: 390, h: 644 }, screen: 390 },
+      { name: "fold", felt: { w: 920, h: 776 }, screen: 920 },
+      { name: "fold-land", felt: { w: 1024, h: 700 }, screen: 1024 },
+    ];
+    let settled = 0;
+    let crossed = 0;
+    for (const table of tables) {
+      for (let seed = 1; seed <= 24; seed += 1) {
+        let previous: { scale: number; shiftX: number; shiftY: number } | null = null;
+        for (const board of playHands(4, seed)) {
+          const count = board.center
+            ? 1 + board.arms.west.length + board.arms.east.length + board.arms.north.length + board.arms.south.length
+            : 0;
+          if (count < 4) continue;
+          const zones = seatZones(table.felt, 4);
+          const layout = layoutForBoard(board, table.felt, table.screen, zones);
+          const frame = chainBounds(layout.tiles, 0);
+          const shot = followCamera({
+            frame,
+            ends: layout.ends,
+            tiles: layout.tiles,
+            felt: table.felt,
+            screenWidth: table.screen,
+            zones,
+          });
+          expect(
+            tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
+            `${table.name} seed ${seed} ${count} tiles`,
+          ).toBe(true);
+          settled += 1;
+          if (previous && Math.abs(previous.scale - shot.scale) > 0.05) {
+            const easing = !tilesClear(layout.tiles, frame, table.felt, previous.scale, previous.shiftX, previous.shiftY, zones, 0);
+            if (easing) crossed += 1;
+          }
+          previous = { scale: shot.scale, shiftX: shot.shiftX, shiftY: shot.shiftY };
+        }
+      }
+    }
+    expect(settled).toBeGreaterThan(400);
+    // The soak waits for this ease. The settled frame above is the one that has to stay clear.
+    expect(crossed).toBeGreaterThan(0);
+  }, 40_000);
 });
 
 const PHONE_RESERVE = { top: 62, right: 63, bottom: 30, left: 63 };

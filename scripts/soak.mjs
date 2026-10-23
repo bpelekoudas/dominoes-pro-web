@@ -129,7 +129,7 @@ try {
   if (report.reconnect === "pending") report.reconnect = "skipped";
   if (!args.noUi) {
     console.log("UI smoke at 390×844");
-    report.ui = await uiSmoke(pageUrl.origin);
+    report.ui = await uiSmoke(pageUrl.origin, args.out);
     console.log(`  ${report.ui.summary}`);
   } else {
     report.ui = { ok: true, skipped: true, summary: "skipped (--no-ui)" };
@@ -1026,7 +1026,7 @@ async function takeUiTurn(page) {
   if (await page.locator("[data-action=continue]").count()) await page.locator("[data-action=continue]").first().click();
 }
 
-async function uiSmoke(origin) {
+async function uiSmoke(origin, outDir = "soak-reports") {
   let chromium;
   try {
     const imported = await import("playwright-core");
@@ -1069,8 +1069,15 @@ async function uiSmoke(origin) {
       await takeUiTurn(page);
       await page.waitForTimeout(350);
     }
+    // The new chain is on screen immediately, and the camera eases onto it for
+    // 360ms. A landing hop can also carry the last tile onto a badge. Both are
+    // gone once the picture settles, which is the frame this check is about.
+    await settleCamera(page);
     const audit = await page.evaluate(auditTable);
-    if (!audit.ok) throw new Error(audit.reason);
+    if (!audit.ok) {
+      const saved = await saveUiFailure(page, outDir, audit);
+      throw new Error(`${audit.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
     return { ok: true, skipped: false, summary: audit.summary };
@@ -1079,25 +1086,101 @@ async function uiSmoke(origin) {
   }
 }
 
+async function settleCamera(page) {
+  await page.evaluate(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const moving = () => {
+      const nodes = document.querySelectorAll(".board-scaler, .board-stage, .board-tile, .table-scroll");
+      for (const node of nodes) {
+        for (const anim of node.getAnimations()) {
+          const iterations = anim.effect?.getComputedTiming?.().iterations ?? 1;
+          if (anim.playState === "running" && iterations !== Infinity) return true;
+        }
+      }
+      return false;
+    };
+    const started = performance.now();
+    while (performance.now() - started < 2500) {
+      if (!moving()) {
+        await sleep(60);
+        if (!moving()) return;
+      }
+      await sleep(40);
+    }
+  });
+}
+
+async function saveUiFailure(page, outDir, audit) {
+  mkdirSync(outDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const shot = path.join(outDir, `ui-overlap-${stamp}.png`);
+  const dump = path.join(outDir, `ui-overlap-${stamp}.json`);
+  await page.screenshot({ path: shot });
+  writeFileSync(dump, JSON.stringify(audit, null, 2));
+  return { shot, dump };
+}
+
 function auditTable() {
   const felt = document.querySelector(".table-scroll");
   if (!felt) return { ok: false, reason: "The table is not on screen." };
+  const round = (value) => Math.round(value * 10) / 10;
+  const plain = (box) => ({
+    left: round(box.left),
+    top: round(box.top),
+    right: round(box.right),
+    bottom: round(box.bottom),
+    width: round(box.width),
+    height: round(box.height),
+  });
+  const camera = {};
+  for (const name of felt.getAttributeNames()) {
+    if (name.startsWith("data-")) camera[name] = felt.getAttribute(name);
+  }
+  const scaler = felt.querySelector(".board-scaler");
+  const stage = felt.querySelector(".board-stage");
+  const motion = {
+    camera: felt.getAttribute("data-camera"),
+    running: [...felt.querySelectorAll(".board-scaler, .board-stage, .board-tile")].some((node) =>
+      node.getAnimations().some((anim) => {
+        const iterations = anim.effect?.getComputedTiming?.().iterations ?? 1;
+        return anim.playState === "running" && iterations !== Infinity;
+      }),
+    ),
+    scaler: scaler ? getComputedStyle(scaler).transform : null,
+    stage: stage ? getComputedStyle(stage).transform : null,
+  };
   const safe = felt.getBoundingClientRect();
   const tiles = [...felt.querySelectorAll("[data-board-tile]")];
-  if (tiles.length === 0) return { ok: false, reason: "No board tiles to measure." };
-  const zones = [...document.querySelectorAll(".edge-badge, .edge-slivers, .playbar, .hand-tray, .seat-pips")].map((node) =>
-    node.getBoundingClientRect(),
-  );
+  const evidence = { felt: plain(safe), camera, motion, tiles: tiles.length };
+  if (tiles.length === 0) return { ok: false, reason: "No board tiles to measure.", ...evidence };
+  const zones = [...document.querySelectorAll(".edge-badge, .edge-slivers, .playbar, .hand-tray, .seat-pips")].map((node) => {
+    const edge = node.closest("[data-edge]")?.getAttribute("data-edge") ?? "";
+    const classes = typeof node.className === "string" ? node.className : "";
+    return { selector: [edge && `edge-${edge}`, classes].filter(Boolean).join(" "), box: node.getBoundingClientRect() };
+  });
   const overlaps = (a, b) => a.left < b.right - 0.6 && a.right > b.left + 0.6 && a.top < b.bottom - 0.6 && a.bottom > b.top + 0.6;
   for (const tile of tiles) {
     const box = tile.getBoundingClientRect();
+    const tileId = tile.getAttribute("data-board-tile");
     const inside =
       box.left >= safe.left - 0.6 && box.top >= safe.top - 0.6 && box.right <= safe.right + 0.6 && box.bottom <= safe.bottom + 0.6;
-    if (!inside) return { ok: false, reason: "A tile sits outside the felt." };
-    if (zones.some((zone) => overlaps(box, zone))) return { ok: false, reason: "A tile sits under a seat badge or the rack." };
+    if (!inside) {
+      return { ok: false, reason: "A tile sits outside the felt.", tile: { id: tileId, rect: plain(box) }, ...evidence };
+    }
+    const hit = zones.find((zone) => overlaps(box, zone.box));
+    if (hit) {
+      return {
+        ok: false,
+        reason: "A tile sits under a seat badge or the rack.",
+        tile: { id: tileId, rect: plain(box) },
+        zone: { selector: hit.selector, rect: plain(hit.box) },
+        zones: zones.map((zone) => ({ selector: zone.selector, rect: plain(zone.box) })),
+        ...evidence,
+      };
+    }
   }
   const rail = document.querySelector(".edge-top");
-  if (!rail) return { ok: false, reason: "The top seat is missing, so the reaction bubble was not checked." };
+  if (!rail) return { ok: false, reason: "The top seat is missing, so the reaction bubble was not checked.", ...evidence };
   const bubble = document.createElement("p");
   bubble.className = "talk-bubble talk-reaction";
   bubble.textContent = "👀";
@@ -1107,7 +1190,15 @@ function auditTable() {
   const onTile = tiles.some((tile) => overlaps(bubbleBox, tile.getBoundingClientRect()));
   const inRail = bubbleBox.top >= railBox.top - 1 && bubbleBox.bottom <= railBox.bottom + 1;
   bubble.remove();
-  if (!inRail || onTile) return { ok: false, reason: "The top-seat reaction covers a board tile." };
+  if (!inRail || onTile) {
+    return {
+      ok: false,
+      reason: "The top-seat reaction covers a board tile.",
+      bubble: plain(bubbleBox),
+      rail: plain(railBox),
+      ...evidence,
+    };
+  }
   return { ok: true, summary: `${tiles.length} tiles inside the safe rect, reaction clear of the chain` };
 }
 

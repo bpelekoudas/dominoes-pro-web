@@ -307,7 +307,13 @@ export class Accounts {
       try {
         await sender(email, link);
       } catch {
-        return { ok: false, error: "The email could not be sent. Try again in a minute.", status: 502 };
+        // A refused send (the domain is not verified yet, or the provider is down)
+        // is our outage. 502 makes Render and the browser treat it as a dead edge.
+        return {
+          ok: false,
+          error: "Email sign-in is temporarily unavailable, try Google or play as guest",
+          status: 503,
+        };
       }
       return { ok: true };
     }

@@ -49,6 +49,20 @@ export interface AccountController {
   stay: () => void;
 }
 
+const EMAIL_SIGNIN_UNAVAILABLE = "Email sign-in is temporarily unavailable, try Google or play as guest";
+
+/** What the player reads when a magic-link request is refused. */
+export function magicLinkNotice(status: number, error: string | undefined): string {
+  if (status === 400 || status === 429) return error || "That email could not be sent.";
+  // 502 was the old send failure. 503 is the clean one. An empty body
+  // (a proxy page, or the old gateway text) still gets the friendly line.
+  if (status === 502 || status === 503) {
+    if (error && error !== "The email could not be sent. Try again in a minute.") return error;
+    return EMAIL_SIGNIN_UNAVAILABLE;
+  }
+  return error || "That email could not be sent.";
+}
+
 export function useAccount(): AccountController {
   const [user, setUser] = useState<AccountUser | null>(null);
   const [ready, setReady] = useState(false);
@@ -251,7 +265,7 @@ export function useAccount(): AccountController {
         const response = await postJson("/api/auth/email", { email });
         const body = (await response.json().catch(() => ({}))) as { error?: string; devLink?: string; ok?: boolean };
         if (!response.ok) {
-          setNotice(body.error ?? "That email could not be sent.");
+          setNotice(magicLinkNotice(response.status, body.error));
           return;
         }
         if (body.devLink) {

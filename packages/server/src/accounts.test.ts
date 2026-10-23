@@ -158,6 +158,41 @@ describe("accounts", () => {
     expect(refused.error).toBe("Email sign-in is not available yet.");
   });
 
+  it("answers a refused magic-link send with a clean error, not a 502", async () => {
+    const store = new Store(":memory:");
+    const accounts = accountsFor(store, {
+      secret: SECRET,
+      devMagicLink: false,
+      resendApiKey: "re_test",
+      emailFrom: "login@example.com",
+      sendEmail: async () => {
+        throw new Error("domain is not verified");
+      },
+    });
+    const refused = await accounts.requestMagicLink({
+      email: "bryan@example.com",
+      currentUserId: null,
+      ip: "203.0.113.10",
+      origin: "https://uhohdominoes.com",
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error("The send should have failed.");
+    expect(refused.status).not.toBe(502);
+    expect(refused.status).toBe(503);
+    expect(refused.error).toBe("Email sign-in is temporarily unavailable, try Google or play as guest");
+
+    const { app } = await createApp({ store, accounts, serveWeb: false });
+    const mailed = await app.inject({
+      method: "POST",
+      url: "/api/auth/email",
+      headers: { host: "uhohdominoes.com", "x-forwarded-proto": "https" },
+      payload: { email: "player@example.com" },
+    });
+    expect(mailed.statusCode).toBe(503);
+    expect(mailed.json().error).toBe("Email sign-in is temporarily unavailable, try Google or play as guest");
+    await app.close();
+  });
+
   it("rejects a bad session and an expired session", () => {
     const store = new Store(":memory:");
     const accounts = accountsFor(store);
