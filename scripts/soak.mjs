@@ -182,6 +182,7 @@ async function computerKnockProbe() {
     }
     if (message.type === "error") {
       failure = `Server error: ${message.message}`;
+      if (seat.onView) seat.onView();
       return;
     }
     if (message.type === "welcome") {
@@ -192,6 +193,7 @@ async function computerKnockProbe() {
     if (message.type !== "state") return;
     seat.view = message.view;
     if (seat.onReady) seat.onReady();
+    if (seat.onView) seat.onView();
     const view = seat.view;
     if (
       view.boneyardCount === 0 &&
@@ -221,8 +223,9 @@ async function computerKnockProbe() {
     }),
   );
   await ready;
-  const opened = seat.view;
-  if (!failure && (!opened || opened.boneyardCount !== 0 || opened.phase !== "knock" || opened.canKnock !== true)) {
+  // The welcome is followed by the lobby, then the fixture deal. Read the deal, not the first state.
+  const opened = await waitForKnockDeal(seat, () => failure);
+  if (!failure && !knockDealReady(opened, seat.playerId)) {
     failure = "The knock fixture did not put an empty boneyard on your turn.";
   }
   const deadline = Date.now() + 90_000;
@@ -286,6 +289,38 @@ function probeIntent(view) {
   if (view.phase === "draw") return { type: "draw" };
   if (!view.canKnock) throw new Error("A knock was offered while a tile could be played.");
   return { type: "knock" };
+}
+
+function knockDealReady(view, playerId) {
+  return Boolean(
+    view &&
+      view.boneyardCount === 0 &&
+      view.turnPlayerId === playerId &&
+      view.phase === "knock" &&
+      view.canKnock === true,
+  );
+}
+
+/** Resolves on the fixture deal, a server error, or the timeout. Not a fixed pause. */
+function waitForKnockDeal(seat, failed) {
+  const timeoutMs = 10_000;
+  return new Promise((resolve) => {
+    const finish = (view) => {
+      clearTimeout(timer);
+      seat.onView = null;
+      resolve(view ?? null);
+    };
+    const timer = setTimeout(() => finish(seat.view), timeoutMs);
+    const consider = () => {
+      if (failed()) {
+        finish(seat.view);
+        return;
+      }
+      if (knockDealReady(seat.view, seat.playerId)) finish(seat.view);
+    };
+    seat.onView = consider;
+    consider();
+  });
 }
 
 function waitSeat(seat) {
