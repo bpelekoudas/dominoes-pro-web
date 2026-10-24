@@ -44,6 +44,7 @@ describe("alias redirect", () => {
     expect(aliasRedirect("uhoh-dominoes.onrender.com", "/health")).toBeNull();
     expect(aliasRedirect("uhoh-dominoes.onrender.com", "/api/guest")).toBeNull();
     expect(aliasRedirect("uhoh-dominoes.onrender.com", "/api/soak/cleanup")).toBeNull();
+    expect(aliasRedirect("uhoh-dominoes.onrender.com", "/api/stripe/webhook")).toBeNull();
     expect(aliasRedirect("www.uhohdominoes.com", "/ws")).toBeNull();
   });
 
@@ -58,6 +59,8 @@ describe("canonical page", () => {
     expect(canonicalPage("/r/ab12cd")).toBe("https://uhohdominoes.com/r/AB12CD");
     expect(canonicalPage("/")).toBe("https://uhohdominoes.com/");
     expect(canonicalPage("/nope")).toBe("https://uhohdominoes.com/");
+    expect(canonicalPage("/terms")).toBe("https://uhohdominoes.com/terms");
+    expect(canonicalPage("/privacy")).toBe("https://uhohdominoes.com/privacy");
   });
 
   it("rewrites the canonical link and the Open Graph URL", () => {

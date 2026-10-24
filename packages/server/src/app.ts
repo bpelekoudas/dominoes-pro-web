@@ -18,13 +18,17 @@ import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, 
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
+import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
+import { CoinShop, shopFromEnv, WEBHOOK_PATH } from "./stripe-shop.js";
 
 export interface AppOptions {
   store?: Store;
   accounts?: Accounts;
   /** Skip the static site. Tests use this. */
   serveWeb?: boolean;
+  /** Tests pass a shop. Production builds one from the environment. */
+  shop?: CoinShop;
 }
 
 export async function createApp(options: AppOptions = {}) {
@@ -44,6 +48,12 @@ export async function createApp(options: AppOptions = {}) {
     } satisfies AccountOptions);
 
   const cosmetics = new Cosmetics(store);
+  const shop =
+    options.shop ??
+    (await shopFromEnv(store, {
+      secretKey: process.env.VITEST === "true" ? null : process.env.STRIPE_SECRET_KEY,
+      webhookSecret: process.env.VITEST === "true" ? null : process.env.STRIPE_WEBHOOK_SECRET,
+    }));
   const hub = new Hub(
     store,
     20_000,
@@ -59,6 +69,25 @@ export async function createApp(options: AppOptions = {}) {
     trustProxy: true,
   });
   await app.register(websocket);
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+    const raw = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    if (requestPath(request.url) === WEBHOOK_PATH) {
+      done(null, raw);
+      return;
+    }
+    if (raw.length === 0) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(raw.toString("utf8")) as unknown);
+    } catch {
+      const error = new Error("That message could not be read.") as Error & { statusCode: number };
+      error.statusCode = 400;
+      done(error);
+    }
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     const target = aliasRedirect(requestHost(request), request.url);
@@ -214,6 +243,41 @@ export async function createApp(options: AppOptions = {}) {
     return { ok: true };
   });
 
+  app.get("/terms", async (_request, reply) => {
+    reply.type("text/html; charset=utf-8").header("cache-control", "no-cache");
+    return legalHtml("terms");
+  });
+
+  app.get("/privacy", async (_request, reply) => {
+    reply.type("text/html; charset=utf-8").header("cache-control", "no-cache");
+    return legalHtml("privacy");
+  });
+
+  app.get("/api/shop", async (request, reply) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to open the store." });
+    return shop.catalog();
+  });
+
+  app.post("/api/shop/checkout", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in or continue as a guest, then buy Gold Bones." });
+    const body = (request.body ?? {}) as { lookupKey?: unknown };
+    const lookupKey = typeof body.lookupKey === "string" ? body.lookupKey : "";
+    const result = await shop.startCheckout(user.id, lookupKey);
+    if ("error" in result) return reply.code(result.status).send({ error: result.error });
+    return { url: result.url };
+  });
+
+  app.post(WEBHOOK_PATH, async (request, reply) => {
+    const signature = request.headers["stripe-signature"];
+    const header = Array.isArray(signature) ? signature[0] : signature;
+    if (!Buffer.isBuffer(request.body)) return reply.code(400).send({ error: "The signature did not match." });
+    const result = shop.receive(request.body, header);
+    return reply.code(result.status).send(result.body);
+  });
+
   app.get("/ws", { websocket: true }, (socket, request) => {
     if (!originOk(request)) {
       socket.close(1008, "That request came from somewhere else.");
@@ -294,7 +358,11 @@ export async function createApp(options: AppOptions = {}) {
     return { status: response.statusCode, ms: Math.round(performance.now() - started) };
   });
 
-  return { app, store, accounts, hub, bots };
+  return { app, store, accounts, hub, bots, shop };
+}
+
+function requestPath(url: string): string {
+  return (url.split("?")[0] ?? "/").replace(/\/+$/, "") || "/";
 }
 
 function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {

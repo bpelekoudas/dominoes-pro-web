@@ -58,6 +58,8 @@ export function aliasRedirect(host: string | undefined, url: string): string | n
 /** Page address for the canonical link and the Open Graph URL. Room paths stay on the room. */
 export function canonicalPage(urlPath: string): string {
   const pathOnly = (urlPath.split("?")[0] ?? "/").replace(/\/{2,}/g, "/");
+  const bare = pathOnly.replace(/\/+$/, "") || "/";
+  if (bare === "/terms" || bare === "/privacy") return `${CANONICAL_ORIGIN}${bare}`;
   const room = /^\/r\/([A-Za-z0-9]{4,8})\/?$/.exec(pathOnly);
   if (room?.[1]) return `${CANONICAL_ORIGIN}/r/${room[1].toUpperCase()}`;
   return `${CANONICAL_ORIGIN}/`;

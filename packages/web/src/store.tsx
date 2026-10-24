@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { StoreItem } from "../../rules/src/catalog.js";
 import { AVATAR_ART } from "./avatars";
 import { playUiClick } from "./sound";
@@ -32,8 +32,21 @@ interface StoreState {
   items: StoreItem[];
 }
 
+interface ShopPack {
+  lookupKey: string;
+  cents: number;
+  coins: number;
+  name: string;
+}
+
+interface ShopState {
+  open: boolean;
+  packs: ShopPack[];
+}
+
 export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const [state, setState] = useState<StoreState | null>(null);
+  const [shop, setShop] = useState<ShopState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<StoreItem["category"]>("character");
   const [picked, setPicked] = useState<StoreItem | null>(null);
@@ -51,8 +64,32 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
         return;
       }
       setState((await response.json()) as StoreState);
+      const shopResponse = await fetch("/api/shop");
+      if (shopResponse.ok) setShop((await shopResponse.json()) as ShopState);
       setError(null);
       return;
+    }
+  };
+
+  const buyPack = async (lookupKey: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/shop/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lookupKey }),
+      });
+      const payload = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || typeof payload.url !== "string") {
+        setError(payload.error ?? "Store coming soon");
+        return;
+      }
+      window.location.assign(payload.url);
+    } catch {
+      setError("The store didn't answer.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -92,8 +129,8 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
         </button>
         <h2>Store</h2>
       </header>
-      <p className="store-balance" data-test-balance="true">
-        <span className="balance-kicker">Test balance</span>
+      <p className="store-balance" data-test-balance={shop?.open ? "false" : "true"}>
+        {shop?.open ? null : <span className="balance-kicker">Test balance</span>}
         <span className="balance-chips">
           <strong>
             <i className="bone-pip" aria-hidden="true" />
@@ -105,6 +142,28 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
           </strong>
         </span>
       </p>
+      <section className="coin-packs" aria-label="Gold Bones" data-shop={shop?.open ? "open" : "soon"}>
+        {shop && !shop.open ? <p className="coin-soon">Store coming soon</p> : null}
+        {shop?.open
+          ? shop.packs.map((pack) => (
+              <button
+                type="button"
+                key={pack.lookupKey}
+                className="coin-pack"
+                disabled={busy}
+                data-pack={pack.lookupKey}
+                onClick={press(() => void buyPack(pack.lookupKey))}
+              >
+                <span className="coin-pack-count">{format(pack.coins)} Gold Bones</span>
+                <span className="coin-pack-price">{money(pack.cents)}</span>
+              </button>
+            ))
+          : null}
+      </section>
+      <nav className="store-legal" aria-label="Legal">
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
       {error ? <p className="banner error">{error}</p> : null}
       <div className="store-tabs" role="tablist">
         {TABS.map((entry) => (
@@ -326,6 +385,73 @@ function wearingItem(loadout: Loadout, item: StoreItem): boolean {
 
 function format(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US").format(value ?? 0);
+}
+
+function money(cents: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+/** After Checkout, show the Gold Bones balance once the webhook has granted them. */
+export function CheckoutBanner() {
+  const [note, setNote] = useState<string | null>(null);
+  const dismissed = useRef(false);
+
+  useEffect(() => {
+    const flag = new URLSearchParams(window.location.search).get("checkout");
+    if (flag !== "success" && flag !== "cancel") return;
+    let stopped = false;
+    const drop = () => {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("checkout")) return;
+      url.searchParams.delete("checkout");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    };
+    if (flag === "cancel") {
+      setNote("No charge was made.");
+      drop();
+      return;
+    }
+    setNote("Checking your Gold Bones…");
+    const run = async () => {
+      let sawBalance = false;
+      for (let attempt = 0; attempt < 8 && !stopped; attempt += 1) {
+        try {
+          const response = await fetch("/api/store");
+          if (response.ok) {
+            const body = (await response.json()) as { goldBones?: number };
+            const count = format(body.goldBones);
+            sawBalance = true;
+            if (!stopped && !dismissed.current) setNote(`You have ${count} Gold Bones.`);
+          }
+        } catch {
+          // The next try asks again.
+        }
+        if (attempt < 7 && !stopped) await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      }
+      if (!stopped && !sawBalance && !dismissed.current) setNote("Sign in to see your Gold Bones.");
+      if (!stopped) drop();
+    };
+    void run();
+    return () => {
+      stopped = true;
+    };
+  }, []);
+
+  if (!note) return null;
+  return (
+    <p className="checkout-note" role="status">
+      <span>{note}</span>
+      <button
+        type="button"
+        onClick={() => {
+          dismissed.current = true;
+          setNote(null);
+        }}
+      >
+        Close
+      </button>
+    </p>
+  );
 }
 
 function press(action: () => void): () => void {

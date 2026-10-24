@@ -485,6 +485,10 @@ export function ArcadeHome({
           </button>
         </section>
       ) : null}
+      <nav className="arcade-legal" aria-label="Legal">
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
     </main>
   );
 }

@@ -13,7 +13,7 @@ import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./accou
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
 import { AvatarFace, BotBadge } from "./avatars";
-import { useMatchCosmetics } from "./store";
+import { CheckoutBanner, useMatchCosmetics } from "./store";
 import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
 import { FeelCall, FeelTally } from "./feel/overlay";
@@ -59,6 +59,7 @@ export function App() {
     if (typeof sessionStorage === "undefined") return false;
     if (sessionStorage.getItem("uhoh.splash") === "1") return false;
     if (localStorage.getItem(TOKEN_KEY)) return false;
+    if (new URLSearchParams(location.search).get("checkout")) return false;
     return true;
   });
   const [iris, setIris] = useState(false);
@@ -254,6 +255,7 @@ export function App() {
   if (!view) {
     return (
       <>
+        <CheckoutBanner />
         <ArcadeHome
           presetCode={roomFromLocation() ?? ""}
           error={error ?? account.error}
@@ -294,6 +296,7 @@ export function App() {
 
   return (
     <>
+      <CheckoutBanner />
       <Game
         view={view}
         chat={chat}

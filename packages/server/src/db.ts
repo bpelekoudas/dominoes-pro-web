@@ -432,6 +432,20 @@ export class Store {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS bot_events_kind ON bot_events (kind);
+      CREATE TABLE IF NOT EXISTS stripe_events (
+        event_id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        session_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS coin_purchases (
+        session_id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        lookup_key TEXT NOT NULL,
+        coins INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
   }
 
