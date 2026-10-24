@@ -1,0 +1,1190 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
+import type { PlayerView } from "@uhoh/rules";
+import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
+import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
+import {
+  chainBounds,
+  fitInsets,
+  followCamera,
+  READABLE_PHONE_PX,
+  READABLE_WIDE_PX,
+  handOverPlacement,
+  landedTileBox,
+  zoneInsets,
+  type AxisInsets,
+  type ZoneRect,
+} from "./board-scale.js";
+import { handFit } from "./hand-fit.js";
+import { FeelRipple, useLiveFeel } from "./feel/live";
+import { scoreTier } from "./feel/ladder";
+import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { normalizeFx, type FxId } from "./fx.js";
+import { demoAward, MomentLayer } from "./moment.js";
+import {
+  chooseDropEnd,
+  type DropBox,
+  ghostAimPoint,
+  ghostTopLeft,
+  GHOST_HEIGHT,
+  GHOST_WIDTH,
+} from "./drop.js";
+
+const NO_SLOTS: Array<LayoutBox & { id: string }> = [];
+
+const PIPS: Record<number, number[]> = {
+  0: [],
+  1: [5],
+  2: [1, 9],
+  3: [1, 5, 9],
+  4: [1, 3, 7, 9],
+  5: [1, 3, 5, 7, 9],
+  6: [1, 3, 4, 6, 7, 9],
+};
+
+export function Domino({
+  a,
+  b,
+  orientation,
+  spinner = false,
+  faceDown = false,
+}: {
+  a: number;
+  b: number;
+  orientation: "horizontal" | "vertical";
+  spinner?: boolean;
+  faceDown?: boolean;
+}) {
+  return (
+    <span className={`domino ${orientation}${spinner ? " spinner" : ""}${faceDown ? " face-down" : ""}`}>
+      {faceDown ? null : (
+        <>
+          <Half value={a} />
+          <span className="domino-split" />
+          <Half value={b} />
+        </>
+      )}
+    </span>
+  );
+}
+
+function Half({ value }: { value: number }) {
+  return (
+    <span className="half" aria-hidden="true">
+      {(PIPS[value] ?? []).map((pos) => (
+        <i key={pos} data-pos={pos} />
+      ))}
+    </span>
+  );
+}
+
+export function Table({
+  view,
+  selectedTile,
+  dragTileId,
+  aimEndId,
+  onPlay,
+  onSelect,
+  replayToken = 0,
+  tableArt = null,
+}: {
+  view: PlayerView;
+  selectedTile: string | null;
+  dragTileId: string | null;
+  aimEndId: string | null;
+  onPlay: (tileId: string, endId: string) => void;
+  onSelect: (tileId: string | null) => void;
+  tableArt?: string | null;
+  replayToken?: number;
+}) {
+  const board = view.board;
+  // The felt the chain should fold into, in design pixels, at the readable floor.
+  const [limits, setLimits] = useState<{ width: number; height: number } | null>(null);
+  const layout = useMemo(() => (board?.center ? layoutBoard(board, limits ?? undefined) : null), [board, limits]);
+  const frame = useMemo(() => (layout ? chainBounds(layout.tiles, 0) : null), [layout]);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [lift, setLift] = useState(0);
+  const [clip, setClip] = useState<AxisInsets>({ top: 30, right: 30, bottom: 30, left: 30 });
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [offscreen, setOffscreen] = useState({ top: false, right: false, bottom: false, left: false });
+  const [camMode, setCamMode] = useState<"fit" | "follow">("fit");
+  const [overview, setOverview] = useState(false);
+  const [punch, setPunch] = useState(1);
+  const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
+  const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
+  const [cameraArmed, setCameraArmed] = useState(false);
+  const shift = { x: pan.x + nudge.x, y: pan.y + nudge.y };
+  const shownScale = scale * nudge.zoom;
+  const armOnce = useRef(false);
+  const held = useRef<{ hand: string; scale: number } | null>(null);
+  const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
+  const frozen = useRef(false);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const handKey = `${view.gameNumber}:${view.handNumber}`;
+  const handOver = view.phase === "between" || view.phase === "over";
+  const lastTileId = view.lastPlay?.tileId ?? null;
+  const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !layout) return;
+    const measure = () => {
+      const nextReserve = measureReserve(viewport);
+      // Hand over keeps the last scale. The sheet must not zoom the chain.
+      if (frozen.current && held.current?.hand === handKey) return;
+      let width = viewport.clientWidth;
+      let height = viewport.clientHeight;
+      if (width < 8 || height < 8) return;
+      // The first felt size of the hand is the one that fits the chain.
+      // A later hint, banner, or sheet must not zoom it. A real resize
+      // changes the width and takes a fresh measurement.
+      const locked = feltLock.current;
+      if (locked?.hand === handKey && Math.abs(width - locked.w) < 32) {
+        width = locked.w;
+        height = locked.h;
+      } else {
+        feltLock.current = { hand: handKey, w: width, h: height };
+      }
+      const bounds = chainBounds(layout.tiles, 0);
+      const column = viewport.closest(".felt-column");
+      const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
+      const zones = measureZones(viewport);
+      const felt = { w: width, h: height };
+      const readablePx = screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+      const room = fitInsets(felt, zones, nextReserve);
+      const designW = Math.max(160, ((width - room.left - room.right) * TILE_SHORT) / readablePx);
+      const designH = Math.max(160, ((height - room.top - room.bottom) * TILE_SHORT) / readablePx);
+      setLimits((current) => {
+        if (current && Math.abs(current.width - designW) < 12 && Math.abs(current.height - designH) < 12) return current;
+        return { width: designW, height: designH };
+      });
+      const shot = followCamera({
+        frame: bounds,
+        ends: layout.ends,
+        tiles: layout.tiles,
+        playableIds: view.legalPlays.map((play) => play.endId),
+        felt,
+        screenWidth,
+        reserve: nextReserve,
+        zones,
+        overview: handOver || overview,
+        punch,
+      });
+      setClip((current) => (sameInsets(current, shot.clip) ? current : shot.clip));
+      held.current = { hand: handKey, scale: shot.scale };
+      frozen.current = handOver;
+      setScale((current) => (Math.abs(current - shot.scale) < 0.01 ? current : shot.scale));
+      setPan((current) => (Math.abs(current.x - shot.shiftX) < 0.5 && Math.abs(current.y - shot.shiftY) < 0.5 ? current : { x: shot.shiftX, y: shot.shiftY }));
+      setCamMode(shot.mode);
+      setOffscreen((current) =>
+        current.top === shot.off.top && current.right === shot.off.right && current.bottom === shot.off.bottom && current.left === shot.off.left
+          ? current
+          : shot.off,
+      );
+      if (!armOnce.current) {
+        armOnce.current = true;
+        requestAnimationFrame(() => setCameraArmed(true));
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    const app = viewport.closest(".felt-app");
+    app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+      observer.observe(node);
+    });
+    return () => observer.disconnect();
+  }, [layout, handOver, handKey, lastTileId, playableKey, overview, punch]);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const viewport = viewportRef.current;
+    if (!handOver || !viewport || !frame) {
+      setLift((current) => (current === 0 ? current : 0));
+      root.style.removeProperty("--hand-sheet-max");
+      return;
+    }
+    const measure = () => {
+      const felt = viewport.getBoundingClientRect();
+      const sheet = document.querySelector(".hand-summary");
+      let sheetTop: number | null = null;
+      if (sheet) {
+        const cap = window.innerHeight * 0.54;
+        const naturalMax = Math.min(cap, sheet.scrollHeight);
+        sheetTop = window.innerHeight - naturalMax;
+      }
+      const last = lastTileId && layout ? layout.tiles.find((tile) => tile.tileId === lastTileId) : undefined;
+      const local = last ? place(last, frame) : null;
+      const placement = handOverPlacement({
+        feltTop: felt.top,
+        feltHeight: felt.height,
+        sheetTop,
+        chainHeight: frame.h * scale,
+        lastTile: local ? { top: local.top * scale, height: local.height * scale } : null,
+      });
+      const next = Math.round(placement.lift);
+      setLift((current) => (current === next ? current : next));
+      if (placement.sheetTop == null) root.style.removeProperty("--hand-sheet-max");
+      else root.style.setProperty("--hand-sheet-max", `${Math.max(120, Math.round(window.innerHeight - placement.sheetTop))}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    const sheet = document.querySelector(".hand-summary");
+    if (sheet) observer.observe(sheet);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--hand-sheet-max");
+    };
+  }, [handOver, frame, scale, layout, lastTileId]);
+
+  const focusTile = dragTileId ?? selectedTile;
+  const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];
+  // A drag shows every legal end. A tap shows them only when the tile fits more than one.
+  const armed = dragTileId !== null || focusPlays.length > 1;
+  const hotEnds = new Set(armed ? focusPlays.map((play) => play.endId) : []);
+  const dropLead = dragTileId !== null && hotEnds.has("lead");
+  const slotKey = armed ? [...hotEnds].sort().join(",") : "";
+  const previewDouble = Boolean(focusTile && focusTile.split("-")[0] === focusTile.split("-")[1]);
+  const slotBoxes = useMemo(() => {
+    if (!layout || !slotKey) return NO_SLOTS;
+    const ids = new Set(slotKey.split(","));
+    return layout.ends.filter((end) => ids.has(end.id)).map((end) => ({ ...nextSlotBox(layout, end, previewDouble), id: end.id }));
+  }, [layout, slotKey, previewDouble]);
+  const ghostFaces = useMemo(() => {
+    const faces = new Map<string, { a: number; b: number; orientation: "horizontal" | "vertical" }>();
+    if (!layout || !focusTile) return faces;
+    for (const box of slotBoxes) {
+      const end = layout.ends.find((item) => item.id === box.id);
+      if (!end) continue;
+      faces.set(box.id, ghostFace(focusTile, box, end));
+    }
+    return faces;
+  }, [layout, focusTile, slotBoxes]);
+  const slots = useScreenBoxes(stageRef, frame, shownScale, slotBoxes);
+  const feel = useLiveFeel(view);
+  const pop = useScorePop(view.lastPlay);
+  const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
+  const [shake, setShake] = useState<BigMomentLevel | null>(null);
+  const [slamming, setSlamming] = useState(false);
+  const landed = useTileCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, lastTileId);
+  const endsAt = useEndCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, (pop?.awarded ?? 0) >= 10);
+  // Keep the state object. A fresh literal would restart the shatter on every render.
+  const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
+  const popFrom = endsAt ?? landed;
+  const livePopup = scorePopupText(view.lastPlay?.awarded ?? 0);
+  const popup = scorePopupForPlay(view.lastPlay, pop);
+  const popAt =
+    popup && pop && popFrom && pop.tileId === lastTileId
+      ? { left: popFrom.x, top: popFrom.y, place: "tile" as const }
+      : null;
+  const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
+
+  useEffect(() => {
+    const awarded = view.lastPlay?.awarded ?? 0;
+    if (awarded < 10) return;
+    setPunch(awarded >= 25 ? 1.12 : 1.06);
+    const timer = window.setTimeout(() => setPunch(1), 720);
+    return () => window.clearTimeout(timer);
+  }, [view.lastPlay?.seq, view.lastPlay?.awarded]);
+
+  useEffect(() => {
+    if (!overview) return;
+    const timer = window.setTimeout(() => setOverview(false), 1700);
+    return () => window.clearTimeout(timer);
+  }, [overview]);
+
+  function onCamDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const target = event.target;
+    if (target instanceof Element && target.closest("button, a, .end-cap")) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size === 1) drag.current = { x: event.clientX, y: event.clientY, moved: false };
+    if (pointers.current.size >= 2) {
+      const pts = [...pointers.current.values()];
+      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
+      pinch.current = { dist, zoom: nudge.zoom };
+    }
+  }
+
+  function onCamMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!pointers.current.has(event.pointerId)) return;
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.current.size >= 2 && pinch.current) {
+      const pts = [...pointers.current.values()];
+      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
+      const zoom = Math.min(1.85, Math.max(0.55, pinch.current.zoom * (dist / pinch.current.dist)));
+      setUserCam("drag");
+      setNudge((current) => ({ ...current, zoom }));
+      return;
+    }
+    const start = drag.current;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (!start.moved && Math.hypot(dx, dy) < 8) return;
+    start.moved = true;
+    setUserCam("drag");
+    setNudge({ x: dx, y: dy, zoom: nudge.zoom });
+  }
+
+  function onCamUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = drag.current;
+    pointers.current.delete(event.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size > 0) return;
+    drag.current = null;
+    if (start && !start.moved) {
+      setNudge({ x: 0, y: 0, zoom: 1 });
+      setUserCam("follow");
+      setOverview((value) => !value);
+      return;
+    }
+    if (!start?.moved) return;
+    window.setTimeout(() => {
+      setNudge({ x: 0, y: 0, zoom: 1 });
+      setUserCam("follow");
+    }, 1500);
+  }
+
+  return (
+    <div
+      className={`table-scroll${dropLead ? " drop-ready" : ""}${shake ? " shaking" : ""}${handOver && lastTileId ? " hand-over" : ""}`}
+      data-last-tile={lastTileId ?? ""}
+      data-shake={shake ?? "off"}
+      ref={viewportRef}
+      data-open-total={view.openTotal}
+      data-knock-streak={view.knockStreak}
+      data-table-id={view.tableId}
+      data-board-scale={shownScale.toFixed(2)}
+      data-tile-px={(TILE_SHORT * shownScale).toFixed(0)}
+      data-cam-mode={handOver || overview ? "overview" : camMode}
+      data-cam-user={userCam}
+      onPointerDown={onCamDown}
+      onPointerMove={onCamMove}
+      onPointerUp={onCamUp}
+      onPointerCancel={onCamUp}
+      data-board-lift={String(lift)}
+      data-fit-top={clip.top.toFixed(0)}
+      data-fit-right={clip.right.toFixed(0)}
+      data-fit-bottom={clip.bottom.toFixed(0)}
+      data-fit-left={clip.left.toFixed(0)}
+      data-board-frozen={handOver ? "true" : "false"}
+      data-win-board="true"
+      data-camera={cameraArmed ? "armed" : "hold"}
+      data-drop-ready={dropLead ? "true" : "false"}
+      style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
+    >
+      {offscreen.top ? <i className="cam-edge cam-n" aria-hidden="true" /> : null}
+      {offscreen.right ? <i className="cam-edge cam-e" aria-hidden="true" /> : null}
+      {offscreen.bottom ? <i className="cam-edge cam-s" aria-hidden="true" /> : null}
+      {offscreen.left ? <i className="cam-edge cam-w" aria-hidden="true" /> : null}
+      {layout && frame ? (
+        <div
+          className="board-clip"
+          style={{ clipPath: `inset(${clip.top}px ${clip.right}px ${clip.bottom}px ${clip.left}px)` }}
+        >
+        <div
+          className="board-scaler"
+          style={{
+            width: frame.w * shownScale,
+            height: frame.h * shownScale,
+            transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
+          }}
+        >
+          <div
+            className="board-stage"
+            ref={stageRef}
+            style={{ width: frame.w, height: frame.h, transform: `scale(${shownScale})` }}
+          >
+            {layout.tiles.map((tile) => (
+              <div
+                key={tile.tileId}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
+                style={place(tile, frame)}
+                data-board-tile={tile.tileId}
+              >
+                <Domino a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
+              </div>
+            ))}
+            {layout.ends.map((end) => {
+              const hot = hotEnds.has(end.id);
+              const aim = aimEndId === end.id;
+              return (
+                <button
+                  key={end.id}
+                  type="button"
+                  className={`end-cap${hot ? " hot" : ""}${aim ? " aim" : ""}${feel.scoring ? " is-scoring" : ""}`}
+                  style={place(end, frame)}
+                  data-end-id={end.id}
+                  data-hot={hot ? "true" : "false"}
+                  onClick={() => chooseEnd(end.id)}
+                  aria-label={`Open ${end.id} end, match ${end.match}`}
+                />
+              );
+            })}
+          </div>
+        </div>
+        </div>
+      ) : null}
+      {moment && anchor && livePopup && livePopup === scorePopupText(moment.awarded) ? (
+        <MomentLayer
+          token={moment.key}
+          awarded={moment.awarded}
+          tileId={moment.tileId}
+          tile={{
+            a: placed?.a ?? faceOf(moment.tileId).a,
+            b: placed?.b ?? faceOf(moment.tileId).b,
+            orientation: placed?.orientation ?? "vertical",
+            spinner: placed?.spinner,
+          }}
+          anchor={anchor}
+          effect={moment.effect}
+          cry={feel.cry}
+          onShake={setShake}
+          onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
+          onDone={() => {
+            setSlamming(false);
+            dismissMoment();
+          }}
+        />
+      ) : null}
+      {slots.map((slot) => {
+        const face = ghostFaces.get(slot.id) ?? null;
+        return createPortal(
+          <div
+            key={slot.id}
+            className="ghost-slot"
+            data-end-id={slot.id}
+            style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
+          >
+            {face ? <Domino a={face.a} b={face.b} orientation={face.orientation} /> : null}
+          </div>,
+          document.body,
+        );
+      })}
+      <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
+      <FeelRipple knock={feel.knock} />
+      {popup && pop && popAt ? (
+        <FlyingScore pop={pop} text={popup.text} at={popAt} />
+      ) : null}
+    </div>
+  );
+
+  function chooseEnd(endId: string) {
+    if (!selectedTile || !hotEnds.has(endId)) return;
+    onPlay(selectedTile, endId);
+    onSelect(null);
+  }
+}
+
+function ghostFace(
+  tileId: string,
+  box: LayoutBox,
+  end: PlacedEnd,
+): { a: number; b: number; orientation: "horizontal" | "vertical" } {
+  const parts = tileId.split("-").map((part) => Number(part));
+  const low = Number.isFinite(parts[0]) ? parts[0]! : 0;
+  const high = Number.isFinite(parts[1]) ? parts[1]! : low;
+  const orientation = box.w >= box.h ? "horizontal" : "vertical";
+  const match = low === end.match || high === end.match ? end.match : low;
+  const other = match === low ? high : low;
+  const dx = box.x + box.w / 2 - (end.x + end.w / 2);
+  const dy = box.y + box.h / 2 - (end.y + end.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? { a: match, b: other, orientation } : { a: other, b: match, orientation };
+  }
+  return dy >= 0 ? { a: match, b: other, orientation } : { a: other, b: match, orientation };
+}
+
+function Arrival({
+  lastPlay,
+  yourId,
+  layout,
+}: {
+  lastPlay: PlayerView["lastPlay"];
+  yourId: string;
+  layout: BoardLayout | null;
+}) {
+  const seq = lastPlay?.seq ?? -1;
+  const tileId = lastPlay?.tileId ?? null;
+  const playerId = lastPlay?.playerId ?? null;
+  const awarded = lastPlay?.awarded ?? 0;
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [face, setFace] = useState<{ a: number; b: number; orientation: "horizontal" | "vertical" } | null>(null);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const skip = playerId === yourId || !tileId || bigMomentLevel(awarded) !== null || prefersReducedMotion();
+
+  useLayoutEffect(() => {
+    if (skip || !tileId || !playerId) {
+      setBox(null);
+      return;
+    }
+    let tile: HTMLElement | null = null;
+    let frame = 0;
+    let timer = 0;
+    let cancelled = false;
+    const start = () => {
+      tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
+      const seat = document.querySelector<HTMLElement>(`.rail[data-player-id="${CSS.escape(playerId)}"] .avatar`);
+      if (!tile || !seat) return false;
+      const to = tile.getBoundingClientRect();
+      if (to.width < 2 || to.height < 2) return false;
+      const from = seat.getBoundingClientRect();
+      const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
+      tile.classList.add("is-arriving");
+      setFace(
+        placed
+          ? { a: placed.a, b: placed.b, orientation: placed.orientation }
+          : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
+      );
+      setBox({ left: from.left, top: from.top, width: Math.max(18, from.width), height: Math.max(18, from.height) });
+      timer = window.setTimeout(() => {
+        tile?.classList.remove("is-arriving");
+        if (!cancelled) setBox(null);
+      }, 420);
+      frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => {
+          if (cancelled || !tile) return;
+          const landed = tile.getBoundingClientRect();
+          setBox({ left: landed.left, top: landed.top, width: landed.width, height: landed.height });
+        });
+      });
+      return true;
+    };
+    if (!start()) frame = window.requestAnimationFrame(() => {
+      if (!cancelled) start();
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      tile?.classList.remove("is-arriving");
+      setBox(null);
+    };
+  }, [seq, tileId, playerId, skip]);
+
+  if (!box || !face) return null;
+  return createPortal(
+    <div className="arrive-tile" data-arrive={tileId ?? ""} style={box}>
+      <Domino a={face.a} b={face.b} orientation={face.orientation} />
+    </div>,
+    document.body,
+  );
+}
+
+function nextSlotBox(layout: BoardLayout, end: PlacedEnd, isDouble: boolean): LayoutBox {
+  const tip = [...layout.tiles].reverse().find((tile) => tile.arm === end.id);
+  if (!tip) {
+    const center = layout.tiles[0];
+    if (!center) return end;
+    return straightBox(center, end.id, isDouble);
+  }
+  // A double, and the tile played on a double, stay on the current line.
+  const tipIsDouble = tip.direction === "north" || tip.direction === "south" ? tip.w > tip.h : tip.h > tip.w;
+  if (isDouble || tipIsDouble) return straightBox(tip, tip.direction, isDouble);
+  return layout.previews[end.id] ?? straightBox(tip, tip.direction, false);
+}
+
+interface ScreenBox {
+  id: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function useScreenBoxes(
+  stageRef: { current: HTMLDivElement | null },
+  fit: LayoutBox | null,
+  scale: number,
+  boxes: Array<LayoutBox & { id: string }>,
+): ScreenBox[] {
+  const [placed, setPlaced] = useState<ScreenBox[]>([]);
+  const key = boxes.map((box) => `${box.id}:${box.x}:${box.y}:${box.w}:${box.h}`).join("|");
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || !fit || boxes.length === 0) {
+      setPlaced([]);
+      return;
+    }
+    const origin = stage.getBoundingClientRect();
+    setPlaced(
+      boxes.map((box) => {
+        const local = place(box, fit);
+        return {
+          id: box.id,
+          left: origin.left + local.left * scale,
+          top: origin.top + local.top * scale,
+          width: local.width * scale,
+          height: local.height * scale,
+        };
+      }),
+    );
+  }, [stageRef, fit, scale, key, boxes]);
+  return placed;
+}
+
+function useBigMoment(
+  lastPlay: PlayerView["lastPlay"],
+  players: PlayerView["players"],
+  replayToken: number,
+): {
+  moment: { key: string; awarded: number; tileId: string | null; effect: FxId } | null;
+  dismissMoment: () => void;
+} {
+  const liveKey =
+    lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}:${lastPlay.awarded}` : "";
+  const skip = useRef(liveKey);
+  const playersRef = useRef(players);
+  playersRef.current = players;
+  const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null; effect: FxId } | null>(null);
+  if (moment && moment.key.startsWith("play-") && moment.key !== liveKey) setMoment(null);
+  const dismiss = () => setMoment(null);
+  useEffect(() => {
+    if (liveKey === skip.current) return;
+    skip.current = liveKey;
+    if (!liveKey || !lastPlay) {
+      setMoment((prev) => (prev && prev.key.startsWith("play-") ? null : prev));
+      return;
+    }
+    const scorer = playersRef.current.find((player) => player.id === lastPlay.playerId);
+    setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId, effect: normalizeFx(scorer?.effectId) });
+  }, [liveKey, lastPlay]);
+  const tileRef = useRef(lastPlay?.tileId ?? null);
+  tileRef.current = lastPlay?.tileId ?? null;
+  useEffect(() => {
+    if (replayToken <= 0) return;
+    setMoment({ key: `demo-${replayToken}`, awarded: demoAward(), tileId: tileRef.current, effect: "glass" });
+  }, [replayToken]);
+  return { moment, dismissMoment: dismiss };
+}
+
+function useEndCenter(
+  viewportRef: { current: HTMLDivElement | null },
+  layout: BoardLayout | null,
+  frame: LayoutBox | null,
+  scale: number,
+  shiftX: number,
+  shiftY: number,
+  active: boolean,
+): { x: number; y: number } | null {
+  const [spot, setSpot] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!active || !viewport || !layout || !frame || layout.ends.length === 0) {
+      setSpot(null);
+      return;
+    }
+    const felt = viewport.getBoundingClientRect();
+    let x = 0;
+    let y = 0;
+    for (const end of layout.ends) {
+      const box = landedTileBox(
+        { left: felt.left, top: felt.top, width: felt.width, height: felt.height },
+        frame,
+        scale,
+        shiftX,
+        shiftY,
+        end,
+      );
+      x += box.x;
+      y += box.y;
+    }
+    const next = { x: x / layout.ends.length, y: y / layout.ends.length };
+    setSpot((current) => (current && Math.abs(current.x - next.x) < 0.5 && Math.abs(current.y - next.y) < 0.5 ? current : next));
+  }, [viewportRef, layout, frame, scale, shiftX, shiftY, active]);
+  return spot;
+}
+
+function useTileCenter(
+  viewportRef: { current: HTMLDivElement | null },
+  layout: BoardLayout | null,
+  frame: LayoutBox | null,
+  scale: number,
+  shiftX: number,
+  shiftY: number,
+  tileId: string | null,
+): { x: number; y: number; w: number; h: number } | null {
+  const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const tile = tileId && layout ? layout.tiles.find((item) => item.tileId === tileId) : undefined;
+    const root = document.documentElement;
+    if (!viewport || !frame || !tile) {
+      setBox(null);
+      delete root.dataset.tileHitX;
+      delete root.dataset.tileHitY;
+      return;
+    }
+    const felt = viewport.getBoundingClientRect();
+    const next = landedTileBox(
+      { left: felt.left, top: felt.top, width: felt.width, height: felt.height },
+      frame,
+      scale,
+      shiftX,
+      shiftY,
+      tile,
+    );
+    root.dataset.tileHitX = next.x.toFixed(1);
+    root.dataset.tileHitY = next.y.toFixed(1);
+    root.dataset.tileHitW = next.w.toFixed(1);
+    root.dataset.tileHitH = next.h.toFixed(1);
+    setBox((current) =>
+      current &&
+      Math.abs(current.x - next.x) < 0.5 &&
+      Math.abs(current.y - next.y) < 0.5 &&
+      Math.abs(current.w - next.w) < 0.5 &&
+      Math.abs(current.h - next.h) < 0.5
+        ? current
+        : next,
+    );
+  }, [viewportRef, layout, frame, scale, shiftX, shiftY, tileId]);
+  return box;
+}
+
+function sameInsets(a: AxisInsets, b: AxisInsets): boolean {
+  return Math.abs(a.top - b.top) < 0.5 && Math.abs(a.right - b.right) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5 && Math.abs(a.left - b.left) < 0.5;
+}
+
+function measureZones(viewport: HTMLElement): ZoneRect[] {
+  const felt = viewport.getBoundingClientRect();
+  const zones: ZoneRect[] = [];
+  const app = viewport.closest(".felt-app");
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const rect = node.getBoundingClientRect();
+    const left = Math.max(rect.left, felt.left) - felt.left;
+    const top = Math.max(rect.top, felt.top) - felt.top;
+    const right = Math.min(rect.right, felt.right) - felt.left;
+    const bottom = Math.min(rect.bottom, felt.bottom) - felt.top;
+    if (right - left < 1 || bottom - top < 1) return;
+    zones.push({ left, top, right, bottom });
+  });
+  return zones;
+}
+
+function measureReserve(viewport: HTMLElement): AxisInsets {
+  const felt = viewport.getBoundingClientRect();
+  const zones: DOMRect[] = [];
+  const app = viewport.closest(".felt-app");
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+    if (node instanceof HTMLElement) zones.push(node.getBoundingClientRect());
+  });
+  return zoneInsets(
+    { left: felt.left, top: felt.top, right: felt.right, bottom: felt.bottom },
+    zones.map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom })),
+  );
+}
+
+function faceOf(tileId: string | null): { a: number; b: number } {
+  const [low, high] = (tileId ?? "6-6").split("-").map((part) => Number(part));
+  return { a: Number.isFinite(low) ? low! : 6, b: Number.isFinite(high) ? high! : 6 };
+}
+
+function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null {
+  const label = scoreDeltaLabel(lastPlay?.awarded ?? 0);
+  const liveKey = lastPlay && label != null ? `${lastPlay.seq}:${label}` : "";
+  const tileId = lastPlay?.tileId ?? "";
+  const endId = lastPlay?.endId ?? "";
+  const playerId = lastPlay?.playerId ?? "";
+  const [pop, setPop] = useState<{ seq: number; awarded: number; tileId: string; endId: string; playerId: string } | null>(null);
+  const keyRef = useRef(liveKey);
+  keyRef.current = liveKey;
+  if (pop && `${pop.seq}:${pop.awarded}` !== liveKey) setPop(null);
+  useEffect(() => {
+    if (!liveKey || label == null) return;
+    // A routine award still appears at 460ms and leaves at 1100ms.
+    // The flight into the chip happens inside that window.
+    const timing = scorePopWindow(label);
+    const token = liveKey;
+    const awarded = label;
+    const seq = Number(liveKey.slice(0, liveKey.indexOf(":")));
+    const show = window.setTimeout(() => {
+      if (keyRef.current !== token) return;
+      setPop({ seq, awarded, tileId, endId, playerId });
+    }, timing.show);
+    const hide = window.setTimeout(() => {
+      setPop((prev) => (prev && `${prev.seq}:${prev.awarded}` === token ? null : prev));
+    }, timing.hide);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+    };
+  }, [liveKey, label, tileId, endId, playerId]);
+  return pop && `${pop.seq}:${pop.awarded}` === liveKey ? pop : null;
+}
+
+function FlyingScore({
+  pop,
+  text,
+  at,
+}: {
+  pop: { seq: number; awarded: number; playerId: string };
+  text: string;
+  at: { left: number; top: number; place: "tile" | "above" | "beside" };
+}) {
+  const [spot, setSpot] = useState(at);
+  const [fly, setFly] = useState(false);
+  useLayoutEffect(() => {
+    setSpot(at);
+    setFly(false);
+    let frame = 0;
+    const wait = scorePopWindow(pop.awarded).fly;
+    const timer = window.setTimeout(() => {
+      const chip = document.querySelector<HTMLElement>(`[data-win-score="${CSS.escape(pop.playerId)}"]`);
+      const rect = chip?.getBoundingClientRect();
+      if (!rect || rect.width < 1) return;
+      frame = window.requestAnimationFrame(() => {
+        setFly(true);
+        setSpot({ left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, place: "above" });
+      });
+    }, wait);
+    return () => {
+      window.clearTimeout(timer);
+      window.cancelAnimationFrame(frame);
+    };
+  }, [pop.seq, pop.awarded, pop.playerId, at.left, at.top, at.place]);
+  return createPortal(
+    <p
+      className="score-pop"
+      style={{ left: spot.left, top: spot.top, transitionDuration: fly ? `${SCORE_FLY_MS}ms` : "0ms" }}
+      data-awarded={pop.awarded}
+      data-tier={scoreTier(pop.awarded)}
+      data-place={fly ? "fly" : at.place}
+      data-fly={fly ? "1" : "0"}
+    >
+      {text}
+    </p>,
+    document.body,
+  );
+}
+
+function place(box: LayoutBox, fit: LayoutBox): { left: number; top: number; width: number; height: number } {
+  return {
+    left: box.x - fit.x,
+    top: box.y - fit.y,
+    width: box.w,
+    height: box.h,
+  };
+}
+
+type Ghost = {
+  tileId: string;
+  high: number;
+  low: number;
+  left: number;
+  top: number;
+  spring: boolean;
+};
+
+type Session = {
+  pointerId: number;
+  tileId: string;
+  high: number;
+  low: number;
+  originX: number;
+  originY: number;
+  active: boolean;
+};
+
+export function Hand({
+  view,
+  selectedTile,
+  onSelect,
+  onPlay,
+  onDragTile,
+}: {
+  view: PlayerView;
+  selectedTile: string | null;
+  onSelect: (tileId: string | null) => void;
+  onPlay: (tileId: string, endId: string) => void;
+  onDragTile: (tileId: string | null, aimEndId: string | null) => void;
+}) {
+  const mine = view.turnPlayerId === view.yourId;
+  const session = useRef<Session | null>(null);
+  const dragged = useRef(false);
+  const timer = useRef<number | null>(null);
+  const frame = useRef<number | null>(null);
+  const motion = useRef(0);
+  const [ghost, setGhost] = useState<Ghost | null>(null);
+  const [liftedId, setLiftedId] = useState<string | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const onPlayRef = useRef(onPlay);
+  onPlayRef.current = onPlay;
+  const onDragRef = useRef(onDragTile);
+  onDragRef.current = onDragTile;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const handRef = useRef<HTMLDivElement>(null);
+  const count = view.you.hand.length;
+
+  useLayoutEffect(() => {
+    const el = handRef.current;
+    const frame = el?.parentElement;
+    if (!el || !frame) return;
+    const natural = () =>
+      window.matchMedia("(min-width: 880px) and (min-height: 640px)").matches
+        ? 68
+        : window.matchMedia("(min-width: 720px)").matches
+          ? 58
+          : 44;
+    const apply = () => {
+      const next = handFit(el.clientWidth, count, natural());
+      el.style.setProperty("--hand-tile", `${next.tile}px`);
+      el.style.setProperty("--hand-gap", `${next.gap}px`);
+      el.dataset.scroll = next.scroll ? "true" : "false";
+      const hidden = el.scrollWidth - el.clientWidth - el.scrollLeft;
+      frame.dataset.fadeStart = next.scroll && el.scrollLeft > 4 ? "true" : "false";
+      frame.dataset.fadeEnd = next.scroll && hidden > 4 ? "true" : "false";
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    el.addEventListener("scroll", apply, { passive: true });
+    return () => {
+      observer.disconnect();
+      el.removeEventListener("scroll", apply);
+    };
+  }, [count]);
+
+  useEffect(() => () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+  }, []);
+
+  useEffect(() => {
+    if (!liftedId) return;
+    const blockScroll = (event: TouchEvent) => event.preventDefault();
+    document.addEventListener("touchmove", blockScroll, { passive: false });
+    document.body.classList.add("is-dragging");
+    return () => {
+      document.removeEventListener("touchmove", blockScroll);
+      document.body.classList.remove("is-dragging");
+    };
+  }, [liftedId]);
+
+  return (
+    <div className="hand-frame">
+    <div className="hand" role="list" ref={handRef} data-count={count} data-scroll="false">
+      {view.you.hand.map((tile) => {
+        const plays = view.legalPlays.filter((play) => play.tileId === tile.id);
+        const playable = mine && plays.length > 0;
+        const selected = selectedTile === tile.id;
+        const lifted = liftedId === tile.id;
+        return (
+          <button
+            key={tile.id}
+            type="button"
+            role="listitem"
+            className={`hand-tile${playable ? " playable" : ""}${selected ? " selected" : ""}${lifted ? " lifted" : ""}`}
+            data-tile-id={tile.id}
+            data-playable={playable ? "true" : "false"}
+            aria-label={`${tile.high} ${tile.low}${playable ? ", playable" : ""}`}
+            aria-grabbed={lifted}
+            onContextMenu={(event) => event.preventDefault()}
+            onPointerDown={(event) => {
+              if (!playable || event.button !== 0) return;
+              cancelMotion();
+              dragged.current = false;
+              session.current = {
+                pointerId: event.pointerId,
+                tileId: tile.id,
+                high: tile.high,
+                low: tile.low,
+                originX: event.clientX,
+                originY: event.clientY,
+                active: false,
+              };
+            }}
+            onPointerMove={(event) => moveDrag(event)}
+            onPointerUp={(event) => finishDrag(event)}
+            onPointerCancel={(event) => finishDrag(event, true)}
+            onClick={() => {
+              if (dragged.current) {
+                dragged.current = false;
+                return;
+              }
+              if (!playable) return;
+              if (plays.length === 1 && plays[0]) {
+                onPlay(tile.id, plays[0].endId);
+                onSelect(null);
+                return;
+              }
+              onSelect(selected ? null : tile.id);
+            }}
+          >
+            <Domino a={tile.high} b={tile.low} orientation="vertical" />
+          </button>
+        );
+      })}
+      {ghost
+        ? createPortal(
+            <div
+              className={`drag-ghost${ghost.spring ? " spring" : ""}`}
+              style={{ left: ghost.left, top: ghost.top, width: GHOST_WIDTH, height: GHOST_HEIGHT }}
+            >
+              <Domino a={ghost.high} b={ghost.low} orientation="vertical" />
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+    </div>
+  );
+
+  function moveDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = session.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const dx = event.clientX - current.originX;
+    const dy = event.clientY - current.originY;
+    if (!current.active) {
+      if (Math.hypot(dx, dy) < 12) return;
+      // A sideways slide still scrolls the hand. A lift starts the drag.
+      if (Math.abs(dx) > Math.abs(dy)) {
+        dragged.current = true;
+        return;
+      }
+      current.active = true;
+      dragged.current = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // The pointer can already be gone on a very fast lift.
+      }
+      setLiftedId(current.tileId);
+      onSelectRef.current(null);
+    }
+    event.preventDefault();
+    const parked = ghostTopLeft(event.clientX, event.clientY);
+    setGhost({
+      tileId: current.tileId,
+      high: current.high,
+      low: current.low,
+      left: parked.left,
+      top: parked.top,
+      spring: false,
+    });
+    const aim = ghostAimPoint(event.clientX, event.clientY);
+    onDragRef.current(current.tileId, chooseDropEnd(aim.x, aim.y, targetsFor(current.tileId, viewRef.current)));
+  }
+
+  function finishDrag(event: ReactPointerEvent<HTMLButtonElement>, cancel = false) {
+    const current = session.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    session.current = null;
+    if (!current.active) return;
+    const aim = ghostAimPoint(event.clientX, event.clientY);
+    const targets = targetsFor(current.tileId, viewRef.current);
+    const endId = cancel ? null : chooseDropEnd(aim.x, aim.y, targets);
+    const parked = ghostTopLeft(event.clientX, event.clientY);
+    onDragRef.current(null, null);
+    const stamp = motion.current;
+    if (endId) {
+      const target = targets.find((box) => box.id === endId);
+      if (target && !prefersReducedMotion()) {
+        glide(current, parked, {
+          left: target.left + target.width / 2 - GHOST_WIDTH / 2,
+          top: target.top + target.height / 2 - GHOST_HEIGHT / 2,
+        }, stamp, () => {
+          setLiftedId(null);
+          onPlayRef.current(current.tileId, endId);
+          onSelectRef.current(null);
+          setGhost(null);
+        });
+        return;
+      }
+      setLiftedId(null);
+      onPlayRef.current(current.tileId, endId);
+      onSelectRef.current(null);
+      setGhost(null);
+      return;
+    }
+    const home = document.querySelector<HTMLElement>(`[data-tile-id="${current.tileId}"]`);
+    const rect = home?.getBoundingClientRect();
+    if (!rect || prefersReducedMotion()) {
+      setLiftedId(null);
+      setGhost(null);
+      return;
+    }
+    glide(current, parked, { left: rect.left, top: rect.top }, stamp, () => {
+      setLiftedId(null);
+      setGhost(null);
+    });
+  }
+
+  function glide(
+    current: Session,
+    from: { left: number; top: number },
+    to: { left: number; top: number },
+    stamp: number,
+    done: () => void,
+  ) {
+    const parked = {
+      tileId: current.tileId,
+      high: current.high,
+      low: current.low,
+    };
+    setGhost({ ...parked, left: from.left, top: from.top, spring: true });
+    frame.current = window.requestAnimationFrame(() => {
+      frame.current = window.requestAnimationFrame(() => {
+        frame.current = null;
+        if (motion.current !== stamp) return;
+        setGhost({ ...parked, left: to.left, top: to.top, spring: true });
+        later(done, 240);
+      });
+    });
+  }
+
+  function later(run: () => void, ms: number) {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    const stamp = motion.current;
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      if (motion.current !== stamp) return;
+      run();
+    }, ms);
+  }
+
+  function cancelMotion() {
+    motion.current += 1;
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    if (frame.current !== null) {
+      window.cancelAnimationFrame(frame.current);
+      frame.current = null;
+    }
+  }
+}
+
+function targetsFor(tileId: string, view: PlayerView): DropBox[] {
+  const ids = new Set(view.legalPlays.filter((play) => play.tileId === tileId).map((play) => play.endId));
+  const targets: DropBox[] = [];
+  if (ids.has("lead")) {
+    const felt = document.querySelector(".table-scroll");
+    if (felt) targets.push(toBox("lead", felt.getBoundingClientRect()));
+  }
+  for (const element of document.querySelectorAll<HTMLElement>("[data-end-id]")) {
+    const id = element.dataset.endId;
+    if (!id || !ids.has(id)) continue;
+    targets.push(toBox(id, element.getBoundingClientRect()));
+  }
+  return targets;
+}
+
+function toBox(id: string, rect: DOMRect): DropBox {
+  return { id, left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
