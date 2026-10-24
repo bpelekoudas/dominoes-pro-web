@@ -169,6 +169,8 @@ export async function createApp(options: AppOptions = {}) {
     return sendAuth(reply, request, accounts.rename(user.id, body.displayName ?? ""));
   });
 
+  app.get("/api/store/status", async () => shop.statusReport());
+
   app.get("/api/store", async (request, reply) => {
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to open the store." });

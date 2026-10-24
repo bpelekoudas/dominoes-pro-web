@@ -285,6 +285,9 @@ describe("checkout", () => {
     const store = new Store(":memory:");
     const calls: CheckoutInput[] = [];
     const stripe: ShopStripe = {
+      async checkAuth() {
+        return undefined;
+      },
       async findPrice() {
         return null;
       },
@@ -353,13 +356,121 @@ describe("checkout", () => {
     });
     expect(called).toBe(false);
     expect(shop.open).toBe(false);
+    expect(shop.statusReport()).toMatchObject({ open: false, reason: "live_key", secretKey: "live", secretKeyBytes: "sk_live_secret".length });
     expect(shop.receive(Buffer.from("{}"), "signed").status).toBe(503);
-    const closed = await shopFromEnv(store, { secretKey: "sk_test_only", webhookSecret: "" }, () => {
-      called = true;
-      throw new Error("a missing webhook secret must not build a client");
-    });
-    expect(called).toBe(false);
-    expect(closed.open).toBe(false);
+  });
+
+  it("checks Stripe auth, then reports a missing, short, or rejected setup without creating prices", async () => {
+    const store = new Store(":memory:");
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    try {
+      let saved = 0;
+      const authError = Object.assign(new Error("Invalid API Key provided: sk_test_abcdefghijklmnopqrstuvwxyz"), {
+        type: "StripeAuthenticationError",
+        statusCode: 401,
+        code: "api_key_expired",
+      });
+      const rejected = await shopFromEnv(store, { secretKey: "sk_test_abc", webhookSecret: "whsec_short" }, () => ({
+        async checkAuth() {
+          throw authError;
+        },
+        async findPrice() {
+          return null;
+        },
+        async savePrice(pack) {
+          saved += 1;
+          return { id: pack.lookupKey, lookupKey: pack.lookupKey, cents: pack.cents, currency: "usd" };
+        },
+        async startCheckout() {
+          return { url: "https://checkout.stripe.com/c/pay/cs_test" };
+        },
+      }));
+      expect(saved).toBe(0);
+      expect(rejected.statusReport()).toEqual({
+        open: false,
+        reason: "stripe_auth_failed",
+        secretKey: "test",
+        secretKeyBytes: "sk_test_abc".length,
+        webhookSecretBytes: "whsec_short".length,
+      });
+      expect(warnings.join("\n")).toContain("stripe_auth_failed");
+      expect(warnings.join("\n")).not.toContain("sk_test_abc");
+
+      let authed = 0;
+      const short = await shopFromEnv(store, { secretKey: '"sk_test_only"', webhookSecret: "xxxxxxxxxx" }, () => ({
+        async checkAuth() {
+          authed += 1;
+        },
+        async findPrice() {
+          return null;
+        },
+        async savePrice() {
+          saved += 1;
+          throw new Error("prices must not be created");
+        },
+        async startCheckout() {
+          return { url: "https://checkout.stripe.com/c/pay/cs_test" };
+        },
+      }));
+      expect(authed).toBe(1);
+      expect(saved).toBe(0);
+      expect(short.statusReport().reason).toBe("webhook_secret_invalid");
+      expect(short.statusReport().webhookSecretBytes).toBe(10);
+
+      const missingSecret = await shopFromEnv(store, { secretKey: "sk_test_only", webhookSecret: "" }, () => ({
+        async checkAuth() {
+          authed += 1;
+        },
+        async findPrice() {
+          return null;
+        },
+        async savePrice() {
+          saved += 1;
+          throw new Error("prices must not be created");
+        },
+        async startCheckout() {
+          return { url: "https://checkout.stripe.com/c/pay/cs_test" };
+        },
+      }));
+      expect(missingSecret.statusReport().reason).toBe("no_webhook_secret");
+      expect(saved).toBe(0);
+
+      const brokenPrices = await shopFromEnv(
+        store,
+        { secretKey: "sk_test_only", webhookSecret: `whsec_${"a".repeat(30)}` },
+        () => ({
+          async checkAuth() {
+            return undefined;
+          },
+          async findPrice() {
+            return null;
+          },
+          async savePrice() {
+            const error = Object.assign(new Error("sk_test_only leaked"), { type: "StripeAPIError", statusCode: 400, code: "parameter_invalid" });
+            throw error;
+          },
+          async startCheckout() {
+            return { url: "https://checkout.stripe.com/c/pay/cs_test" };
+          },
+        }),
+      );
+      expect(brokenPrices.statusReport().reason).toBe("products_failed");
+      expect(brokenPrices.open).toBe(false);
+      expect(warnings.join("\n")).toContain("products_failed");
+      expect(warnings.join("\n")).not.toContain("sk_test_only");
+
+      const { app } = await createApp({ store, shop: rejected, serveWeb: false });
+      const status = await app.inject({ method: "GET", url: "/api/store/status" });
+      expect(status.statusCode).toBe(200);
+      expect(status.json().reason).toBe("stripe_auth_failed");
+      await app.close();
+    } finally {
+      console.warn = original;
+    }
   });
 });
 

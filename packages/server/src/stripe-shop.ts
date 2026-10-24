@@ -42,10 +42,34 @@ export interface CheckoutInput {
  * choose payment methods, tax, or a statement descriptor.
  */
 export interface ShopStripe {
+  /** A cheap authenticated read. Used at boot so a bad key is not confused with a missing product. */
+  checkAuth(): Promise<void>;
   findPrice(lookupKey: string): Promise<SavedPrice | null>;
   savePrice(pack: CoinPack): Promise<SavedPrice>;
   startCheckout(input: CheckoutInput): Promise<{ url: string }>;
 }
+
+export type StoreCloseReason =
+  | "no_secret_key"
+  | "no_webhook_secret"
+  | "not_test_key"
+  | "live_key"
+  | "stripe_auth_failed"
+  | "stripe_unreachable"
+  | "webhook_secret_invalid"
+  | "products_failed";
+
+export interface StoreStatus {
+  open: boolean;
+  reason?: StoreCloseReason;
+  /** Shape only. Never the key. */
+  secretKey: "missing" | "test" | "live" | "other";
+  secretKeyBytes: number;
+  webhookSecretBytes: number;
+}
+
+/** A real Stripe webhook secret is `whsec_` plus a long token. Ten bytes is not one. */
+const WEBHOOK_SECRET_MIN_BYTES = 24;
 
 export interface ShopCatalog {
   open: boolean;
@@ -75,6 +99,9 @@ export function checkoutSessionParams(input: CheckoutInput): Stripe.Checkout.Ses
 export function liveStripe(secretKey: string): ShopStripe {
   const stripe = new Stripe(secretKey, { timeout: 8_000, maxNetworkRetries: 0 });
   return {
+    async checkAuth() {
+      await stripe.balance.retrieve();
+    },
     async findPrice(lookupKey) {
       const list = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
       const price = list.data[0];
@@ -116,43 +143,104 @@ export function liveStripe(secretKey: string): ShopStripe {
 }
 
 /**
- * Open the shop only for a test key plus a webhook secret.
- * A live key is ignored. A missing secret leaves the shop closed and grants nothing.
- * Price sync failure keeps webhook verification, and leaves checkout closed.
+ * Open the shop only for a test key plus a webhook secret that looks real.
+ * A live key is ignored. A missing or short secret leaves the shop closed and grants nothing.
+ * The boot always logs a status line. Lengths are logged. The key and the secret are not.
  */
 export async function shopFromEnv(
   store: Store,
   env: { secretKey?: string | null; webhookSecret?: string | null },
   stripeFactory: (secretKey: string) => ShopStripe = liveStripe,
 ): Promise<CoinShop> {
-  const secretKey = env.secretKey?.trim() ?? "";
-  const webhookSecret = env.webhookSecret?.trim() ?? "";
-  if (secretKey.startsWith("sk_live_")) {
-    console.warn("A live Stripe key was ignored. The store stays closed until a test key is set.");
-    return new CoinShop(store, null, null);
+  const secretKey = unwrapEnv(env.secretKey);
+  const webhookSecret = unwrapEnv(env.webhookSecret);
+  const shape = secretKeyShape(secretKey);
+  const keyBytes = secretKey.length;
+  const webhookBytes = webhookSecret.length;
+  console.info(`Store boot: secretKey=${shape} secretKeyBytes=${keyBytes} webhookSecretBytes=${webhookBytes}`);
+
+  const finish = (reason: StoreCloseReason | undefined, stripe: ShopStripe | null, secret: string | null) => {
+    if (reason) console.warn(`Store closed: ${reason}`);
+    const shop = new CoinShop(store, stripe, secret);
+    shop.note(reason, shape, keyBytes, webhookBytes);
+    return shop;
+  };
+
+  if (shape === "missing") return finish("no_secret_key", null, null);
+  if (shape === "live") return finish("live_key", null, null);
+  if (shape !== "test") return finish("not_test_key", null, null);
+
+  const client = stripeFactory(secretKey);
+  try {
+    await client.checkAuth();
+    console.info("Store Stripe auth ok");
+  } catch (error) {
+    const reason = isAuthError(error) ? "stripe_auth_failed" : "stripe_unreachable";
+    console.warn(`Store closed: ${reason} ${stripeErrorCode(error)}`);
+    const shop = new CoinShop(store, null, null);
+    shop.note(reason, shape, keyBytes, webhookBytes);
+    return shop;
   }
-  if (!isTestSecretKey(secretKey) || !webhookSecret) return new CoinShop(store, null, null);
-  const shop = new CoinShop(store, stripeFactory(secretKey), webhookSecret);
+
+  if (webhookBytes === 0) return finish("no_webhook_secret", null, null);
+  if (!webhookSecretOk(webhookSecret)) return finish("webhook_secret_invalid", null, null);
+
+  const shop = new CoinShop(store, client, webhookSecret);
+  shop.note(undefined, shape, keyBytes, webhookBytes);
   try {
     await shop.sync();
+    return shop;
   } catch (error) {
-    console.warn(`Stripe prices were not synced. The store stays closed. ${safeReason(error)}`);
+    console.warn(`Store closed: products_failed ${stripeErrorCode(error)}`);
+    shop.note("products_failed", shape, keyBytes, webhookBytes);
+    return shop;
   }
-  return shop;
 }
 
 export class CoinShop {
   private priceIds = new Map<string, string>();
   private ready = false;
+  private reason: StoreCloseReason | undefined;
+  private keyShape: StoreStatus["secretKey"] = "missing";
+  private keyBytes = 0;
+  private webhookBytes: number;
 
   constructor(
     private readonly store: Store,
     private readonly stripe: ShopStripe | null,
     private readonly webhookSecret: string | null,
-  ) {}
+  ) {
+    this.webhookBytes = webhookSecret?.length ?? 0;
+    this.reason = webhookSecret ? undefined : "no_webhook_secret";
+  }
 
   get open(): boolean {
     return this.ready;
+  }
+
+  note(
+    reason: StoreCloseReason | undefined,
+    shape: StoreStatus["secretKey"],
+    keyBytes: number,
+    webhookBytes: number,
+  ): void {
+    this.reason = reason;
+    this.keyShape = shape;
+    this.keyBytes = keyBytes;
+    this.webhookBytes = webhookBytes;
+    if (reason) this.ready = false;
+  }
+
+  /** Public, non-secret snapshot of why the shop is open or closed. */
+  statusReport(): StoreStatus {
+    const body: StoreStatus = {
+      open: this.ready,
+      secretKey: this.keyShape,
+      secretKeyBytes: this.keyBytes,
+      webhookSecretBytes: this.webhookBytes,
+    };
+    if (!this.ready && this.reason) body.reason = this.reason;
+    return body;
   }
 
   catalog(): ShopCatalog {
@@ -179,9 +267,14 @@ export class CoinShop {
         throw new Error(`The price for ${pack.lookupKey} does not match the server config.`);
       }
       ids.set(pack.lookupKey, price.id);
+      console.info(`Store price ready: ${pack.lookupKey}`);
     }
     this.priceIds = ids;
     this.ready = ids.size === COIN_PACKS.length;
+    if (this.ready) {
+      this.reason = undefined;
+      console.info("Store open");
+    }
   }
 
   async startCheckout(userId: string, lookupKey: string): Promise<{ url: string } | { error: string; status: number }> {
@@ -300,6 +393,43 @@ function sessionOf(event: Stripe.Event): Stripe.Checkout.Session | null {
   const object = event.data?.object as { object?: string } | undefined;
   if (!object || object.object !== "checkout.session") return null;
   return event.data.object as Stripe.Checkout.Session;
+}
+
+function unwrapEnv(value: string | null | undefined): string {
+  let text = value?.trim() ?? "";
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  return text;
+}
+
+function secretKeyShape(key: string): StoreStatus["secretKey"] {
+  if (!key) return "missing";
+  if (key.startsWith("sk_live_")) return "live";
+  if (isTestSecretKey(key)) return "test";
+  return "other";
+}
+
+function webhookSecretOk(secret: string): boolean {
+  return secret.startsWith("whsec_") && secret.length >= WEBHOOK_SECRET_MIN_BYTES;
+}
+
+function isAuthError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const record = error as { statusCode?: unknown; type?: unknown };
+  const status = typeof record.statusCode === "number" ? record.statusCode : 0;
+  const type = typeof record.type === "string" ? record.type : "";
+  return status === 401 || status === 403 || type === "StripeAuthenticationError" || type === "StripePermissionError";
+}
+
+/** Type, code, and HTTP status only. Stripe messages can echo part of a key. */
+function stripeErrorCode(error: unknown): string {
+  if (!error || typeof error !== "object") return "unknown";
+  const record = error as { type?: unknown; code?: unknown; statusCode?: unknown };
+  const parts = [record.type, record.code, record.statusCode].filter(
+    (part) => typeof part === "string" || typeof part === "number",
+  );
+  return parts.join(" ") || "unknown";
 }
 
 function safeReason(error: unknown): string {
