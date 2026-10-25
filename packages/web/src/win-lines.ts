@@ -70,3 +70,9 @@ export function winLineFor(avatarId: string | null | undefined, seed: number): s
   const index = (seed >>> 0) % pack.lines.length;
   return pack.lines[index] ?? GENERIC_WIN_LINE;
 }
+
+/** A character's own line, or null when they only have the generic match line. */
+export function characterWinLine(avatarId: string | null | undefined, seed: number): string | null {
+  const line = winLineFor(avatarId, seed);
+  return line === GENERIC_WIN_LINE ? null : line;
+}

@@ -21,6 +21,7 @@ import { FeelPreview, feelPreviewRequested } from "./feel/preview";
 import { crowdView, feelSeatsRequested, feelTableRequested, useFeelPlay } from "./feel/table-play";
 import { ScoreChaseContext, useScoreChase, useShownScore } from "./feel/score";
 import { useHandCelebration, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
+import { WinnerPopLayer } from "./winner-pop-layer";
 
 interface ChatLine {
   id: number;
@@ -732,6 +733,7 @@ export function Game({
           reduced={win.reduced}
         />
       ) : null}
+      <WinnerPopLayer view={view} stage={win.stage} reduced={win.reduced} frozenAt={win.frozenAt} />
       {win.plan && (win.stage === "pips" || win.stage === "banner") ? (
         <WinShow
           stage={win.stage}

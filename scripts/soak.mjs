@@ -1106,6 +1106,11 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     await ready.first().waitFor({ timeout: 25_000 });
     if ((await page.locator(".table-scroll [data-board-tile]").count()) === 0) await takeUiTurn(page);
     await page.waitForSelector(".table-scroll [data-board-tile]", { timeout: 25_000 });
+    const pop = await probeWinnerPop(page);
+    if (!pop.ok) {
+      const saved = await saveUiFailure(page, outDir, pop);
+      throw new Error(`${pop.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
     for (let step = 0; step < 10; step += 1) {
       await takeUiTurn(page);
       await page.waitForTimeout(350);
@@ -1121,7 +1126,7 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     }
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: audit.summary };
+    return { ok: true, skipped: false, summary: `${pop.summary}; ${audit.summary}` };
   } finally {
     await browser.close();
   }
@@ -1159,6 +1164,91 @@ async function saveUiFailure(page, outDir, audit) {
   await page.screenshot({ path: shot });
   writeFileSync(dump, JSON.stringify(audit, null, 2));
   return { shot, dump };
+}
+
+async function probeWinnerPop(page) {
+  const control = ".hand-tile[data-playable=true], [data-action=draw], [data-action=knock], [data-action=continue]";
+  const before = await page.locator(control).count();
+  await page.evaluate(() => {
+    window.dispatchEvent(new CustomEvent("uhoh-winner-pop", { detail: { kind: "game" } }));
+  });
+  const pop = page.locator("[data-winner-pop]");
+  try {
+    await pop.waitFor({ state: "attached", timeout: 2_000 });
+  } catch {
+    return { ok: false, reason: "The winner pop did not appear." };
+  }
+  // Game pop reaches its hold at 180ms and stays there until 700ms.
+  await page.waitForTimeout(260);
+  const audit = await page.evaluate(auditWinnerPop);
+  if (!audit.ok) return audit;
+  try {
+    await pop.waitFor({ state: "detached", timeout: 1_800 });
+  } catch {
+    return { ok: false, reason: "The winner pop stayed on screen and would block the next hand.", ...audit };
+  }
+  const after = await page.locator(control).count();
+  if (before > 0 && after === 0) return { ok: false, reason: "The winner pop removed the turn control.", ...audit };
+  return audit;
+}
+
+function auditWinnerPop() {
+  const pop = document.querySelector("[data-winner-pop]");
+  if (!pop) return { ok: false, reason: "The winner pop left before the hold could be measured." };
+  const style = getComputedStyle(pop);
+  if (style.pointerEvents !== "none") return { ok: false, reason: "The winner pop blocks taps." };
+  const round = (value) => Math.round(value * 10) / 10;
+  const plain = (box) => ({
+    left: round(box.left),
+    top: round(box.top),
+    right: round(box.right),
+    bottom: round(box.bottom),
+    width: round(box.width),
+    height: round(box.height),
+  });
+  const union = (a, b) => ({
+    left: Math.min(a.left, b.left),
+    top: Math.min(a.top, b.top),
+    right: Math.max(a.right, b.right),
+    bottom: Math.max(a.bottom, b.bottom),
+  });
+  let box = pop.getBoundingClientRect();
+  for (const extra of pop.querySelectorAll(".avatar-pose, .avatar-frame")) {
+    const part = extra.getBoundingClientRect();
+    if (part.width > 2 && part.height > 2) box = union(box, part);
+  }
+  box = { ...box, width: box.right - box.left, height: box.bottom - box.top };
+  const overlaps = (a, b) => a.left < b.right - 0.6 && a.right > b.left + 0.6 && a.top < b.bottom - 0.6 && a.bottom > b.top + 0.6;
+  const hits = [];
+  for (const node of document.querySelectorAll(
+    "[data-board-tile], .hand-tile, .edge-badge, .seat-chip, .edge-slivers, .hand-tray, .playbar",
+  )) {
+    if (node.closest(".winner-pop")) continue;
+    const other = node.getBoundingClientRect();
+    if (other.width < 2 || other.height < 2) continue;
+    if (!overlaps(box, other)) continue;
+    const tile = node.getAttribute("data-board-tile");
+    const classes = typeof node.className === "string" ? node.className : "";
+    hits.push(tile ? `tile ${tile}` : classes || node.tagName);
+  }
+  if (hits.length > 0) {
+    return {
+      ok: false,
+      reason: "The winner pop covers a tile, the rack, or a badge.",
+      hits: hits.slice(0, 8),
+      pop: plain(box),
+    };
+  }
+  const tile = document.querySelector(".table-scroll [data-board-tile]");
+  if (tile) {
+    const tileBox = tile.getBoundingClientRect();
+    const hit = document.elementFromPoint(tileBox.left + tileBox.width / 2, tileBox.top + tileBox.height / 2);
+    if (hit && pop.contains(hit)) return { ok: false, reason: "The winner pop blocks a board tile.", pop: plain(box) };
+  }
+  return {
+    ok: true,
+    summary: `winner pop ${Math.round(box.width)}x${Math.round(box.height)} clear of tiles`,
+  };
 }
 
 function auditTable() {

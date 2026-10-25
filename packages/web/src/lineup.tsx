@@ -49,6 +49,12 @@ function poseUrl(avatarId: string, role: "winner" | "loser"): string | null {
   return `/poses/${avatarId}-${pose}.webp?v=${POSE_ART}`;
 }
 
+/** Cut-out win pose, including 2 Hot 4 TV's Wildcats sign. Null keeps the portrait. */
+export function winPoseSrc(avatarId: string | null | undefined): string | null {
+  if (!avatarId) return null;
+  return poseUrl(avatarId, "winner");
+}
+
 /** Win/lose file for a character, or null when the portrait should stand in. */
 export function lineupPoseFor(avatarId: string | null | undefined, role: "winner" | "loser"): "win" | "lose" | null {
   if (!avatarId || !POSE_IDS.has(avatarId)) return null;

@@ -37,16 +37,19 @@ export function AvatarFace({
   bot = false,
   timer = null,
   frameId = null,
+  pose = null,
 }: {
   id: string | null | undefined;
   bot?: boolean;
   timer?: number | null;
   frameId?: string | null;
+  /** Win-pose cutout. The frame paints behind it so a sign on the pose stays visible. */
+  pose?: string | null;
 }) {
   const ratio = timer == null ? null : Math.max(0, Math.min(1, timer));
   return (
-    <span className={`avatar${bot ? " bot" : ""}`} data-avatar={resolveAvatar(id)} aria-hidden="true">
-      {ratio != null ? (
+    <span className={`avatar${bot ? " bot" : ""}${pose ? " posing" : ""}`} data-avatar={resolveAvatar(id)} aria-hidden="true">
+      {ratio != null && !pose ? (
         <svg className="timer-ring" viewBox="0 0 36 36">
           <circle cx="18" cy="18" r="16" pathLength="100" />
           <circle
@@ -59,7 +62,7 @@ export function AvatarFace({
           />
         </svg>
       ) : null}
-      <Portrait id={id} size="chip" />
+      {pose ? <img className="avatar-pose" src={pose} alt="" draggable={false} data-pose="win" /> : <Portrait id={id} size="chip" />}
       {frameId ? <img className="avatar-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
       {bot ? (
         <svg className="bot-mark" viewBox="0 0 24 36">

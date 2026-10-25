@@ -1532,6 +1532,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .tier-up { animation: none; }
   .win-pip, .win-bit, .win-flash, .win-shock { display: none; }
   .chip-meta strong.is-scoring { animation: none; }
+  .winner-pop { animation: none; transition: none; }
   .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-burst, .feel-topple i, .feel-landing, .seat-chip[data-feel],
   .rail[data-feel] .sliver, .hand[data-feel] .hand-tile, .board-tile.last-move,
   .arrive-tile .domino, .edge.turn .sliver:first-child,
@@ -1876,6 +1877,56 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   object-position: center bottom;
 }
 .avatar-frame { z-index: 2; }
+.avatar.posing {
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.avatar.posing .avatar-pose {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  display: block;
+}
+.avatar.posing .avatar-frame { z-index: 0; }
+.winner-pop {
+  position: fixed;
+  z-index: 33;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: none;
+  margin: 0;
+  opacity: 0;
+  overflow: visible;
+}
+.winner-pop .avatar {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+.winner-pop-line {
+  flex: none;
+  width: 100%;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  color: #fff8ea;
+  background: rgba(12, 12, 12, 0.86);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 body:has(.store-screen) { overflow: hidden; height: 100dvh; }
 .store-screen {
