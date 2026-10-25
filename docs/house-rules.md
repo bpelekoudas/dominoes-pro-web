@@ -40,7 +40,7 @@ The older single-player page in the repo root is not this game, and it still sco
 
 - Domino: the first player to play their last tile wins the hand. They collect everyone else's remaining pips as one total, rounded to the nearest multiple of 5. Remainder 1 or 2 goes down, remainder 3 or 4 goes up, and an exact multiple stays. 7 becomes 5, 8 becomes 10, 29 becomes 30. A leftover of 5 does count. The "at least 10" rule is only for board scoring. Each hand is not rounded before the hands are added.
 - Locked hand: nobody can play and the boneyard is empty. The lightest hand wins and collects everyone else's pips, rounded to the nearest 5 the same way.
-- Tied locked hand: the other players' pips are split evenly. Each share is rounded down to a multiple of 5. Confirmed by the owner.
+- Tied locked hand: the other players' pips are split evenly. Each exact share (pips divided by the number of tied players) is rounded to the nearest 5, same rule as a leftover pot. A fraction is cut to a whole number first, then remainder 1 or 2 goes down and 3 or 4 goes up. Two players splitting 19 get 9.5, which rounds to 10 each. Two players splitting 15 get 7.5, which rounds to 5 each. Confirmed by the owner.
 
 ## Winning
 
@@ -59,7 +59,7 @@ The older single-player page in the repo root is not this game, and it still sco
 These are the spots the written rules did not spell out. The two owner questions are settled. The rest are the readings this game uses.
 
 1. **Who leads.** Confirmed: the winner of a hand leads the next hand, inside a game and into the next game of the series. Only the very first hand of a series uses the 6–6 rule.
-2. **Tied lock money.** Confirmed: split the other players' pips evenly, then round each person's share down to a multiple of 5. Two players splitting 19 get 5 each. A share of 5 is kept. A share under 5 becomes 0.
+2. **Tied lock money.** Confirmed: split the other players' pips evenly, then round each exact share to the nearest 5. Two players splitting 19 get 10 each. A share of 7.5 rounds to 5, because the half is dropped before the remainder test and remainder 2 goes down. An exact 5 is kept. A share whose whole number is 1 or 2 becomes 0.
 3. **No double was dealt on the opening hand.** The player with the heaviest tile leads and must play that tile. Heaviest means the higher pip total, then the higher single pip. This is rare: every double would have to be sitting in the boneyard.
 4. **150 ends the game immediately.** Confirmed by the owner after a 2-player game reached 155 on a board score of 10 and the hand kept going. A board score that takes someone to 150 or more stops the hand on that play. The hand-end count can do it too. The winner of that game leads the next game, unless the series is over. If two players are tied at the top and both are at 150 or more, the game continues until one is strictly ahead.
 5. **Two players reach 150 together.** The higher score wins the game. If they are tied at the top, and that score is at least 150, the game continues until one player is strictly ahead.

@@ -595,7 +595,7 @@ function finishLock(match: MatchState): ApplyResult {
     summary =
       share > 0
         ? `Locked and tied. ${names} split the rest, ${share} each. ${leader} leads next.`
-        : `Locked and tied. Nothing is left after rounding. ${leader} leads next.`;
+        : `Locked and tied. Each share rounds to nothing. ${leader} leads next.`;
   }
   return finish(match, {
     reason: "locked",

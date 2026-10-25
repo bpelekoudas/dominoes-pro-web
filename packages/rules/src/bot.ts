@@ -155,6 +155,13 @@ function countedHand(match: MatchState, playerId: string, opponentId: string): s
   return unseenTileIds(match, playerId);
 }
 
+/**
+ * Highest score this counted hand can take on its next play.
+ * A last tile goes out and collects this seat's remaining pips as one pot,
+ * rounded with roundToFive. That is a single winner, so it is not a tied
+ * split. A tie would use splitShare on the other players' pips, and this
+ * seat cannot see those hands.
+ */
 function bestSwing(board: BoardState, hand: readonly string[], myRemainPips: number): number {
   if (!board.center || hand.length === 0) return 0;
   let best = 0;

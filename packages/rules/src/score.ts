@@ -14,6 +14,13 @@ export function boardAward(total: number): number {
  * Remainder 1 or 2 goes down. Remainder 3 or 4 goes up. An exact multiple stays.
  * 7 becomes 5. 8 becomes 10. 12 becomes 10. 13 becomes 15. 29 becomes 30.
  * The hand award rounds the combined total once. It does not round each hand first.
+ *
+ * A fraction is cut to a whole number first. The digits after the decimal
+ * are dropped, then that whole number uses the remainder rule above.
+ * 9.5 becomes 9, remainder 4, and rounds up to 10.
+ * 7.5 becomes 7, remainder 2, and rounds down to 5. 7.5 is halfway between
+ * 5 and 10. Dropping the half leaves remainder 2, which is the down band,
+ * so 7.5 does not round up to 10.
  */
 export function roundToFive(pips: number): number {
   if (!Number.isFinite(pips) || pips <= 0) return 0;
@@ -25,22 +32,14 @@ export function roundToFive(pips: number): number {
 }
 
 /**
- * Round a pip total down to a multiple of 5. Used only for a tied lock,
- * where each share is rounded down. 9 becomes 5. 4 becomes 0.
- */
-export function roundDownToFive(pips: number): number {
-  if (!Number.isFinite(pips) || pips <= 0) return 0;
-  return Math.floor(Math.trunc(pips) / 5) * 5;
-}
-
-/**
- * Split a pot evenly across `ways` players, then round each share down
- * to a multiple of 5. This is the confirmed tie rule, not nearest-5.
- * Two players splitting 19 get 5 each. Equivalent to floor(pot / (ways * 5)) * 5.
+ * Split the other players' pips evenly, then round each exact share to the
+ * nearest 5. The share is pot / ways, fraction included, passed through
+ * roundToFive. Two players splitting 19 get 9.5, which rounds to 10 each.
+ * Two players splitting 15 get 7.5, which rounds to 5 each.
  */
 export function splitShare(pot: number, ways: number): number {
   if (ways <= 0 || pot <= 0) return 0;
-  return roundDownToFive(pot / ways);
+  return roundToFive(pot / ways);
 }
 
 export function scoreDomino(
@@ -67,8 +66,8 @@ export interface LockScore {
 /**
  * Locked hand: fewest pips wins and collects everyone else's pips,
  * rounded once to the nearest 5. A tie splits only the non-tied
- * players' pips. Each share is rounded down. The next leader is the
- * tied player holding the lowest tile-end.
+ * players' pips. Each exact share is rounded to the nearest 5.
+ * The next leader is the tied player holding the lowest tile-end.
  */
 export function scoreLocked(hands: Record<string, readonly string[]>): LockScore {
   const pipCounts: Record<string, number> = {};

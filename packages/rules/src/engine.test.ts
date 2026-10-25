@@ -14,7 +14,7 @@ import {
 } from "./engine.js";
 import { openScore } from "./board.js";
 import { deckMatchesSeed, shuffleWithSeed } from "./rng.js";
-import { roundDownToFive, roundToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
+import { roundToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
 import { allTileIds, handPips, lowestEndKey } from "./tiles.js";
 import { resolveTaunt, tauntsForPlayer } from "./taunts.js";
 import { project, type TableMeta } from "./view.js";
@@ -281,7 +281,8 @@ describe("owner checklist", () => {
     expect(locked.ok, locked.error).toBe(true);
     expect(locked.match.lastHand?.reason).toBe("locked");
     expect(handPips(["5-5", "4-5"])).toBe(19);
-    expect(locked.match.lastHand?.leftoverAwards).toEqual({ a: 5, b: 5, c: 0 });
+    expect(locked.match.lastHand?.leftoverAwards).toEqual({ a: 10, b: 10, c: 0 });
+    expect(locked.match.lastHand?.summary).toBe("Locked and tied. Alex and Sam split the rest, 10 each. Sam leads next.");
     expect(locked.match.lastHand?.nextLeaderId).toBe("b");
     const places = locked.match.lastHand?.placements ?? [];
     expect(places.filter((row) => row.place === 1).map((row) => row.playerId).sort()).toEqual(["a", "b"]);
@@ -291,6 +292,33 @@ describe("owner checklist", () => {
     expect(next.hand?.leaderId).toBe("b");
     expect(next.hand?.openingTileId).toBeNull();
     expect(next.config.boneyardMode).toBe("draw_one");
+  });
+
+  it("says a tied split rounds to nothing when each share is 1 or 2", () => {
+    const hands = {
+      a: ["6-6", "0-1", "0-2", "0-3", "0-4", "0-5", "1-2"],
+      b: ["1-1", "1-3", "1-4", "1-5", "2-2", "2-3", "2-4"],
+      c: ["2-5", "3-3", "3-4", "3-5", "4-4", "4-5", "5-5"],
+    };
+    let match = start([A, B, C], deckFor(["a", "b", "c"], hands), series);
+    match = play(match, "a", "6-6", "lead");
+    match = {
+      ...match,
+      hand: {
+        ...match.hand!,
+        hands: { a: ["0-2"], b: ["1-1"], c: ["2-2"] },
+        boneyard: [],
+        phase: "await_knock",
+        turnIndex: 0,
+      },
+    };
+    const locked = applyIntent(match, "a", { type: "knock" });
+    expect(locked.ok, locked.error).toBe(true);
+    expect(locked.match.lastHand?.leftoverAwards).toEqual({ a: 0, b: 0, c: 0 });
+    expect(handPips(["0-2"])).toBe(2);
+    expect(handPips(["1-1"])).toBe(2);
+    expect(handPips(["2-2"])).toBe(4);
+    expect(locked.match.lastHand?.summary).toBe("Locked and tied. Each share rounds to nothing. Alex leads next.");
   });
 
   it("keeps the boneyard rule for the series, and an empty yard is a knock", () => {
@@ -469,12 +497,30 @@ describe("leftover rounding", () => {
     expect(scoreDomino({ a: 0, b: 8, c: 8 }, "a")).toEqual({ a: 15, b: 0, c: 0 });
   });
 
-  it("still rounds a tied share down, which is not the nearest-5 rule", () => {
-    expect(roundDownToFive(0)).toBe(0);
-    expect(roundDownToFive(4)).toBe(0);
-    expect(roundDownToFive(9)).toBe(5);
-    expect(splitShare(19, 2)).toBe(5);
-    expect(splitShare(9, 2)).toBe(0);
+  it("rounds a fractional share by dropping the fraction, then using the remainder rule", () => {
+    expect(roundToFive(9.5)).toBe(10);
+    expect(roundToFive(7.5)).toBe(5);
+    expect(roundToFive(2.5)).toBe(0);
+    expect(roundToFive(4.5)).toBe(5);
+    expect(roundToFive(8.4)).toBe(10);
+    // 19 / 2 = 9.5, which is not halfway between 5 and 10. Remainder 4 rounds up.
+    expect(splitShare(19, 2)).toBe(10);
+    // 15 / 2 = 7.5, halfway between 5 and 10. The half is dropped, remainder 2 rounds down.
+    expect(splitShare(15, 2)).toBe(5);
+    // 9 / 2 = 4.5. Truncates to 4, remainder 4, rounds up to 5.
+    expect(splitShare(9, 2)).toBe(5);
+    // 7 / 2 = 3.5. Truncates to 3, remainder 3, rounds up to 5.
+    expect(splitShare(7, 2)).toBe(5);
+    // 4 / 2 = 2. Remainder 2 rounds down to 0.
+    expect(splitShare(4, 2)).toBe(0);
+    expect(splitShare(10, 2)).toBe(5);
+    expect(splitShare(0, 2)).toBe(0);
+    // 20 / 3 = 6.666… truncates to 6, remainder 1, rounds down to 5.
+    expect(splitShare(20, 3)).toBe(5);
+    // 23 / 3 = 7.666… truncates to 7, remainder 2, rounds down to 5.
+    expect(splitShare(23, 3)).toBe(5);
+    // 25 / 3 = 8.333… truncates to 8, remainder 3, rounds up to 10.
+    expect(splitShare(25, 3)).toBe(10);
   });
 });
 
@@ -502,10 +548,11 @@ describe("locked hands", () => {
     expect(twentyNine.awards).toEqual({ a: 30, b: 0 });
   });
 
-  it("splits a tie evenly and rounds each share down", () => {
-    expect(splitShare(19, 2)).toBe(5);
+  it("splits a tie on the exact share and rounds that share to the nearest 5", () => {
+    expect(splitShare(19, 2)).toBe(10);
+    expect(splitShare(15, 2)).toBe(5);
     expect(splitShare(20, 3)).toBe(5);
-    expect(splitShare(7, 2)).toBe(0);
+    expect(splitShare(7, 2)).toBe(5);
     expect(splitShare(10, 2)).toBe(5);
     expect(splitShare(0, 2)).toBe(0);
 
@@ -519,7 +566,12 @@ describe("locked hands", () => {
     expect(handPips(hands.c)).toBe(19);
     const locked = scoreLocked(hands);
     expect(locked.winnerIds.sort()).toEqual(["a", "b"]);
-    expect(locked.awards).toEqual({ a: 5, b: 5, c: 0 });
+    expect(locked.awards).toEqual({ a: 10, b: 10, c: 0 });
+
+    // 0-2 and 1-1 are 2 each. 2-2 is 4. The share is 2, which rounds to nothing.
+    const nothing = scoreLocked({ a: ["0-2"], b: ["1-1"], c: ["2-2"] });
+    expect(nothing.awards).toEqual({ a: 0, b: 0, c: 0 });
+    expect(nothing.nextLeaderId).toBe("a");
   });
 
   it("gives the next lead to the tied player with the lowest end", () => {
