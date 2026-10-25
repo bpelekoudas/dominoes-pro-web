@@ -1,6 +1,6 @@
 /**
- * Honest end-of-hand math. The engine rounds a pot down to a multiple of 5,
- * and a locked tie splits only the other players' pips before that rounding.
+ * Honest end-of-hand math. The engine rounds one combined pot to the nearest 5,
+ * and a locked tie splits only the other players' pips, then rounds each share down.
  * There is no partnership mode: the award sits on the winning player, or on
  * each tied player when a lock splits.
  */

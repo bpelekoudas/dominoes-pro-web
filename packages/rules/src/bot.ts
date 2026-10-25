@@ -7,6 +7,7 @@ import {
   type MatchState,
   type PublicEvent,
 } from "./engine.js";
+import { roundToFive } from "./score.js";
 import { allTileIds, tileById, tilePips } from "./tiles.js";
 
 export type BotDifficulty = "easy" | "medium" | "hard" | "expert";
@@ -162,7 +163,7 @@ function bestSwing(board: BoardState, hand: readonly string[], myRemainPips: num
     for (const end of openEnds(board)) {
       if (end.id === "lead" || !tileFits(tile, end.match)) continue;
       let swing = openScore(placeTile(board, end.id, tile)).awarded;
-      if (hand.length === 1) swing += Math.floor(myRemainPips / 5) * 5;
+      if (hand.length === 1) swing += roundToFive(myRemainPips);
       if (swing > best) best = swing;
     }
   }

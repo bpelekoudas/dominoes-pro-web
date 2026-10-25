@@ -14,7 +14,7 @@ import {
 } from "./engine.js";
 import { openScore } from "./board.js";
 import { deckMatchesSeed, shuffleWithSeed } from "./rng.js";
-import { roundDownToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
+import { roundDownToFive, roundToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
 import { allTileIds, handPips, lowestEndKey } from "./tiles.js";
 import { resolveTaunt, tauntsForPlayer } from "./taunts.js";
 import { project, type TableMeta } from "./view.js";
@@ -441,23 +441,45 @@ describe("owner checklist", () => {
 });
 
 describe("leftover rounding", () => {
-  it("rounds down, and a leftover of 5 still counts", () => {
-    expect(roundDownToFive(0)).toBe(0);
-    expect(roundDownToFive(4)).toBe(0);
-    expect(roundDownToFive(5)).toBe(5);
-    expect(roundDownToFive(9)).toBe(5);
-    expect(roundDownToFive(17)).toBe(15);
-    expect(roundDownToFive(15)).toBe(15);
+  it("rounds one total to the nearest 5, for every remainder from 1 through 60", () => {
+    expect(roundToFive(0)).toBe(0);
+    expect(roundToFive(-3)).toBe(0);
+    expect(roundToFive(7)).toBe(5);
+    expect(roundToFive(8)).toBe(10);
+    expect(roundToFive(12)).toBe(10);
+    expect(roundToFive(13)).toBe(15);
+    expect(roundToFive(29)).toBe(30);
+    for (let pips = 1; pips <= 60; pips += 1) {
+      const remainder = pips % 5;
+      const expected = remainder === 0 ? pips : remainder <= 2 ? pips - remainder : pips + (5 - remainder);
+      expect(roundToFive(pips), String(pips)).toBe(expected);
+      expect(expected % 5).toBe(0);
+    }
 
     expect(scoreDomino({ a: 0, b: 17 }, "a")).toEqual({ a: 15, b: 0 });
+    expect(scoreDomino({ a: 0, b: 8 }, "a")).toEqual({ a: 10, b: 0 });
+    expect(scoreDomino({ a: 0, b: 7 }, "a")).toEqual({ a: 5, b: 0 });
     expect(scoreDomino({ a: 0, b: 5 }, "a")).toEqual({ a: 5, b: 0 });
-    expect(scoreDomino({ a: 0, b: 4 }, "a")).toEqual({ a: 0, b: 0 });
-    expect(scoreDomino({ a: 0, b: 7, c: 6 }, "a")).toEqual({ a: 10, b: 0, c: 0 });
+    expect(scoreDomino({ a: 0, b: 4 }, "a")).toEqual({ a: 5, b: 0 });
+    expect(scoreDomino({ a: 0, b: 3 }, "a")).toEqual({ a: 5, b: 0 });
+    expect(scoreDomino({ a: 0, b: 2 }, "a")).toEqual({ a: 0, b: 0 });
+    // 7 and 6 are added first. 13 rounds to 15. Rounding each hand would pay 10.
+    expect(scoreDomino({ a: 0, b: 7, c: 6 }, "a")).toEqual({ a: 15, b: 0, c: 0 });
+    // 8 and 8 are 16, which rounds to 15. Rounding each hand would pay 20.
+    expect(scoreDomino({ a: 0, b: 8, c: 8 }, "a")).toEqual({ a: 15, b: 0, c: 0 });
+  });
+
+  it("still rounds a tied share down, which is not the nearest-5 rule", () => {
+    expect(roundDownToFive(0)).toBe(0);
+    expect(roundDownToFive(4)).toBe(0);
+    expect(roundDownToFive(9)).toBe(5);
+    expect(splitShare(19, 2)).toBe(5);
+    expect(splitShare(9, 2)).toBe(0);
   });
 });
 
 describe("locked hands", () => {
-  it("pays the lightest hand the others' pips, rounded down", () => {
+  it("pays the lightest hand the others' pips, rounded once to the nearest 5", () => {
     const hands = {
       a: ["0-2"],
       b: ["5-5", "4-4"],
@@ -470,6 +492,14 @@ describe("locked hands", () => {
     expect(locked.winnerIds).toEqual(["a"]);
     expect(locked.awards).toEqual({ a: 25, b: 0, c: 0 });
     expect(locked.nextLeaderId).toBe("a");
+
+    // 4-4 is 8. Floor would pay 5. Nearest pays 10.
+    const eight = scoreLocked({ a: ["0-0"], b: ["4-4"] });
+    expect(eight.awards).toEqual({ a: 10, b: 0 });
+    // 6-6 + 5-5 + 4-3 is 29. Floor would pay 25. Nearest pays 30.
+    expect(handPips(["6-6", "5-5", "3-4"])).toBe(29);
+    const twentyNine = scoreLocked({ a: ["0-0"], b: ["6-6", "5-5", "3-4"] });
+    expect(twentyNine.awards).toEqual({ a: 30, b: 0 });
   });
 
   it("splits a tie evenly and rounds each share down", () => {

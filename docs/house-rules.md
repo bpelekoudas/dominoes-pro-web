@@ -38,8 +38,8 @@ The older single-player page in the repo root is not this game, and it still sco
 
 ## Ending a hand
 
-- Domino: the first player to play their last tile wins the hand. They collect everyone else's remaining pips, rounded down to a multiple of 5. A leftover of 5 does count. The "at least 10" rule is only for board scoring.
-- Locked hand: nobody can play and the boneyard is empty. The lightest hand wins and collects everyone else's pips, rounded down the same way.
+- Domino: the first player to play their last tile wins the hand. They collect everyone else's remaining pips as one total, rounded to the nearest multiple of 5. Remainder 1 or 2 goes down, remainder 3 or 4 goes up, and an exact multiple stays. 7 becomes 5, 8 becomes 10, 29 becomes 30. A leftover of 5 does count. The "at least 10" rule is only for board scoring. Each hand is not rounded before the hands are added.
+- Locked hand: nobody can play and the boneyard is empty. The lightest hand wins and collects everyone else's pips, rounded to the nearest 5 the same way.
 - Tied locked hand: the other players' pips are split evenly. Each share is rounded down to a multiple of 5. Confirmed by the owner.
 
 ## Winning

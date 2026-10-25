@@ -60,8 +60,8 @@ describe("hand win pips", () => {
     expect(new Set(plan.pips.map((pip) => pip.sourceTileId))).toEqual(new Set(["5-5", "6-6"]));
   });
 
-  it("skips the flight when the leftovers round down to nothing", () => {
-    const awards = scoreDomino({ winner: 2, loser: 4 }, "winner");
+  it("skips the flight when the leftovers round to nothing", () => {
+    const awards = scoreDomino({ winner: 2, loser: 2 }, "winner");
     expect(awards).toEqual({ winner: 0, loser: 0 });
     const plan = planWinPips(awards, [{ playerId: "loser", tiles: [{ id: "0-4" }] }]);
     expect(plan.pips).toEqual([]);

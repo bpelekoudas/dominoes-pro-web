@@ -561,7 +561,7 @@ function finishDomino(match: MatchState, winnerId: string): ApplyResult {
   const summary =
     award > 0
       ? `${winner} went out and took ${award} from the table.`
-      : `${winner} went out. The leftovers round down to nothing.`;
+      : `${winner} went out. The leftovers come to nothing.`;
   return finish(match, {
     reason: "domino",
     winnerIds: [winnerId],
@@ -587,7 +587,7 @@ function finishLock(match: MatchState): ApplyResult {
     summary =
       award > 0
         ? `Locked. ${nameOf(match, winnerId)} had the lightest hand and took ${award}.`
-        : `Locked. ${nameOf(match, winnerId)} had the lightest hand. The leftovers round down to nothing.`;
+        : `Locked. ${nameOf(match, winnerId)} had the lightest hand. The leftovers come to nothing.`;
   } else {
     const names = locked.winnerIds.map((id) => nameOf(match, id)).join(" and ");
     const share = locked.awards[locked.winnerIds[0]!] ?? 0;

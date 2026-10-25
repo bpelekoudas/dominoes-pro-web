@@ -28,7 +28,7 @@ Sound is a short click when a tile lands, a buzz when it becomes your turn, and 
 
 - A board that adds up to 5 scores nothing. 10, 15, 20, and so on score the whole amount.
 - The first double is the spinner. The cross opens only after both long sides have a tile. Once both long sides are filled, an unplayed side of the spinner does not count in the open-end total.
-- Going out pays the other players' pips, rounded down to a multiple of 5. A leftover of 5 still counts.
+- Going out pays the other players' pips as one total, rounded to the nearest multiple of 5. Remainder 1 or 2 goes down and 3 or 4 goes up. A leftover of 5 still counts.
 - A locked tie splits what's left, and each share is rounded down. The player with the lowest tile-end leads next.
 - The winner of a hand leads the next hand, including the first hand of the next game. Only the first hand of a whole series starts from the double-six. If 6–6 was not dealt, the highest double leads. If nobody holds a double, the heaviest tile leads: higher pip total, then the higher single pip.
 - Every hand records who finished 1st, 2nd, 3rd, and 4th. Ties share a place and the next place is skipped. Those places are shown. They do not award points yet.

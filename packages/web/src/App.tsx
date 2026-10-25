@@ -1281,7 +1281,7 @@ function HandSummary({
         ) : null}
       </div>
       <p>{hand.summary}</p>
-      <p className="round-note">Leftovers round down to the nearest 5.</p>
+      <p className="round-note">Leftovers round to the nearest 5.</p>
       <ol className="place-list">
         {places.map((place) => (
           <li key={place.playerId}>
