@@ -4,6 +4,8 @@ import { isAvatarId } from "../../rules/src/avatars.js";
 import { scoreDomino } from "../../rules/src/score.js";
 import { Portrait, AvatarFace } from "./avatars";
 import { MatchLineup } from "./lineup";
+import { GamePips } from "./game-pips";
+import { gameTallyText } from "./game-tally.js";
 import { prefersReducedMotion } from "./moment";
 import { seatAround } from "./seats";
 import { playWinSting } from "./sound";
@@ -833,7 +835,21 @@ function previewView(mode: WinPreviewMode): PlayerView {
   };
 }
 
-function PreviewSeat({ id, name, score, avatarId }: { id: string; name: string; score: number; avatarId: string }) {
+function PreviewSeat({
+  id,
+  name,
+  score,
+  avatarId,
+  gamesWon,
+  winsNeeded,
+}: {
+  id: string;
+  name: string;
+  score: number;
+  avatarId: string;
+  gamesWon: number;
+  winsNeeded: number;
+}) {
   const live = useWinScore(id, score);
   return (
     <div className={`seat-chip${id === "you" ? " you" : ""}${live.hot ? " win-hot" : ""}`} data-player-id={id}>
@@ -844,6 +860,7 @@ function PreviewSeat({ id, name, score, avatarId }: { id: string; name: string; 
           <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={id}>
             {live.score}
           </strong>
+          <GamePips won={gamesWon} needed={winsNeeded} />
         </span>
       </span>
     </div>
@@ -877,7 +894,14 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
             .filter((seat) => seat.edge !== "bottom")
             .map((seat) => (
               <div key={seat.player.id} className={`rail rail-${seat.edge}`} data-edge={seat.edge} data-player-id={seat.player.id}>
-                <PreviewSeat id={seat.player.id} name={seat.player.name} score={seat.player.score} avatarId={seat.player.avatarId} />
+                <PreviewSeat
+                  id={seat.player.id}
+                  name={seat.player.name}
+                  score={seat.player.score}
+                  avatarId={seat.player.avatarId}
+                  gamesWon={seat.player.gamesWon}
+                  winsNeeded={view.winsNeeded}
+                />
               </div>
             ))}
           <div className="win-preview-chain" aria-hidden="true">
@@ -896,7 +920,14 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
           ) : null}
           {you ? (
             <div className="you-float">
-              <PreviewSeat id={you.player.id} name="You" score={you.player.score} avatarId={you.player.avatarId} />
+              <PreviewSeat
+                id={you.player.id}
+                name="You"
+                score={you.player.score}
+                avatarId={you.player.avatarId}
+                gamesWon={you.player.gamesWon}
+                winsNeeded={view.winsNeeded}
+              />
             </div>
           ) : null}
         </div>
@@ -926,6 +957,8 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
         {win.stage === "lineup" && win.banner ? (
           <MatchLineup
             players={lineupCast(view)}
+            games={view.players.map((player) => player.gamesWon)}
+            winsNeeded={view.winsNeeded}
             winnerId={win.banner.winnerId}
             line={winLineFor(
               win.banner.avatarId,
@@ -940,6 +973,9 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
           match ? (
             <section className="hand-summary" data-screen="series">
               <p className="result-kicker">Series over</p>
+              <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
+                Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+              </p>
               <div className="winner-row">
                 <h2>{winnerName} won the hand</h2>
               </div>

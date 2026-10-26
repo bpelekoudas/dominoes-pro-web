@@ -602,6 +602,7 @@ async function playMatch(mode, index, options) {
   const seenDeals = new Set();
   const seenEnds = new Set();
   let prevScores = {};
+  let prevGames = null;
   let prevPlaySeq = 0;
   let prevGame = 0;
   let checkedSig = "";
@@ -746,6 +747,7 @@ async function playMatch(mode, index, options) {
       prevScores[player.id] = player.score;
     }
     if (view.lastPlay && view.lastPlay.seq > prevPlaySeq) prevPlaySeq = view.lastPlay.seq;
+    checkGames(view);
     if (view.boneyardCount === 0 && view.lastEvent?.kind === "knock") report.emptyBoneyardKnocks = (report.emptyBoneyardKnocks ?? 0) + 1;
     checkSeries(view);
     if (view.status === "complete" || view.phase === "over") done = true;
@@ -797,6 +799,28 @@ async function playMatch(mode, index, options) {
       const passed = view.turnPlayerId === nextSeat(view, event.playerId);
       if (stayed && view.phase !== "play") throw new Error("A draw kept the turn without a playable tile.");
       if (!stayed && !passed) throw new Error("The turn after a draw is wrong.");
+    }
+  }
+
+  function checkGames(view) {
+    const total = view.players.reduce((sum, player) => sum + player.gamesWon, 0);
+    const closedThisGame = Boolean(view.lastHand?.gameWinnerId && view.lastHand.gameNumber === view.gameNumber);
+    const expected = closedThisGame ? view.gameNumber : Math.max(0, view.gameNumber - 1);
+    if (total !== expected) throw new Error(`Games won add up to ${total}, expected ${expected}.`);
+    if (!prevGames) {
+      prevGames = Object.fromEntries(view.players.map((player) => [player.id, player.gamesWon]));
+      return;
+    }
+    for (const player of view.players) {
+      const before = prevGames[player.id] ?? 0;
+      if (player.gamesWon < before || player.gamesWon > before + 1) {
+        throw new Error(`${player.name} games went from ${before} to ${player.gamesWon}.`);
+      }
+      if (player.gamesWon === before + 1 && view.lastHand?.gameWinnerId !== player.id) {
+        throw new Error(`${player.name} gained a game without winning it.`);
+      }
+      if (player.gamesWon > view.winsNeeded) throw new Error(`${player.name} has more games than the series needs.`);
+      prevGames[player.id] = player.gamesWon;
     }
   }
 
@@ -1111,6 +1135,11 @@ async function uiSmoke(origin, outDir = "soak-reports") {
       const saved = await saveUiFailure(page, outDir, pop);
       throw new Error(`${pop.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
+    const tally = await page.evaluate(auditGameTally);
+    if (!tally.ok) {
+      const saved = await saveUiFailure(page, outDir, tally);
+      throw new Error(`${tally.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
     for (let step = 0; step < 10; step += 1) {
       await takeUiTurn(page);
       await page.waitForTimeout(350);
@@ -1126,7 +1155,7 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     }
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: `${pop.summary}; ${audit.summary}` };
+    return { ok: true, skipped: false, summary: `${pop.summary}; ${tally.summary}; ${audit.summary}` };
   } finally {
     await browser.close();
   }
@@ -1190,6 +1219,28 @@ async function probeWinnerPop(page) {
   const after = await page.locator(control).count();
   if (before > 0 && after === 0) return { ok: false, reason: "The winner pop removed the turn control.", ...audit };
   return audit;
+}
+
+function auditGameTally() {
+  const target = document.querySelector("[data-series-target]");
+  const needed = Number(target?.getAttribute("data-series-target"));
+  if (!needed) return { ok: false, reason: "The series target is not on screen." };
+  const label = target.textContent ?? "";
+  if (!label.includes(`to ${needed}`)) return { ok: false, reason: "The series target text does not match the count." };
+  const chips = [...document.querySelectorAll(".seat-chip[data-player-id]")];
+  if (chips.length < 2) return { ok: false, reason: "The game tally is missing a seat." };
+  const counts = [];
+  for (const chip of chips) {
+    const mark = chip.querySelector("[data-games-won]");
+    if (!mark) return { ok: false, reason: "A seat has no games tally." };
+    const won = Number(mark.getAttribute("data-games-won"));
+    const need = Number(mark.getAttribute("data-games-needed"));
+    const text = (mark.textContent ?? "").replace(/\s+/g, "");
+    if (need !== needed) return { ok: false, reason: "A seat's series target disagrees with the table." };
+    if (text !== `${won}/${need}`) return { ok: false, reason: "The games label does not match the game-win count." };
+    counts.push(won);
+  }
+  return { ok: true, summary: `games ${counts.join("-")} first to ${needed} on ${chips.length} seats` };
 }
 
 function auditWinnerPop() {

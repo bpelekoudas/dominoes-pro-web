@@ -354,6 +354,36 @@ input {
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+.game-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1;
+}
+.game-pips {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(213, 163, 54, 0.16);
+  color: #fff8ea;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+.edge-badge .game-pips {
+  height: 12px;
+  padding: 0 3px;
+  font-size: 0.68rem;
+}
+.game-pips.pop { animation: win-score-pop 280ms cubic-bezier(0.2, 1.4, 0.4, 1); }
 .edge-left .talk-bubble { left: calc(100% + 6px); top: 0; }
 .edge-right .talk-bubble { right: calc(100% + 6px); left: auto; top: 0; }
 /* Stay in the badge row. A bubble hung under the rail lands on the top tiles. */
@@ -1294,6 +1324,13 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .place-list, .score-list { margin: 8px 0; padding-left: 18px; }
 .score-list { list-style: none; padding-left: 0; }
 .score-list li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.score-figures { display: inline-flex; align-items: center; gap: 8px; }
+.series-tally {
+  margin: 2px 0 0;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
 .reveal-row { display: grid; gap: 10px; }
 .reveal-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
 .reveal-tiles .domino { width: 44px; height: 88px; }
@@ -1532,6 +1569,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .tier-up { animation: none; }
   .win-pip, .win-bit, .win-flash, .win-shock { display: none; }
   .chip-meta strong.is-scoring { animation: none; }
+  .game-pips.pop { animation: none; }
   .winner-pop { animation: none; transition: none; }
   .feel-ripple, .feel-call, .feel-tally, .feel-pop, .feel-burst, .feel-topple i, .feel-landing, .seat-chip[data-feel],
   .rail[data-feel] .sliver, .hand[data-feel] .hand-tile, .board-tile.last-move,
@@ -2616,6 +2654,18 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
   text-transform: uppercase;
   font-size: 15px;
   color: rgba(255, 248, 234, 0.72);
+  pointer-events: none;
+}
+.lineup-tally {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 36px;
+  margin: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+  color: #d5a336;
   pointer-events: none;
 }
 .lineup[data-motion="on"] .lineup-stage {

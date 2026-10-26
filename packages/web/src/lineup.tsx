@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Portrait } from "./avatars";
+import { gameTallyText } from "./game-tally.js";
 
 /** Bump when a pose file's bytes change. */
 export const POSE_ART = "1";
@@ -94,6 +95,8 @@ export function MatchLineup({
   motion,
   instant,
   onContinue,
+  games,
+  winsNeeded,
 }: {
   players: readonly LineupPlayer[];
   winnerId: string;
@@ -101,6 +104,8 @@ export function MatchLineup({
   motion: "on" | "off";
   instant: boolean;
   onContinue: () => void;
+  games?: readonly number[];
+  winsNeeded?: number;
 }) {
   const winner = players.find((player) => player.id === winnerId) ?? players[0];
   const losers = players.filter((player) => player.id !== winner?.id);
@@ -160,6 +165,11 @@ export function MatchLineup({
         </div>
       </div>
       <p className="lineup-hint">Tap to continue</p>
+      {winsNeeded && games && games.length > 0 ? (
+        <p className="lineup-tally" data-games-tally={gameTallyText(games)} data-series-target={winsNeeded}>
+          Games {gameTallyText(games)} · first to {winsNeeded}
+        </p>
+      ) : null}
     </button>
   );
 }

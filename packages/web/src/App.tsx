@@ -22,6 +22,8 @@ import { crowdView, feelSeatsRequested, feelTableRequested, useFeelPlay } from "
 import { ScoreChaseContext, useScoreChase, useShownScore } from "./feel/score";
 import { useHandCelebration, WinPreview, WinScoreContext, WinShow, winPreviewRequested } from "./win-fx";
 import { WinnerPopLayer } from "./winner-pop-layer";
+import { GamePips } from "./game-pips";
+import { gameTallyText } from "./game-tally.js";
 
 interface ChatLine {
   id: number;
@@ -546,10 +548,10 @@ export function Game({
             {view.roomCode}
           </button>
         ) : null}
-        <p className="series-line">
+        <p className="series-line" data-series-target={view.winsNeeded}>
           {playing ? (
             <>
-              {`Bo${view.settings.seriesLength} · G${view.gameNumber} · H${view.handNumber} · to `}
+              {`Bo${view.settings.seriesLength} to ${view.winsNeeded} · G${view.gameNumber} · H${view.handNumber} · `}
               <SeriesTarget view={view} />
             </>
           ) : (
@@ -602,6 +604,9 @@ export function Game({
         <section className="ended-screen" data-screen="player-left">
           <div className="hand-summary-scroll">
             <p className="result-kicker">Game ended - {view.ended.name} left</p>
+            <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
+              Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+            </p>
             <ScoreList view={view} />
             {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
           </div>
@@ -750,6 +755,8 @@ export function Game({
       {win.stage === "lineup" && win.banner ? (
         <MatchLineup
           players={view.players.map((player) => ({ id: player.id, name: player.name, avatarId: player.avatarId }))}
+          games={view.players.map((player) => player.gamesWon)}
+          winsNeeded={view.winsNeeded}
           winnerId={win.banner.winnerId}
           line={winLineFor(
             win.banner.avatarId,
@@ -985,9 +992,12 @@ function EdgeBadge({
         frameId={player.frameId}
         timer={player.isTurn && view.turnDeadline ? ratio : null}
       />
-      <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
-        {live.score}
-      </strong>
+      <span className="game-col">
+        <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
+          {live.score}
+        </strong>
+        <GamePips won={player.gamesWon} needed={view.winsNeeded} />
+      </span>
       {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
     </div>
   );
@@ -1046,6 +1056,7 @@ function SeatChip({
           >
             {live.score}
           </strong>
+          <GamePips won={player.gamesWon} needed={view.winsNeeded} />
           {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
           {player.rank ? (
             <RankLine
@@ -1235,11 +1246,14 @@ function TurnBar({ view }: { view: PlayerView }) {
 
 function ScoreList({ view }: { view: PlayerView }) {
   return (
-    <ul className="score-list">
+    <ul className="score-list" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
       {view.players.map((player) => (
-        <li key={player.id}>
+        <li key={player.id} data-player-id={player.id}>
           <span>{player.isYou ? "You" : player.name}</span>
-          <strong>{player.score}</strong>
+          <span className="score-figures">
+            <GamePips won={player.gamesWon} needed={view.winsNeeded} />
+            <strong>{player.score}</strong>
+          </span>
         </li>
       ))}
     </ul>
@@ -1272,6 +1286,9 @@ function HandSummary({
   return (
     <section className="hand-summary" data-screen={seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand"}>
       <p className="result-kicker">{seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
+      <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
+        Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+      </p>
       <div className="winner-row">
         <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>
         {last && lastFace ? (
