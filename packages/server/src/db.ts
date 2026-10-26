@@ -184,6 +184,9 @@ export class Store {
   constructor(filename: string) {
     this.db = new DatabaseSync(filename);
     this.db.exec(`PRAGMA foreign_keys = ON;`);
+    // A deploy runs the new process before the old one has exited, and both
+    // open this file. Wait instead of failing the request with a locked database.
+    this.db.exec(`PRAGMA busy_timeout = 3000;`);
     if (filename !== ":memory:") this.db.exec(`PRAGMA journal_mode = WAL;`);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS rooms (

@@ -1073,6 +1073,30 @@ async function untilBotActs(
   throw new Error("A computer never moved.");
 }
 
+describe("deploy drain", () => {
+  it("closes live sockets and keeps the equip table out of quick match", () => {
+    const { hub } = setup();
+    let closed = 0;
+    const messages: ServerMessage[] = [];
+    const opened = hub.beginEquipProbe("Watch", "watch", (message) => messages.push(message), () => {
+      closed += 1;
+    });
+    expect(opened.ok).toBe(true);
+    const code = latestView(messages)?.roomCode ?? "";
+    const joined = hub.connect({ type: "join", name: "Ada", code }, () => undefined, () => undefined);
+    expect(joined.ok).toBe(false);
+    if (!joined.ok) expect(joined.error).toBe("That table isn't open.");
+    const quick = hub.connect({ type: "quick", name: "Bo", size: 2 }, () => undefined, () => undefined);
+    expect(quick.ok).toBe(true);
+    if (quick.ok) {
+      const roomId = hub.openTables();
+      expect(roomId.every((table) => table.code !== code)).toBe(true);
+    }
+    hub.closeConnections();
+    expect(closed).toBe(1);
+  });
+});
+
 describe("quick match", () => {
   it("seats two players at the same public table and deals when it is full", () => {
     const { hub, connect } = setup();

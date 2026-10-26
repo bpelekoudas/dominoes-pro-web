@@ -138,6 +138,8 @@ interface LiveRoom {
   casual: boolean;
   /** Public quick-match table others can find while it is waiting. */
   listed: boolean;
+  /** Equip check. Not listed, and not something another player can join. */
+  probe: boolean;
   createdAt: number;
   /** When the wait offer may appear. Null on a private room. */
   quickWaitUntil: number | null;
@@ -368,6 +370,43 @@ export class Hub {
     return count;
   }
 
+  /**
+   * A two-seat table for the equip check. It is not listed, so it cannot sit
+   * down at a table that is already waiting, and Quick Match will not find it.
+   */
+  beginEquipProbe(
+    name: string,
+    userId: string,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+  ): { ok: true; session: BoundSession } | { ok: false; error: string } {
+    const opened = this.create(
+      { type: "create", name, playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      send,
+      close,
+      userId,
+    );
+    if (!opened.ok) return opened;
+    const room = this.roomFor(opened.session.playerId);
+    if (room) room.probe = true;
+    return opened;
+  }
+
+  /** Close every live socket. A deploy does this so seats reconnect on the new process. */
+  closeConnections(): void {
+    for (const room of this.rooms.values()) {
+      for (const seat of room.seats) {
+        const close = seat.close;
+        if (!close) continue;
+        try {
+          close();
+        } catch {
+          // The socket is already gone.
+        }
+      }
+    }
+  }
+
   /** Drop every live table that includes one of these accounts. */
   dropUsers(userIds: readonly string[]): void {
     const ids = new Set(userIds);
@@ -502,6 +541,7 @@ export class Hub {
       },
       casual: soak ? true : listed ? false : message.casual === true,
       listed,
+      probe: false,
       createdAt: Date.now(),
       quickWaitUntil: listed ? Date.now() + this.quickWaitMs : null,
       botFillAt: null,
@@ -576,7 +616,7 @@ export class Hub {
     if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
     const code = message.code.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const room = this.byCode.get(code) ? this.rooms.get(this.byCode.get(code)!) : undefined;
-    if (!room) return { ok: false, error: "No table with that code." };
+    if (!room || room.probe) return { ok: false, error: room ? "That table isn't open." : "No table with that code." };
     const joinerSoak = this.accountIsSoak(accountUserId, name);
     if (joinerSoak !== room.soak) {
       return {
@@ -1284,6 +1324,7 @@ export class Hub {
       },
       casual: row.casual === 1,
       listed: row.listed === 1,
+      probe: false,
       createdAt: Date.parse(row.created_at) || Date.now(),
       quickWaitUntil: row.listed === 1 && row.status === "lobby" ? Date.now() + this.quickWaitMs : null,
       botFillAt: null,
@@ -1423,7 +1464,7 @@ export class Hub {
 
   private fillAccountBots(roomId: string, asker?: LiveSeat): void {
     const room = this.rooms.get(roomId);
-    if (!room || !this.openToHumans(room) || !room.listed) {
+    if (!room || !this.openToHumans(room) || !(room.listed || room.probe)) {
       if (asker) this.tell(asker, { type: "error", message: "This table has already started." });
       return;
     }

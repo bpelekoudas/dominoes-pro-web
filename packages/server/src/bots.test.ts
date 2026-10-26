@@ -276,6 +276,75 @@ describe("bot play", () => {
     hub.discardRoom(seated.session.playerId);
   });
 
+  it("checks the bot who actually sat and leaves a waiting table alone", async () => {
+    const store = new Store(":memory:");
+    const cosmetics = new Cosmetics(store);
+    const hub = new Hub(store, 20, () => 60_000, 30_000, 1_000, 60_000, 60_000, () => 60_000);
+    const bots = new BotLeague(store, hub, cosmetics);
+    bots.ensure();
+    const now = new Date().toISOString();
+    for (const [id, name] of [
+      ["holder", "Holder"],
+      ["waiter", "Waiter"],
+    ] as const) {
+      store.insertUser({
+        id,
+        display_name: name,
+        avatar_id: "homescreen",
+        created_at: now,
+        updated_at: now,
+        is_guest: 1,
+      });
+    }
+    const held: ServerMessage[] = [];
+    const holding = hub.connect(
+      { type: "quick", name: "Holder", size: 2 },
+      (message) => held.push(message),
+      () => undefined,
+      "holder",
+    );
+    if (!holding.ok) throw new Error(holding.error);
+    hub.command(holding.session.playerId, { type: "fill-bots" });
+    const first = viewOf(held)?.players.find((player) => player.accountBot);
+    expect(first?.name).toBe("Pip Squeak");
+    expect(viewOf(held)?.status).toBe("playing");
+
+    const next = store.listBots().find((bot) => bot.display_name === "Double Six");
+    if (!next) throw new Error("Double Six was not created.");
+    const worn = CATALOG.find((item) => item.category === "frame" && item.obtain === "bones" && item.bones === 500);
+    expect(worn).toBeTruthy();
+    store.db.prepare(`INSERT INTO owned_items (user_id, item_id, acquired_at) VALUES (?, ?, ?)`).run(next.id, worn!.id, now);
+    expect(cosmetics.equip(next.id, worn!.id).ok).toBe(true);
+
+    const waiting: ServerMessage[] = [];
+    const queued = hub.connect(
+      { type: "quick", name: "Waiter", size: 2 },
+      (message) => waiting.push(message),
+      () => undefined,
+      "waiter",
+    );
+    if (!queued.ok) throw new Error(queued.error);
+    const waitingCode = viewOf(waiting)?.roomCode;
+    expect(viewOf(waiting)?.status).toBe("lobby");
+    expect(viewOf(waiting)?.players).toHaveLength(1);
+
+    await bots.probeNow();
+    const summary = bots.summary();
+    expect(summary.errorsByType).toEqual({});
+    const probes = summary.probes as Array<{ name?: string; ok?: boolean; detail?: string }>;
+    const equip = probes.find((probe) => probe.name === "equip");
+    expect(equip?.ok).toBe(true);
+    expect(equip?.detail).toContain(worn!.id);
+    expect(equip?.detail?.startsWith("Pip Squeak")).toBe(false);
+
+    const still = viewOf(waiting);
+    expect(still?.status).toBe("lobby");
+    expect(still?.players).toHaveLength(1);
+    expect(still?.roomCode).toBe(waitingCode);
+    hub.discardRoom(holding.session.playerId);
+    hub.discardRoom(queued.session.playerId);
+  });
+
   it("runs the throttled probes without recording a failure", async () => {
     const { bots } = memory();
     bots.ensure();

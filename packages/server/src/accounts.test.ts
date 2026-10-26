@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { shuffleWithSeed } from "@uhoh/rules";
 import { Accounts, SESSION_COOKIE, type PublicUser, type SignInResult } from "./accounts.js";
-import { createApp } from "./app.js";
+import { createApp, drainServer } from "./app.js";
 import { Store } from "./db.js";
 import { Hub, type ServerMessage } from "./hub.js";
 
@@ -308,6 +308,26 @@ describe("accounts", () => {
     expect(human.user_id ?? null).toBeNull();
     hub.connect({ type: "reconnect", token: human.token }, () => undefined, () => undefined, second.id);
     expect(store.playerByToken(human.token)?.user_id).toBe(second.id);
+  });
+
+  it("fails health and closes seats while a deploy drains", async () => {
+    const store = new Store(":memory:");
+    const accounts = accountsFor(store);
+    const { app, hub, lifecycle } = await createApp({ store, accounts, serveWeb: false });
+    const ready = await app.inject({ method: "GET", url: "/health" });
+    expect(ready.statusCode).toBe(200);
+    let closed = 0;
+    const seated = hub.connect(
+      { type: "create", name: "Ada", playerCount: 2, boneyardMode: "draw_until", seriesLength: 3 },
+      () => undefined,
+      () => {
+        closed += 1;
+      },
+    );
+    expect(seated.ok).toBe(true);
+    await drainServer({ app, hub, lifecycle });
+    expect(lifecycle.draining).toBe(true);
+    expect(closed).toBe(1);
   });
 
   it("answers health, sets a session cookie, and checks the origin", async () => {

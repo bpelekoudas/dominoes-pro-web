@@ -808,29 +808,29 @@ export class BotLeague {
   private async probeEquip(): Promise<void> {
     const guests: string[] = [];
     try {
-      const bot = this.roster[0];
-      if (!bot) throw new Error("No bot account.");
-      const loadout = this.cosmetics.loadout(bot.userId);
+      if (this.roster.length === 0) throw new Error("No bot account.");
       const human = this.guest("Watch");
       guests.push(human.id);
       const messages: ServerMessage[] = [];
-      const opened = this.hub.connect(
-        { type: "quick", name: human.name, size: 2 },
-        (message) => messages.push(message),
-        () => undefined,
-        human.id,
-      );
+      const opened = this.hub.beginEquipProbe(human.name, human.id, (message) => messages.push(message), () => undefined);
       if (!opened.ok) throw new Error(opened.error);
       this.hub.command(opened.session.playerId, { type: "fill-bots" });
       const view = latestView(messages);
-      const seat = view?.players.find((player) => player.accountBot && player.name === bot.name);
-      if (!seat?.accountBot) throw new Error("The quick table did not seat the equipped bot.");
-      if (seat.frameId !== loadout.frameId) throw new Error(`Frame showed ${seat.frameId}.`);
-      if (seat.effectItemId !== loadout.effectId) throw new Error(`Effect showed ${seat.effectItemId}.`);
-      if (seat.tileId !== loadout.tileId || seat.tableId !== loadout.tableId) throw new Error("Tile or table did not sync.");
+      const seat = view?.players.find((player) => player.accountBot);
+      if (!seat?.accountBot) {
+        const refused = messages.find((message) => message.type === "error");
+        const why = refused?.type === "error" ? refused.message : "no account bot was seated";
+        throw new Error(`The quick table did not seat the equipped bot (${why}).`);
+      }
+      const seated = this.roster.find((candidate) => candidate.name === seat.name);
+      if (!seated) throw new Error(`${seat.name} sat down but is not on the roster.`);
+      const worn = this.cosmetics.loadout(seated.userId);
+      if (seat.frameId !== worn.frameId) throw new Error(`Frame showed ${seat.frameId}.`);
+      if (seat.effectItemId !== worn.effectId) throw new Error(`Effect showed ${seat.effectItemId}.`);
+      if (seat.tileId !== worn.tileId || seat.tableId !== worn.tableId) throw new Error("Tile or table did not sync.");
       if (!seat.avatarId || isWithheldId(seat.avatarId)) throw new Error("Bot avatar was missing or withheld.");
       this.hub.discardRoom(opened.session.playerId);
-      this.probeOk("equip", `${seat.name} showed ${loadout.frameId ?? "no frame"}, ${loadout.effectId}, ${loadout.tileId}, ${loadout.tableId}.`);
+      this.probeOk("equip", `${seat.name} showed ${worn.frameId ?? "no frame"}, ${worn.effectId}, ${worn.tileId}, ${worn.tableId}.`);
     } catch (error) {
       this.bug("equip-sync", error instanceof Error ? error.message : "Equip sync failed.");
       this.probeFail("equip", error);

@@ -31,6 +31,11 @@ export interface AppOptions {
   shop?: CoinShop;
 }
 
+/** Shared with the process signal handler. Health fails while this is draining. */
+export interface ServerLifecycle {
+  draining: boolean;
+}
+
 export async function createApp(options: AppOptions = {}) {
   const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
   const dbFile = process.env.DB_FILE ?? path.join(dataDir, "uhoh.sqlite");
@@ -64,6 +69,7 @@ export async function createApp(options: AppOptions = {}) {
     envMs("QUICK_BOT_FILL_MS", QUICK_BOT_FILL_MS),
   );
   const bots = new BotLeague(store, hub, cosmetics);
+  const lifecycle: ServerLifecycle = { draining: false };
   const app = Fastify({
     logger: true,
     trustProxy: true,
@@ -94,7 +100,10 @@ export async function createApp(options: AppOptions = {}) {
     if (target) return reply.redirect(target, 301);
   });
 
-  app.get("/health", async () => ({ ok: true }));
+  app.get("/health", async (_request, reply) => {
+    if (lifecycle.draining) return reply.code(503).send({ ok: false });
+    return { ok: true };
+  });
 
   app.get("/config.js", async (request, reply) => {
     const publicUrl = publicBase({
@@ -322,7 +331,15 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
       if (!session) {
-        const result = hub.connect(message, send, () => socket.close(), accountUserId);
+        const result = hub.connect(
+          message,
+          send,
+          () => {
+            if (lifecycle.draining) socket.close(1001, "Server is restarting.");
+            else socket.close();
+          },
+          accountUserId,
+        );
         if (!result.ok) {
           send({ type: "error", message: result.error });
           return;
@@ -360,7 +377,18 @@ export async function createApp(options: AppOptions = {}) {
     return { status: response.statusCode, ms: Math.round(performance.now() - started) };
   });
 
-  return { app, store, accounts, hub, bots, shop };
+  return { app, store, accounts, hub, bots, shop, lifecycle };
+}
+
+/** Stop taking traffic, close seats so they reconnect, then close the HTTP server. */
+export async function drainServer(parts: {
+  app: { close: () => Promise<void> };
+  hub: Hub;
+  lifecycle: ServerLifecycle;
+}): Promise<void> {
+  parts.lifecycle.draining = true;
+  parts.hub.closeConnections();
+  await parts.app.close();
 }
 
 function requestPath(url: string): string {
