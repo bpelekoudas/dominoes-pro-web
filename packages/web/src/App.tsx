@@ -290,6 +290,7 @@ export function App() {
           onLook={() => account.openSheet("look")}
           onRefresh={() => void account.refresh()}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
+          introBusy={splash}
         />
         {splash ? <Splash onDone={finishSplash} /> : null}
         <AccountLayer account={account} />

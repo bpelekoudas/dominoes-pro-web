@@ -7,6 +7,7 @@ import { RankLine } from "./rank";
 import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume, type MusicChoice } from "./music";
 import { hapticsOn, setHaptics } from "./feel/haptics";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
+import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -35,6 +36,14 @@ export function reducedMotion(): boolean {
 
 export function menuDemoRequested(): boolean {
   return new URLSearchParams(location.search).get("demo") === "menu";
+}
+
+function stored(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function press(action: () => void): () => void {
@@ -78,6 +87,7 @@ export function ArcadeHome({
   onRefresh,
   onPreview,
   forced = null,
+  introBusy = false,
 }: {
   presetCode: string;
   error: string | null;
@@ -95,6 +105,8 @@ export function ArcadeHome({
   onRefresh: () => void;
   onPreview: (() => void) | null;
   forced?: Sheet;
+  /** Splash is still up, so the how-to waits. */
+  introBusy?: boolean;
 }) {
   const [name, setName] = useState(initialName);
   useEffect(() => {
@@ -107,6 +119,9 @@ export function ArcadeHome({
   const [quickSize, setQuickSize] = useState<QuickSize>(4);
   const [code, setCode] = useState(presetCode);
   const [sheet, setSheet] = useState<Sheet>(forced);
+  const [guide, setGuide] = useState(false);
+  const [guideStep, setGuideStep] = useState(0);
+  const [practiceOffer, setPracticeOffer] = useState(() => !stored(PRACTICE_KEY));
   const [tables, setTables] = useState<OpenTable[]>([]);
   const [muted, setMuteState] = useState(isMuted);
   const [haptics, setHapticState] = useState(hapticsOn);
@@ -156,6 +171,43 @@ export function ArcadeHome({
     action();
   };
 
+  useEffect(() => {
+    if (introBusy || presetCode || stored(HOWTO_KEY)) return;
+    setGuide(true);
+    setGuideStep(0);
+  }, [introBusy, presetCode]);
+
+  const closeGuide = () => {
+    try {
+      localStorage.setItem(HOWTO_KEY, "1");
+    } catch {
+      // Private mode can refuse the write. The card still closes.
+    }
+    setGuide(false);
+  };
+
+  useEffect(() => {
+    if (!guide || reducedMotion()) return;
+    const last = guideStep >= HOWTO_STEPS.length - 1;
+    const timer = window.setTimeout(() => {
+      if (last) closeGuide();
+      else setGuideStep((current) => Math.min(current + 1, HOWTO_STEPS.length - 1));
+    }, HOWTO_BEAT_MS);
+    return () => window.clearTimeout(timer);
+  }, [guide, guideStep]);
+
+  const startPractice = () => {
+    try {
+      localStorage.setItem(PRACTICE_KEY, "1");
+      localStorage.setItem(HOWTO_KEY, "1");
+    } catch {
+      // The game still starts.
+    }
+    setPracticeOffer(false);
+    setGuide(false);
+    onSolo(readyName || user?.displayName || "Guest", 2, "draw_until", 3, "easy");
+  };
+
   return (
     <main className="arcade-home" data-screen="home" data-skin="ivory">
       <header className="arcade-bar">
@@ -196,6 +248,35 @@ export function ArcadeHome({
         >
           Change look
         </button>
+        {guide ? (
+          <section className="howto" data-screen="howto" aria-live="polite">
+            <p className="howto-title">{HOWTO_STEPS[guideStep]?.title}</p>
+            <p className="howto-body">{HOWTO_STEPS[guideStep]?.body}</p>
+            <div className="howto-actions">
+              <button type="button" className="text-button" data-action="practice" disabled={connecting} onClick={press(startPractice)}>
+                Practice
+              </button>
+              <button type="button" className="text-button" data-action="howto-skip" onClick={press(closeGuide)}>
+                Skip
+              </button>
+              <button
+                type="button"
+                className="text-button"
+                data-action="howto-next"
+                onClick={press(() => {
+                  if (guideStep >= HOWTO_STEPS.length - 1) closeGuide();
+                  else setGuideStep((current) => current + 1);
+                })}
+              >
+                {guideStep >= HOWTO_STEPS.length - 1 ? "Done" : "Next"}
+              </button>
+            </div>
+          </section>
+        ) : practiceOffer ? (
+          <button type="button" className="howto-practice" data-action="practice" disabled={connecting} onClick={press(startPractice)}>
+            Practice vs easy computer
+          </button>
+        ) : null}
       </div>
 
       {error ? <p className="banner error">{error}</p> : null}
@@ -477,6 +558,18 @@ export function ArcadeHome({
           <p className="music-credit" data-music-credit>
             These four tracks are CC0 (public domain). Credit is not required. Rap: Lofi Hip Hop Loop — Taylor Harris. Rock: Rock Theme 3 — Umplix. EDM: Synthwave House Loop — Fupi. Classical: Gymnopédie No. 1 — Erik Satie, performed by Teknopazzo.
           </p>
+          <button
+            type="button"
+            className="capsule"
+            data-action="howto"
+            onClick={press(() => {
+              setSheet(null);
+              setGuideStep(0);
+              setGuide(true);
+            })}
+          >
+            How to play
+          </button>
           <button type="button" className="capsule capsule-red" onClick={press(onAccount)}>
             Sign in
           </button>
