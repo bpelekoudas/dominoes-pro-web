@@ -52,7 +52,8 @@ function privacyBody(): string {
     <p>${escapeHtml(LEGAL_ENTITY)}, a Nevada limited liability company, does business as ${escapeHtml(PUBLIC_NAME)}.</p>
     <p>We collect the email address on your account if you sign in with one, your nickname, and game stats such as wins and rating.</p>
     <p>Purchases are handled by Stripe. We never see your card number.</p>
-    <p>You need to be 13 or older.</p>
+    <p>You need to be 13 or older. Settings asks for that before an account is created.</p>
+    <p>Settings can delete the account. That removes the nickname, the email, and the sign-in. Wins and rating stay, under the name Deleted.</p>
     <p>Questions: <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a></p>
   `;
 }

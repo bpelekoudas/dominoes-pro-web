@@ -66,6 +66,8 @@ export interface UserRow {
   is_soak?: number;
   /** Which soak process created this account. Null on older rows. */
   soak_run?: string | null;
+  /** 1 after the player confirms they are 13 or older. */
+  age_ok?: number;
 }
 
 export interface StandingUpdate {
@@ -147,6 +149,8 @@ export interface MagicLinkRow {
   expires_at: string;
   used_at: string | null;
   created_at: string;
+  /** 1 when the player confirmed 13+ before asking for this link. */
+  age_ok?: number;
 }
 
 export interface HandRow {
@@ -411,11 +415,16 @@ export class Store {
     addUser("is_bot", "is_bot INTEGER NOT NULL DEFAULT 0");
     addUser("is_soak", "is_soak INTEGER NOT NULL DEFAULT 0");
     addUser("soak_run", "soak_run TEXT");
+    addUser("age_ok", "age_ok INTEGER NOT NULL DEFAULT 0");
     const walletCols = this.db.prepare(`PRAGMA table_info(wallets)`).all() as Array<{ name: string }>;
     const walletNames = new Set(walletCols.map((column) => column.name));
     if (!walletNames.has("earned_day")) this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_day TEXT`);
     if (!walletNames.has("earned_today")) {
       this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_today INTEGER NOT NULL DEFAULT 0`);
+    }
+    const magicCols = this.db.prepare(`PRAGMA table_info(magic_links)`).all() as Array<{ name: string }>;
+    if (!magicCols.some((column) => column.name === "age_ok")) {
+      this.db.exec(`ALTER TABLE magic_links ADD COLUMN age_ok INTEGER NOT NULL DEFAULT 0`);
     }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS bone_grants (
@@ -439,6 +448,20 @@ export class Store {
         event_id TEXT PRIMARY KEY,
         event_type TEXT NOT NULL,
         session_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS player_blocks (
+        user_id TEXT NOT NULL,
+        blocked_user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, blocked_user_id)
+      );
+      CREATE TABLE IF NOT EXISTS player_reports (
+        id TEXT PRIMARY KEY,
+        reporter_user_id TEXT NOT NULL,
+        reported_user_id TEXT NOT NULL,
+        room_code TEXT,
+        reason TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS coin_purchases (
@@ -562,6 +585,80 @@ export class Store {
 
   playerByToken(token: string): PlayerRow | null {
     return (this.db.prepare(`SELECT * FROM players WHERE token = ?`).get(token) as PlayerRow | undefined) ?? null;
+  }
+
+  playerById(id: string): PlayerRow | null {
+    return (this.db.prepare(`SELECT * FROM players WHERE id = ?`).get(id) as PlayerRow | undefined) ?? null;
+  }
+
+  markAge(userId: string, at: string): void {
+    this.db.prepare(`UPDATE users SET age_ok = 1, updated_at = ? WHERE id = ?`).run(at, userId);
+  }
+
+  blockUser(userId: string, blockedUserId: string, at: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO player_blocks (user_id, blocked_user_id, created_at) VALUES (?, ?, ?)
+         ON CONFLICT (user_id, blocked_user_id) DO NOTHING`,
+      )
+      .run(userId, blockedUserId, at);
+  }
+
+  isBlocked(userId: string, blockedUserId: string): boolean {
+    return Boolean(
+      this.db.prepare(`SELECT 1 AS n FROM player_blocks WHERE user_id = ? AND blocked_user_id = ?`).get(userId, blockedUserId),
+    );
+  }
+
+  isBlockedEither(left: string, right: string): boolean {
+    return this.isBlocked(left, right) || this.isBlocked(right, left);
+  }
+
+  reportCountSince(userId: string, since: string): number {
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM player_reports WHERE reporter_user_id = ? AND created_at > ?`)
+      .get(userId, since) as { n: number };
+    return row.n;
+  }
+
+  insertReport(row: {
+    id: string;
+    reporterUserId: string;
+    reportedUserId: string;
+    roomCode: string | null;
+    reason: string;
+    createdAt: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO player_reports (id, reporter_user_id, reported_user_id, room_code, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(row.id, row.reporterUserId, row.reportedUserId, row.roomCode, row.reason, row.createdAt);
+  }
+
+  /**
+   * Drop the name, email, and sign-in. The user id stays so old game rows still add up.
+   * Purchases stay too, keyed by that id, with no card data on them.
+   */
+  erasePersonalData(userId: string, at: string): boolean {
+    const user = this.user(userId);
+    if (!user || user.is_bot === 1) return false;
+    const emails = this.identitiesForUser(userId)
+      .map((row) => row.email)
+      .filter((email): email is string => Boolean(email));
+    this.db.prepare(`DELETE FROM identities WHERE user_id = ?`).run(userId);
+    this.db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+    this.db.prepare(`DELETE FROM magic_links WHERE user_id = ?`).run(userId);
+    for (const email of emails) this.db.prepare(`DELETE FROM magic_links WHERE email = ?`).run(email);
+    this.db.prepare(`DELETE FROM player_blocks WHERE user_id = ? OR blocked_user_id = ?`).run(userId, userId);
+    this.db.prepare(`UPDATE players SET name = 'Deleted' WHERE user_id = ?`).run(userId);
+    this.db
+      .prepare(
+        `UPDATE users SET display_name = 'Deleted', avatar_id = '2hot4tv', is_guest = 1, soak_run = NULL, updated_at = ? WHERE id = ?`,
+      )
+      .run(at, userId);
+    return true;
   }
 
   insertHand(hand: HandRow & { created_at: string }): void {
@@ -715,9 +812,9 @@ export class Store {
   insertMagicLink(row: MagicLinkRow): void {
     this.db
       .prepare(
-        `INSERT INTO magic_links (id, email, token_hash, user_id, expires_at, used_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO magic_links (id, email, token_hash, user_id, expires_at, used_at, created_at, age_ok) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(row.id, row.email, row.token_hash, row.user_id, row.expires_at, row.used_at, row.created_at);
+      .run(row.id, row.email, row.token_hash, row.user_id, row.expires_at, row.used_at, row.created_at, row.age_ok === 1 ? 1 : 0);
   }
 
   magicLinkByHash(tokenHash: string): MagicLinkRow | null {

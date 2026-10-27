@@ -73,6 +73,7 @@ export function Splash({ onDone, hold = false }: { onDone: () => void; hold?: bo
 export function ArcadeHome({
   presetCode,
   error,
+  notice = null,
   connecting,
   initialName,
   user,
@@ -88,9 +89,15 @@ export function ArcadeHome({
   onPreview,
   forced = null,
   introBusy = false,
+  needsAge = false,
+  ageChecked = false,
+  onAge = () => undefined,
+  onNeedAge = () => undefined,
+  onDelete,
 }: {
   presetCode: string;
   error: string | null;
+  notice?: string | null;
   connecting: boolean;
   initialName: string;
   user: AccountUser | null;
@@ -107,6 +114,11 @@ export function ArcadeHome({
   forced?: Sheet;
   /** Splash is still up, so the how-to waits. */
   introBusy?: boolean;
+  needsAge?: boolean;
+  ageChecked?: boolean;
+  onAge?: (checked: boolean) => void;
+  onNeedAge?: () => void;
+  onDelete?: () => Promise<void>;
 }) {
   const [name, setName] = useState(initialName);
   useEffect(() => {
@@ -128,6 +140,15 @@ export function ArcadeHome({
   const [music, setMusic] = useState<MusicChoice>(musicChoice);
   const [musicLevel, setMusicLevel] = useState(() => Math.round(musicVolume() * 100));
   const readyName = name.trim();
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const gate = (action: () => void) => {
+    if (needsAge && !ageChecked) {
+      setSheet(null);
+      onNeedAge();
+      return;
+    }
+    action();
+  };
   const [wearTick, setWearTick] = useState(0);
   const [frameId, setFrameId] = useState<string | null>(null);
   const heroFrame = frameId ?? (user?.avatarId === "pitmaster" ? "FRM-015" : null);
@@ -197,6 +218,10 @@ export function ArcadeHome({
   }, [guide, guideStep]);
 
   const startPractice = () => {
+    if (needsAge && !ageChecked) {
+      onNeedAge();
+      return;
+    }
     try {
       localStorage.setItem(PRACTICE_KEY, "1");
       localStorage.setItem(HOWTO_KEY, "1");
@@ -279,7 +304,7 @@ export function ArcadeHome({
         ) : null}
       </div>
 
-      {error ? <p className="banner error">{error}</p> : null}
+      {error ? <p className="banner error">{error}</p> : notice ? <p className="banner">{notice}</p> : null}
       {connecting ? <p className="banner">Connecting…</p> : null}
 
       <div className="arcade-actions">
@@ -306,8 +331,19 @@ export function ArcadeHome({
         Nickname
         <input value={name} maxLength={16} autoComplete="nickname" placeholder="Your name" onChange={(event) => setName(event.target.value)} />
       </label>
+      {needsAge ? (
+        <label className="age-gate">
+          <input
+            type="checkbox"
+            data-action="age-13"
+            checked={ageChecked}
+            onChange={(event) => onAge(event.target.checked)}
+          />
+          I am 13 or older
+        </label>
+      ) : null}
       <div className="account-row">
-        <button type="button" className="text-button" disabled={connecting || !readyName} onClick={press(() => onGuest(readyName))}>
+        <button type="button" className="text-button" disabled={connecting || !readyName} onClick={press(() => gate(() => onGuest(readyName)))}>
           Continue as guest
         </button>
         <button type="button" className="text-button" onClick={press(onAccount)}>
@@ -368,7 +404,7 @@ export function ArcadeHome({
             type="button"
             className="capsule"
             data-action="start-solo"
-            onClick={press(() => requireName(() => onSolo(readyName, playerCount, boneyardMode, seriesLength, difficulty)))}
+            onClick={press(() => gate(() => requireName(() => onSolo(readyName, playerCount, boneyardMode, seriesLength, difficulty))))}
           >
             Start
           </button>
@@ -384,7 +420,7 @@ export function ArcadeHome({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              requireName(() => onCreate(readyName, playerCount, boneyardMode, seriesLength));
+              gate(() => requireName(() => onCreate(readyName, playerCount, boneyardMode, seriesLength)));
             }}
           >
             <h3>Create room</h3>
@@ -418,7 +454,7 @@ export function ArcadeHome({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              requireName(() => onJoin(readyName, code));
+              gate(() => requireName(() => onJoin(readyName, code)));
             }}
           >
             <h3>Join room</h3>
@@ -452,7 +488,7 @@ export function ArcadeHome({
               type="button"
               className="capsule"
               data-action="quick"
-              onClick={press(() => requireName(() => onQuick(readyName, quickSize)))}
+              onClick={press(() => gate(() => requireName(() => onQuick(readyName, quickSize))))}
             >
               Find a table
             </button>
@@ -465,7 +501,7 @@ export function ArcadeHome({
                 type="button"
                 key={table.code}
                 className="open-table"
-                onClick={press(() => requireName(() => onJoin(readyName, table.code)))}
+                onClick={press(() => gate(() => requireName(() => onJoin(readyName, table.code))))}
               >
                 <span>
                   {table.code} · {table.seated}/{table.playerCount}
@@ -497,6 +533,7 @@ export function ArcadeHome({
       {sheet === "settings" ? (
         <section className="arcade-modal" role="dialog" aria-label="Settings" data-screen="settings">
           <h2>Settings</h2>
+          {notice ? <p className="banner">{notice}</p> : null}
           <button
             type="button"
             className="capsule"
@@ -570,6 +607,32 @@ export function ArcadeHome({
           >
             How to play
           </button>
+          {needsAge ? (
+            <label className="age-gate">
+              <input type="checkbox" checked={ageChecked} onChange={(event) => onAge(event.target.checked)} />
+              I am 13 or older
+            </label>
+          ) : (
+            <p className="hint">Age confirmed. You need to be 13 or older.</p>
+          )}
+          <p className="hint">During a game, open Table talk to report or block a player. Names and table talk are checked for slurs.</p>
+          {user && onDelete ? (
+            deleteArmed ? (
+              <div className="safety-confirm">
+                <p>This removes your name, email, and sign-in. Wins stay, under the name Deleted.</p>
+                <button type="button" className="capsule capsule-red" data-action="delete-confirm" onClick={press(() => void onDelete())}>
+                  Yes, delete it
+                </button>
+                <button type="button" className="capsule capsule-back" onClick={press(() => setDeleteArmed(false))}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button type="button" className="capsule" data-action="delete-account" onClick={press(() => setDeleteArmed(true))}>
+                Delete account
+              </button>
+            )
+          ) : null}
           <button type="button" className="capsule capsule-red" onClick={press(onAccount)}>
             Sign in
           </button>

@@ -262,6 +262,7 @@ export function App() {
         <ArcadeHome
           presetCode={roomFromLocation() ?? ""}
           error={error ?? account.error}
+          notice={account.notice}
           connecting={status === "connecting"}
           initialName={account.user?.displayName ?? ""}
           user={account.user}
@@ -291,6 +292,11 @@ export function App() {
           onRefresh={() => void account.refresh()}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
           introBusy={splash}
+          needsAge={!account.user?.ageOk}
+          ageChecked={account.ageChecked}
+          onAge={account.setAgeChecked}
+          onNeedAge={account.askAge}
+          onDelete={account.deleteAccount}
         />
         {splash ? <Splash onDone={finishSplash} /> : null}
         <AccountLayer account={account} />
@@ -493,8 +499,10 @@ export function Game({
   }, [tileSkin]);
   void dismissedHand;
   const [drag, setDrag] = useState<{ tileId: string; aimEndId: string | null } | null>(null);
-  const bubble = useTalkBubble(chat);
-  const unread = useUnread(chat, chatOpen);
+  const [mutedSpeakers, setMutedSpeakers] = useState<string[]>([]);
+  const heard = chat.filter((line) => !mutedSpeakers.includes(line.playerId));
+  const bubble = useTalkBubble(heard);
+  const unread = useUnread(heard, chatOpen);
   const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
   const around = seatAround(view.players);
   const opponents = (["left", "top", "right"] as const).flatMap((edge) => {
@@ -724,9 +732,10 @@ export function Game({
       <ChatPanel
         open={chatOpen}
         view={view}
-        chat={chat}
+        chat={heard}
         onClose={onToggleChat}
         onPreset={(packId, tauntId) => onSend({ type: "chat", kind: "preset", packId, tauntId })}
+        onMuted={(playerId) => setMutedSpeakers((current) => (current.includes(playerId) ? current : [...current, playerId]))}
       />
       {win.stage === "call" && win.call ? <FeelCall kind={win.call} reduced={win.reduced} onSkip={win.skip} /> : null}
       {win.stage === "pips" && view.lastHand ? (
@@ -1355,13 +1364,18 @@ function ChatPanel({
   chat,
   onClose,
   onPreset,
+  onMuted,
 }: {
   open: boolean;
   view: PlayerView;
   chat: ChatLine[];
   onClose: () => void;
   onPreset: (packId: string, tauntId: string) => void;
+  onMuted: (playerId: string) => void;
 }) {
+  const [note, setNote] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const list = listRef.current;
@@ -1393,6 +1407,85 @@ function ChatPanel({
             {taunt.text}
           </button>
         ))}
+      </div>
+      <div className="table-safety">
+        <h3>Players</h3>
+        {note ? <p className="hint">{note}</p> : null}
+        {view.players
+          .filter((player) => !player.isYou)
+          .map((player) => {
+            const computer = player.bot && !player.accountBot;
+            return (
+              <div key={player.id} className="safety-row">
+                <span>{player.name}</span>
+                {computer ? <span className="hint">Computer</span> : null}
+                {computer ? null : reporting === player.id ? (
+                  <>
+                    {(["rude", "cheat", "other"] as const).map((reason) => (
+                      <button
+                        key={reason}
+                        type="button"
+                        className="text-button"
+                        data-action="report-player"
+                        data-reason={reason}
+                        disabled={busyId === player.id}
+                        onClick={() => {
+                          setBusyId(player.id);
+                          void fetch("/api/safety/report", {
+                            method: "POST",
+                            credentials: "same-origin",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ playerId: player.id, reason }),
+                          })
+                            .then(async (response) => {
+                              const body = (await response.json().catch(() => ({}))) as { error?: string };
+                              setNote(response.ok ? "Reported." : body.error ?? "That report did not send.");
+                              if (response.ok) setReporting(null);
+                            })
+                            .finally(() => setBusyId(null));
+                        }}
+                      >
+                        {reason === "rude" ? "Rude" : reason === "cheat" ? "Cheating" : "Other"}
+                      </button>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <button type="button" className="text-button" data-action="report-player" onClick={() => setReporting(player.id)}>
+                      Report
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button"
+                      data-action="block-player"
+                      disabled={busyId === player.id}
+                      onClick={() => {
+                        setBusyId(player.id);
+                        void fetch("/api/safety/block", {
+                          method: "POST",
+                          credentials: "same-origin",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ playerId: player.id }),
+                        })
+                          .then(async (response) => {
+                            const body = (await response.json().catch(() => ({}))) as { error?: string };
+                            if (!response.ok) {
+                              setNote(body.error ?? "That block did not stick.");
+                              return;
+                            }
+                            onMuted(player.id);
+                            setNote(`${player.name} is blocked. Their talk stays hidden, and you will not be seated together.`);
+                          })
+                          .finally(() => setBusyId(null));
+                      }}
+                    >
+                      Block
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
       </div>
       <div className="chat-log" ref={listRef}>
         {chat.length === 0 ? <p className="muted">The table is quiet. For now.</p> : null}

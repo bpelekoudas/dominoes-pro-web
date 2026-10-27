@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual, createHash } from
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Store } from "./db.js";
 import { cleanName, cleanSoakRun, isSoakName } from "./hub.js";
+import { blockedSpeech } from "./language.js";
 import { isAvatarId, isWithheldId, resolveAvatar } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
 import { describePlayer, type PublicStanding } from "./ranking.js";
@@ -14,6 +15,8 @@ export interface PublicUser extends PublicStanding {
   avatarId: string | null;
   guest: boolean;
   providers: ProviderName[];
+  /** True after the player confirms they are 13 or older. */
+  ageOk: boolean;
 }
 
 export interface VerifiedIdentity {
@@ -169,17 +172,30 @@ export class Accounts {
     };
   }
 
-  createGuest(displayName: string, current: PublicUser | null, soakRun: string | null = null): SignInResult {
+  createGuest(
+    displayName: string,
+    current: PublicUser | null,
+    soakRun: string | null = null,
+    age13: boolean | null = null,
+  ): SignInResult {
     const name = cleanName(displayName);
     if (!name) return { outcome: "invalid", error: "Use a name, up to 16 letters." };
+    if (blockedSpeech(name)) return { outcome: "invalid", error: "Pick a different name." };
     const runId = isSoakName(name) ? cleanSoakRun(soakRun) : null;
+    const aged = age13 === true || age13 === null || Boolean(runId);
+    if (!aged && !current?.ageOk) return { outcome: "invalid", error: "Confirm you are 13 or older." };
     if (current) {
-      if (current.displayName !== name) this.rename(current.id, name);
+      if (current.displayName !== name) {
+        const renamed = this.rename(current.id, name);
+        if (renamed.outcome !== "ok") return renamed;
+      }
       if (runId) this.store.setSoakRun(current.id, runId);
+      if (aged) this.store.markAge(current.id, this.stamp());
       return { outcome: "ok", user: this.present(current.id)!, token: null };
     }
     const user = this.insertUser(name, true);
     if (runId) this.store.setSoakRun(user.id, runId);
+    if (aged) this.store.markAge(user.id, this.stamp());
     const stamp = this.stamp();
     this.store.insertIdentity({
       id: randomUUID(),
@@ -207,6 +223,7 @@ export class Accounts {
   rename(userId: string, displayName: string): SignInResult {
     const name = cleanName(displayName);
     if (!name) return { outcome: "invalid", error: "Use a name, up to 16 letters." };
+    if (blockedSpeech(name)) return { outcome: "invalid", error: "Pick a different name." };
     const user = this.store.user(userId);
     if (!user) return { outcome: "invalid", error: "That profile is gone." };
     this.store.updateUser(userId, { display_name: name, updated_at: this.stamp() });
@@ -241,7 +258,12 @@ export class Accounts {
     this.store.deleteSessionByHash(sha256(token));
   }
 
-  async signInGoogle(idToken: string, currentUserId: string | null, confirm: boolean): Promise<SignInResult> {
+  async signInGoogle(
+    idToken: string,
+    currentUserId: string | null,
+    confirm: boolean,
+    age13: boolean | null = null,
+  ): Promise<SignInResult> {
     const clientId = this.options.googleClientId?.trim();
     if (!clientId) return { outcome: "not-configured", error: "Google sign-in is not configured yet." };
     if (!idToken) return { outcome: "invalid", error: "Google did not send a sign-in." };
@@ -254,13 +276,19 @@ export class Accounts {
         email: normalizeEmail(identity.email),
         currentUserId,
         confirm,
+        age13,
       });
     } catch {
       return { outcome: "invalid", error: "That Google sign-in could not be checked." };
     }
   }
 
-  async signInApple(idToken: string, currentUserId: string | null, confirm: boolean): Promise<SignInResult> {
+  async signInApple(
+    idToken: string,
+    currentUserId: string | null,
+    confirm: boolean,
+    age13: boolean | null = null,
+  ): Promise<SignInResult> {
     if (!this.options.apple) return { outcome: "not-configured", error: "Apple sign-in is not configured yet." };
     if (!idToken) return { outcome: "invalid", error: "Apple did not send a sign-in." };
     try {
@@ -272,6 +300,7 @@ export class Accounts {
         email: normalizeEmail(identity.email),
         currentUserId,
         confirm,
+        age13,
       });
     } catch {
       return { outcome: "invalid", error: "That Apple sign-in could not be checked." };
@@ -283,9 +312,14 @@ export class Accounts {
     currentUserId: string | null;
     ip: string;
     origin: string;
+    age13?: boolean | null;
   }): Promise<{ ok: true; devLink?: string } | { ok: false; error: string; status: number }> {
     const email = normalizeEmail(input.email);
     if (!email) return { ok: false, error: "Use a real email address.", status: 400 };
+    const current = input.currentUserId ? this.present(input.currentUserId) : null;
+    const owner = this.store.userByEmail(email);
+    const aged = input.age13 === true || input.age13 == null || current?.ageOk || owner?.age_ok === 1;
+    if (!aged) return { ok: false, error: "Confirm you are 13 or older.", status: 400 };
     const now = this.now().getTime();
     if (!this.limit.allow(`email:${email}`, 5, MAGIC_MS, now) || !this.limit.allow(`ip:${input.ip}`, 20, MAGIC_MS, now)) {
       return { ok: false, error: "Wait a few minutes, then ask for another link.", status: 429 };
@@ -300,6 +334,7 @@ export class Accounts {
       expires_at: new Date(now + MAGIC_MS).toISOString(),
       used_at: null,
       created_at: stamp,
+      age_ok: 1,
     });
     const link = `${input.origin.replace(/\/$/, "")}/?email-token=${encodeURIComponent(token)}`;
     const sender = this.options.sendEmail ?? (this.options.resendApiKey && this.options.emailFrom ? this.resend.bind(this) : null);
@@ -324,7 +359,12 @@ export class Accounts {
     return { ok: false, error: "Email sign-in is not available yet.", status: 503 };
   }
 
-  async consumeMagicLink(token: string, currentUserId: string | null, confirm: boolean): Promise<SignInResult> {
+  async consumeMagicLink(
+    token: string,
+    currentUserId: string | null,
+    confirm: boolean,
+    age13: boolean | null = null,
+  ): Promise<SignInResult> {
     if (!token || token.length < 20) return { outcome: "invalid", error: "That link is not valid." };
     const row = this.store.magicLinkByHash(sha256(token));
     if (!row || row.used_at || Date.parse(row.expires_at) <= this.now().getTime()) {
@@ -337,6 +377,7 @@ export class Accounts {
       currentUserId: currentUserId ?? row.user_id,
       preferredUserId: row.user_id,
       confirm,
+      age13: age13 === true || age13 === null || row.age_ok === 1 ? true : false,
     });
     if (result.outcome === "ok") this.store.markMagicLinkUsed(row.id, this.stamp());
     return result;
@@ -353,20 +394,41 @@ export class Accounts {
     currentUserId: string | null;
     preferredUserId?: string | null;
     confirm: boolean;
+    age13?: boolean | null;
   }): SignInResult {
     const byProvider = this.store.identity(input.provider, input.subject);
-    if (byProvider) return this.useExisting(byProvider.user_id, input.currentUserId, input.confirm);
+    if (byProvider) {
+      const gate = this.allowAge(byProvider.user_id, input.age13);
+      if (gate) return gate;
+      return this.useExisting(byProvider.user_id, input.currentUserId, input.confirm);
+    }
     const emailOwner = input.email ? this.store.userByEmail(input.email) : null;
     // A magic link belongs to the guest who asked for it, even if another guest opens it.
     const target = input.preferredUserId ?? input.currentUserId ?? null;
     if (emailOwner && emailOwner.id !== target) {
+      const gate = this.allowAge(emailOwner.id, input.age13);
+      if (gate) return gate;
       const switched = this.useExisting(emailOwner.id, input.currentUserId, input.confirm);
       if (switched.outcome === "ok") this.attach(emailOwner.id, input.provider, input.subject, input.email);
       return switched;
     }
+    const creating = !target;
+    if (creating && input.age13 === false) return { outcome: "invalid", error: "Confirm you are 13 or older." };
     const targetId = target ?? this.insertUser(nameFromEmail(input.email), false).id;
+    if (target) {
+      const gate = this.allowAge(targetId, input.age13);
+      if (gate) return gate;
+    } else this.store.markAge(targetId, this.stamp());
     this.attach(targetId, input.provider, input.subject, input.email);
     return { outcome: "ok", user: this.present(targetId)!, token: this.issue(targetId) };
+  }
+
+  /** Existing accounts confirm once. A missing flag on a direct call counts as confirmed. */
+  private allowAge(userId: string, age13: boolean | null | undefined): SignInResult | null {
+    const aged = age13 === true || age13 == null || this.present(userId)?.ageOk === true;
+    if (!aged) return { outcome: "invalid", error: "Confirm you are 13 or older." };
+    if (age13 === true || age13 == null) this.store.markAge(userId, this.stamp());
+    return null;
   }
 
   /**
@@ -439,6 +501,7 @@ export class Accounts {
       avatarId: resolveAvatar(user.avatar_id),
       guest: user.is_guest === 1,
       providers,
+      ageOk: user.age_ok === 1 || user.is_bot === 1 || user.is_soak === 1,
       ...standing,
     };
   }
@@ -467,7 +530,8 @@ export class Accounts {
 
 function nameFromEmail(email: string | null): string {
   const local = email?.split("@")[0]?.replace(/[^a-zA-Z0-9 ]/g, " ").trim() || "Player";
-  return cleanName(local.slice(0, 16)) ?? "Player";
+  const name = cleanName(local.slice(0, 16)) ?? "Player";
+  return blockedSpeech(name) ? "Player" : name;
 }
 
 export function appleConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppleConfig | null {

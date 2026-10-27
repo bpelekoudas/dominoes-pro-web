@@ -9,6 +9,7 @@ export interface AccountUser extends RankFacts {
   avatarId: string | null;
   guest: boolean;
   providers: string[];
+  ageOk?: boolean;
 }
 
 interface ClaimConflict {
@@ -47,6 +48,10 @@ export interface AccountController {
   requestMagicLink: (email: string) => Promise<void>;
   confirmSwitch: () => Promise<void>;
   stay: () => void;
+  ageChecked: boolean;
+  setAgeChecked: (checked: boolean) => void;
+  askAge: () => void;
+  deleteAccount: () => Promise<void>;
 }
 
 const EMAIL_SIGNIN_UNAVAILABLE = "Email sign-in is temporarily unavailable, try Google or play as guest";
@@ -74,7 +79,14 @@ export function useAccount(): AccountController {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<"profile" | "board" | "look">("profile");
   const [board, setBoard] = useState<"rating" | "season">("rating");
+  const [ageChecked, setAgeCheckedState] = useState(false);
+  const ageRef = useRef(false);
   const pending = useRef<PendingSignIn | null>(null);
+  const setAgeChecked = (checked: boolean) => {
+    ageRef.current = checked;
+    setAgeCheckedState(checked);
+  };
+  const ageOkNow = () => Boolean(user?.ageOk) || ageRef.current;
 
   const remember = (next: AccountUser) => {
     setUser(next);
@@ -112,7 +124,12 @@ export function useAccount(): AccountController {
     pending.current = { kind: "google", idToken };
     setBusy(true);
     try {
-      const response = await postJson("/api/auth/google", { idToken, confirm });
+      if (!ageOkNow()) {
+        setNotice("Confirm you are 13 or older.");
+        setSheetOpen(true);
+        return;
+      }
+      const response = await postJson("/api/auth/google", { idToken, confirm, age13: true });
       const ok = await applyAuth(response);
       if (ok) setSheetOpen(false);
     } finally {
@@ -124,7 +141,12 @@ export function useAccount(): AccountController {
     pending.current = { kind: "apple", idToken };
     setBusy(true);
     try {
-      const response = await postJson("/api/auth/apple", { idToken, confirm });
+      if (!ageOkNow()) {
+        setNotice("Confirm you are 13 or older.");
+        setSheetOpen(true);
+        return;
+      }
+      const response = await postJson("/api/auth/apple", { idToken, confirm, age13: true });
       const ok = await applyAuth(response);
       if (ok) setSheetOpen(false);
     } finally {
@@ -136,7 +158,7 @@ export function useAccount(): AccountController {
     pending.current = { kind: "email", token };
     setBusy(true);
     try {
-      const response = await postJson("/api/auth/email/consume", { token, confirm });
+      const response = await postJson("/api/auth/email/consume", { token, confirm, age13: ageOkNow() });
       const ok = await applyAuth(response);
       if (ok) setSheetOpen(false);
       else setSheetOpen(true);
@@ -207,9 +229,40 @@ export function useAccount(): AccountController {
       const body = (await response.json()) as { user?: AccountUser };
       if (body.user) remember(body.user);
     },
+    askAge: () => {
+      setError("Confirm you are 13 or older.");
+      document.querySelector("[data-action=age-13]")?.scrollIntoView({ block: "center" });
+    },
+    setAgeChecked,
+    ageChecked,
+    deleteAccount: async () => {
+      setBusy(true);
+      setError(null);
+      try {
+        const response = await postJson("/api/account/delete", { confirm: true });
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) {
+          setError(body.error ?? "The account could not be deleted.");
+          return;
+        }
+        localStorage.removeItem(USER_KEY);
+        setUser(null);
+        setConflict(null);
+        pending.current = null;
+        setSheetOpen(false);
+        setNotice("Account deleted.");
+      } finally {
+        setBusy(false);
+      }
+    },
     ensureGuest: async (displayName) => {
       setError(null);
-      const response = await postJson("/api/guest", { displayName });
+      if (!ageOkNow()) {
+        setError("Confirm you are 13 or older.");
+        document.querySelector("[data-action=age-13]")?.scrollIntoView({ block: "center" });
+        return null;
+      }
+      const response = await postJson("/api/guest", { displayName, age13: true });
       const body = (await response.json().catch(() => ({}))) as { error?: string; user?: AccountUser };
       if (!response.ok || !body.user) {
         setError(body.error ?? "Use a name, up to 16 letters.");
@@ -262,7 +315,11 @@ export function useAccount(): AccountController {
       setNotice(null);
       setDevLink(null);
       try {
-        const response = await postJson("/api/auth/email", { email });
+        if (!ageOkNow()) {
+          setNotice("Confirm you are 13 or older.");
+          return;
+        }
+        const response = await postJson("/api/auth/email", { email, age13: true });
         const body = (await response.json().catch(() => ({}))) as { error?: string; devLink?: string; ok?: boolean };
         if (!response.ok) {
           setNotice(magicLinkNotice(response.status, body.error));
@@ -464,6 +521,12 @@ export function AccountLayer({ account }: { account: AccountController }) {
               Save name
             </button>
           </form>
+        ) : null}
+        {account.page === "profile" && !account.user?.ageOk ? (
+          <label className="age-gate">
+            <input type="checkbox" checked={account.ageChecked} onChange={(event) => account.setAgeChecked(event.target.checked)} />
+            I am 13 or older
+          </label>
         ) : null}
         {account.page === "profile" ? (
           <div className="provider-list">

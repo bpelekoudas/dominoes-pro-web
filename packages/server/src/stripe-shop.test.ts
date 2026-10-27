@@ -87,7 +87,7 @@ async function postEvent(
 }
 
 async function guest(app: Awaited<ReturnType<typeof createApp>>["app"]) {
-  const created = await app.inject({ method: "POST", url: "/api/guest", payload: { displayName: "Ada" } });
+  const created = await app.inject({ method: "POST", url: "/api/guest", payload: { displayName: "Ada", age13: true } });
   expect(created.statusCode).toBe(200);
   const id = created.json().user.id as string;
   const cookie = String(created.headers["set-cookie"]).split(";")[0] ?? "";

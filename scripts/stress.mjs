@@ -268,7 +268,7 @@ async function guest(origin, name) {
   const response = await fetch(new URL("/api/guest", origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: name }),
+    body: JSON.stringify({ displayName: name, age13: true }),
   });
   if (!response.ok) throw new Error(`Guest sign-in returned ${response.status}.`);
   const cookies = typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];

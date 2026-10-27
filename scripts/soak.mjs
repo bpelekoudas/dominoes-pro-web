@@ -551,7 +551,7 @@ async function guest(name, origin = pageUrl) {
   const response = await fetch(new URL("/api/guest", origin), {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ displayName: name, soakRun: runId }),
+    body: JSON.stringify({ displayName: name, soakRun: runId, age13: true }),
   });
   if (response.status >= 500) throw new Error(`Guest sign-in returned ${response.status}.`);
   if (!response.ok) throw new Error(`Guest sign-in returned ${response.status}: ${await response.text()}`);
@@ -1120,6 +1120,8 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     const splash = page.locator("[data-screen=splash]");
     if (await splash.count()) await splash.click();
     await page.locator(".arcade-name input").fill("soak-ui");
+    const age = page.locator("[data-action=age-13]");
+    if (await age.count()) await age.check();
     await page.locator("[data-action=solo]").click();
     await page.locator("[data-screen=mode] button", { hasText: /^4$/ }).click();
     await page.locator("[data-action=start-solo]").click();

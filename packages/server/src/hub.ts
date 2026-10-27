@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { blockedSpeech } from "./language.js";
 import {
   allTileIds,
   applyIntent,
@@ -227,6 +228,13 @@ export function cleanName(input: unknown): string | null {
   return name;
 }
 
+export function acceptedName(input: unknown): { ok: true; name: string } | { ok: false; error: string } {
+  const name = cleanName(input);
+  if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+  if (blockedSpeech(name)) return { ok: false, error: "Pick a different name." };
+  return { ok: true, name };
+}
+
 /** Guest names from the soak script. The flag sticks after a rename. */
 export function isSoakName(name: string): boolean {
   return name.toLowerCase().startsWith("soak-");
@@ -451,8 +459,8 @@ export class Hub {
     else this.tell(seat, { type: "error", message: "You're already at a table." });
   }
 
-  /** Public quick tables that are still waiting. */
-  openTables(): Array<{
+  /** Public quick tables that are still waiting. A signed-in player does not see a blocked table. */
+  openTables(viewerId: string | null = null): Array<{
     code: string;
     playerCount: number;
     seated: number;
@@ -470,6 +478,7 @@ export class Hub {
     for (const room of this.rooms.values()) {
       if (!room.listed || !this.openToHumans(room)) continue;
       if (room.seats.length >= room.settings.playerCount) continue;
+      if (this.blockedTable(room, viewerId)) continue;
       const humans = room.seats.filter((seat) => !seat.bot);
       tables.push({
         code: room.code,
@@ -513,8 +522,9 @@ export class Hub {
     close: () => void,
     accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
-    const name = cleanName(message.name);
-    if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+    const named = acceptedName(message.name);
+    if (!named.ok) return named;
+    const name = named.name;
     if (message.playerCount !== 2 && message.playerCount !== 3 && message.playerCount !== 4) {
       return { ok: false, error: "A table is 2, 3, or 4 players." };
     }
@@ -612,8 +622,9 @@ export class Hub {
     close: () => void,
     accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
-    const name = cleanName(message.name);
-    if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+    const named = acceptedName(message.name);
+    if (!named.ok) return named;
+    const name = named.name;
     const code = message.code.toUpperCase().replace(/[^A-Z0-9]/g, "");
     const room = this.byCode.get(code) ? this.rooms.get(this.byCode.get(code)!) : undefined;
     if (!room || room.probe) return { ok: false, error: room ? "That table isn't open." : "No table with that code." };
@@ -632,6 +643,9 @@ export class Hub {
       };
     }
     if (room.seats.length >= room.settings.playerCount) return { ok: false, error: "That table is full." };
+    if (accountUserId && this.blockedTable(room, accountUserId)) {
+      return { ok: false, error: "Someone at that table is blocked." };
+    }
     const seat = this.makeSeat(
       makeId("p"),
       name,
@@ -934,6 +948,10 @@ export class Hub {
       return;
     }
     const text = taunt.text;
+    if (blockedSpeech(text)) {
+      this.tell(seat, { type: "error", message: "Pick another line." });
+      return;
+    }
     const packId = taunt.packId;
     const tauntId = taunt.id;
     const kind = "preset" as const;
@@ -949,7 +967,9 @@ export class Hub {
     });
     const line = toChatLine(row, seat.name);
     for (const player of room.seats) {
-      if (player.send) player.send({ type: "chat", line });
+      if (!player.send) continue;
+      if (this.chatHidden(player, seat)) continue;
+      player.send({ type: "chat", line });
     }
   }
 
@@ -1549,9 +1569,10 @@ export class Hub {
   }
 
   private welcome(room: LiveRoom, seat: LiveSeat): void {
-    const chat = this.store.recentChat(room.id).map((row) => {
+    const chat = this.store.recentChat(room.id).flatMap((row) => {
       const speaker = room.seats.find((candidate) => candidate.id === row.player_id);
-      return toChatLine(row, speaker?.name ?? "Someone");
+      if (speaker && this.chatHidden(seat, speaker)) return [];
+      return [toChatLine(row, speaker?.name ?? "Someone")];
     });
     this.tell(seat, { type: "welcome", token: seat.token, playerId: seat.id, roomCode: room.code, chat });
     this.tell(seat, this.stateFor(room, seat.id));
@@ -1593,8 +1614,9 @@ export class Hub {
     close: () => void,
     accountUserId: string | null,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
-    const name = cleanName(message.name);
-    if (!name) return { ok: false, error: "Use a name, up to 16 letters." };
+    const named = acceptedName(message.name);
+    if (!named.ok) return named;
+    const name = named.name;
     if (this.accountIsSoak(accountUserId, name)) {
       return { ok: false, error: "Soak accounts use a private table." };
     }
@@ -1602,7 +1624,7 @@ export class Hub {
     if (size !== 2 && size !== 3 && size !== 4 && size !== "any") {
       return { ok: false, error: "Pick 2, 3, 4, or any size." };
     }
-    const existing = this.findQuick(size);
+    const existing = this.findQuick(size, accountUserId);
     if (existing) {
       this.releaseAccount(accountUserId, existing.id);
       return this.join({ type: "join", name, code: existing.code }, send, close, accountUserId);
@@ -1651,7 +1673,39 @@ export class Hub {
     }
   }
 
-  private findQuick(size: 2 | 3 | 4 | "any"): LiveRoom | null {
+  /** After an account is deleted, the live seat loses the name and the socket. */
+  scrubUser(userId: string): void {
+    for (const room of this.rooms.values()) {
+      let changed = false;
+      for (const seat of [...room.seats]) {
+        if (seat.userId !== userId) continue;
+        seat.name = "Deleted";
+        changed = true;
+        const close = seat.close;
+        seat.send = null;
+        seat.close = null;
+        seat.connected = false;
+        try {
+          close?.();
+        } catch {
+          // The socket is already gone.
+        }
+      }
+      if (changed) this.broadcast(room);
+    }
+  }
+
+  private chatHidden(listener: LiveSeat, speaker: LiveSeat): boolean {
+    if (!listener.userId || !speaker.userId || listener.id === speaker.id) return false;
+    return this.store.isBlocked(listener.userId, speaker.userId);
+  }
+
+  private blockedTable(room: LiveRoom, userId: string | null): boolean {
+    if (!userId) return false;
+    return room.seats.some((seat) => Boolean(seat.userId) && this.store.isBlockedEither(userId, seat.userId as string));
+  }
+
+  private findQuick(size: 2 | 3 | 4 | "any", viewerId: string | null = null): LiveRoom | null {
     const open = [...this.rooms.values()].filter(
       (room) =>
         room.listed &&
@@ -1659,7 +1713,8 @@ export class Hub {
         room.seats.length < room.settings.playerCount &&
         room.seats.some((seat) => !seat.bot) &&
         room.seats.every((seat) => !seat.bot) &&
-        (size === "any" || room.settings.playerCount === size),
+        (size === "any" || room.settings.playerCount === size) &&
+        !this.blockedTable(room, viewerId),
     );
     open.sort((a, b) => b.seats.length - a.seats.length || a.createdAt - b.createdAt);
     return open[0] ?? null;

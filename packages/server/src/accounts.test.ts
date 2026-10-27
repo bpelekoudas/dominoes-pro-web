@@ -186,7 +186,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/auth/email",
       headers: { host: "uhohdominoes.com", "x-forwarded-proto": "https" },
-      payload: { email: "player@example.com" },
+      payload: { email: "player@example.com", age13: true },
     });
     expect(mailed.statusCode).toBe(503);
     expect(mailed.json().error).toBe("Email sign-in is temporarily unavailable, try Google or play as guest");
@@ -338,7 +338,7 @@ describe("accounts", () => {
     expect(health.statusCode).toBe(200);
     expect(health.json()).toEqual({ ok: true });
 
-    const created = await app.inject({ method: "POST", url: "/api/guest", payload: { displayName: "Bryan" } });
+    const created = await app.inject({ method: "POST", url: "/api/guest", payload: { displayName: "Bryan", age13: true } });
     expect(created.statusCode).toBe(200);
     const setCookie = String(created.headers["set-cookie"]);
     expect(setCookie).toContain(`${SESSION_COOKIE}=`);
@@ -362,7 +362,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/guest",
       headers: { origin: "https://evil.example", host: "uhoh-dominoes.onrender.com" },
-      payload: { displayName: "Nope" },
+      payload: { displayName: "Nope", age13: true },
     });
     expect(foreign.statusCode).toBe(403);
 
@@ -370,7 +370,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/guest",
       headers: { origin: "https://uhohdominoes.com", host: "uhoh-dominoes.onrender.com" },
-      payload: { displayName: "Canonical" },
+      payload: { displayName: "Canonical", age13: true },
     });
     expect(fromCanonical.statusCode).toBe(200);
     expect(String(fromCanonical.headers["set-cookie"])).not.toContain("Domain=");
@@ -385,7 +385,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/auth/email",
       headers: { host: "127.0.0.1:8901" },
-      payload: { email: "bryan@example.com" },
+      payload: { email: "bryan@example.com", age13: true },
     });
     expect(mailed.statusCode).toBe(200);
     const devLink = mailed.json().devLink as string;
@@ -397,7 +397,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/auth/email",
       headers: { host: "uhoh-dominoes.onrender.com" },
-      payload: { email: "alias@example.com" },
+      payload: { email: "alias@example.com", age13: true },
     });
     if (previousPublic === undefined) delete process.env.PUBLIC_URL;
     else process.env.PUBLIC_URL = previousPublic;
@@ -437,7 +437,7 @@ describe("accounts", () => {
       method: "POST",
       url: "/api/guest",
       headers: { host: "uhoh-dominoes.onrender.com" },
-      payload: { displayName: "Still here" },
+      payload: { displayName: "Still here", age13: true },
     });
     expect(api.statusCode).toBe(200);
 

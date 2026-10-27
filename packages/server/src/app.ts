@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
@@ -127,7 +127,10 @@ export async function createApp(options: AppOptions = {}) {
     return { user };
   });
 
-  app.get("/api/open-tables", async () => ({ tables: hub.openTables() }));
+  app.get("/api/open-tables", async (request) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    return { tables: hub.openTables(user?.id ?? null) };
+  });
 
   app.get("/api/leaderboard", async (request) => {
     const query = request.query as { board?: string; bots?: string };
@@ -161,9 +164,13 @@ export async function createApp(options: AppOptions = {}) {
 
   app.post("/api/guest", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { displayName?: string; soakRun?: string };
+    const body = request.body as { displayName?: string; soakRun?: string; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
-    return sendAuth(reply, request, accounts.createGuest(body.displayName ?? "", current, cleanSoakRun(body.soakRun)));
+    return sendAuth(
+      reply,
+      request,
+      accounts.createGuest(body.displayName ?? "", current, cleanSoakRun(body.soakRun), body.age13 === true),
+    );
   });
 
   app.post("/api/profile", async (request, reply) => {
@@ -211,29 +218,30 @@ export async function createApp(options: AppOptions = {}) {
 
   app.post("/api/auth/google", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { idToken?: string; confirm?: boolean };
+    const body = request.body as { idToken?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
-    const result = await accounts.signInGoogle(body.idToken ?? "", current?.id ?? null, body.confirm === true);
+    const result = await accounts.signInGoogle(body.idToken ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
     return sendAuth(reply, request, result);
   });
 
   app.post("/api/auth/apple", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { idToken?: string; confirm?: boolean };
+    const body = request.body as { idToken?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
-    const result = await accounts.signInApple(body.idToken ?? "", current?.id ?? null, body.confirm === true);
+    const result = await accounts.signInApple(body.idToken ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
     return sendAuth(reply, request, result);
   });
 
   app.post("/api/auth/email", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { email?: string };
+    const body = request.body as { email?: string; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
     const result = await accounts.requestMagicLink({
       email: body.email ?? "",
       currentUserId: current?.id ?? null,
       ip: request.ip || "unknown",
       origin: pageOrigin(request),
+      age13: body.age13 === true,
     });
     if (!result.ok) return reply.code(result.status).send({ error: result.error });
     return result.devLink ? { ok: true, devLink: result.devLink } : { ok: true };
@@ -241,10 +249,61 @@ export async function createApp(options: AppOptions = {}) {
 
   app.post("/api/auth/email/consume", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
-    const body = request.body as { token?: string; confirm?: boolean };
+    const body = request.body as { token?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
-    const result = await accounts.consumeMagicLink(body.token ?? "", current?.id ?? null, body.confirm === true);
+    const result = await accounts.consumeMagicLink(body.token ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
     return sendAuth(reply, request, result);
+  });
+
+  app.post("/api/account/delete", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to delete this account." });
+    const body = (request.body ?? {}) as { confirm?: boolean };
+    if (body.confirm !== true) return reply.code(400).send({ error: "Confirm that you want the account deleted." });
+    const erased = store.erasePersonalData(user.id, new Date().toISOString());
+    if (!erased) return reply.code(400).send({ error: "That account cannot be deleted." });
+    hub.scrubUser(user.id);
+    accounts.logout(request.headers.cookie);
+    reply.header("set-cookie", sessionCookie("", request.protocol === "https", 0));
+    return { ok: true };
+  });
+
+  app.post("/api/safety/report", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to report a player." });
+    const body = (request.body ?? {}) as { playerId?: string; reason?: string };
+    const reason = body.reason === "rude" || body.reason === "cheat" || body.reason === "other" ? body.reason : null;
+    if (!reason || typeof body.playerId !== "string") return reply.code(400).send({ error: "Pick a reason." });
+    const seat = store.playerById(body.playerId);
+    if (!seat?.user_id) return reply.code(400).send({ error: "That seat cannot be reported." });
+    if (seat.user_id === user.id) return reply.code(400).send({ error: "You cannot report yourself." });
+    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    if (store.reportCountSince(user.id, since) >= 8) return reply.code(429).send({ error: "Wait a while before another report." });
+    const room = store.room(seat.room_id);
+    store.insertReport({
+      id: randomUUID(),
+      reporterUserId: user.id,
+      reportedUserId: seat.user_id,
+      roomCode: room?.code ?? null,
+      reason,
+      createdAt: new Date().toISOString(),
+    });
+    return { ok: true };
+  });
+
+  app.post("/api/safety/block", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to block a player." });
+    const body = (request.body ?? {}) as { playerId?: string };
+    if (typeof body.playerId !== "string") return reply.code(400).send({ error: "Pick a player." });
+    const seat = store.playerById(body.playerId);
+    if (!seat?.user_id) return reply.code(400).send({ error: "That seat cannot be blocked." });
+    if (seat.user_id === user.id) return reply.code(400).send({ error: "You cannot block yourself." });
+    store.blockUser(user.id, seat.user_id, new Date().toISOString());
+    return { ok: true };
   });
 
   app.post("/api/logout", async (request, reply) => {
