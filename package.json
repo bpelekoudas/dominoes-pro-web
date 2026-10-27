@@ -15,7 +15,8 @@
     "test": "vitest run && npm run test:legacy && node --test scripts/soak-sync.test.mjs",
     "test:legacy": "node test_logic.js && node test_ai.js",
     "typecheck": "tsc -p packages/rules --noEmit && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
-    "soak": "node scripts/soak.mjs"
+    "soak": "node scripts/soak.mjs",
+    "stress": "node scripts/stress.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",

@@ -377,7 +377,7 @@ export async function createApp(options: AppOptions = {}) {
     return { status: response.statusCode, ms: Math.round(performance.now() - started) };
   });
 
-  return { app, store, accounts, hub, bots, shop, lifecycle };
+  return { app, store, accounts, hub, bots, shop, lifecycle, dataDir: path.dirname(dbFile) };
 }
 
 /** Stop taking traffic, close seats so they reconnect, then close the HTTP server. */

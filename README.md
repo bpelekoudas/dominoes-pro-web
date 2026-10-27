@@ -128,7 +128,27 @@ The free service is $0, and it is the wrong place for this test. It cannot have 
 5. Render shows the service from `render.yaml`. The name is `uhoh-dominoes`, the plan is the $7 instance, and the disk is 1 GB. Apply it. The first build takes a few minutes.
 6. When the service says it is live, open `https://uhohdominoes.com`. Create a room on your phone and send the link. The `onrender.com` address redirects there.
 
-A new deploy stops the old copy for a few seconds before the new one starts. That is how a disk stays consistent. Phones show "Reconnecting…" and sit back down by themselves. The game file lives on the disk at `/var/data`, so rooms survive that restart.
+A new deploy stops the old copy for a few seconds before the new one starts. That is how a disk stays consistent. Phones show "Reconnecting…" and sit back down by themselves. The game file lives on the disk at `/var/data/uhoh.sqlite`, so rooms, accounts, and ratings survive that restart. The disk is already attached to the live service (1 GB, mounted at `/var/data`). Nothing else has to be added for deploys to keep the data.
+
+## Backups
+
+The server writes a snapshot to `/var/data/backups` about 30 seconds after it starts, again every 6 hours, and once more when it shuts down for a deploy. It keeps the 8 newest snapshots, and it stops sooner if those files would use more than 400 MB, so the live game still has room on the 1 GB disk. A snapshot is a consistent copy. Games can keep saving while it is written.
+
+These copies sit on the same disk as the live file. They survive a bad write and a deploy. They do not survive if that disk is deleted. To keep a copy off the machine, download one file from the Render shell when you want one.
+
+To see the snapshots:
+
+```bash
+node scripts/restore-db.mjs --data /var/data
+```
+
+To put one back, stop the service first (a running server would keep writing the old file), then:
+
+```bash
+node scripts/restore-db.mjs --data /var/data --file /var/data/backups/uhoh-YYYY-MM-DDTHH-MM-SS.sqlite --yes
+```
+
+Start the service again. The previous live file is left at `/var/data/uhoh.sqlite.before-restore`. Build the server before using that command on a machine that does not already have `packages/server/dist`. On Render the start command has already built it.
 
 ## What is deliberately not here yet
 
