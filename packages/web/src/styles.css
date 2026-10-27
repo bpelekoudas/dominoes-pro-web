@@ -1195,6 +1195,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;
     grid-template-rows: minmax(0, 1fr);
+    /* min-height: 100dvh would cancel this cap, and the rack would slip past the window. */
+    min-height: 0;
     height: calc(100dvh - 32px);
     max-height: calc(100dvh - 32px);
   }
