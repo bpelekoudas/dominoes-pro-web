@@ -20,6 +20,7 @@ import { Store } from "./db.js";
 import { leaderboard } from "./ranking.js";
 import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
+import { cleanPulseNote, pulseName } from "./pulse.js";
 import { CoinShop, shopFromEnv, WEBHOOK_PATH } from "./stripe-shop.js";
 
 export interface AppOptions {
@@ -306,6 +307,21 @@ export async function createApp(options: AppOptions = {}) {
     return { ok: true };
   });
 
+  app.post("/api/pulse", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    if (!pulseAllowed(request.ip)) return reply.code(429).send({ error: "Slow down." });
+    const body = (request.body ?? {}) as { name?: unknown; message?: unknown };
+    const name = pulseName(body.name);
+    if (!name) return reply.code(400).send({ error: "That count is not used." });
+    const day = new Date().toISOString().slice(0, 10);
+    store.bumpPulse(name, day);
+    if (name === "error") {
+      const note = cleanPulseNote(body.message) || "error";
+      store.noteClientError(randomUUID(), note, new Date().toISOString());
+    }
+    return { ok: true };
+  });
+
   app.post("/api/logout", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
     accounts.logout(request.headers.cookie);
@@ -463,6 +479,20 @@ function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInRe
   }
   if (result.token) reply.header("set-cookie", sessionCookie(result.token, request.protocol === "https", 30 * 24 * 60 * 60));
   return { user: result.user, outcome: "ok" as const };
+}
+
+const pulseHits = new Map<string, { at: number; n: number }>();
+
+function pulseAllowed(ip: string): boolean {
+  const now = Date.now();
+  const row = pulseHits.get(ip);
+  if (!row || now - row.at > 60_000) {
+    if (pulseHits.size > 500) pulseHits.clear();
+    pulseHits.set(ip, { at: now, n: 1 });
+    return true;
+  }
+  row.n += 1;
+  return row.n <= 30;
 }
 
 function originOk(request: FastifyRequest): boolean {

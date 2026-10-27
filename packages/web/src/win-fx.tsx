@@ -981,10 +981,10 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
               </div>
               <p>{view.lastHand?.summary}</p>
               <div className="match-over-actions">
-                <button type="button" className="secondary" data-action="rematch">
-                  Play Again
+                <button type="button" className="primary" data-action="rematch">
+                  Play again
                 </button>
-                <button type="button" className="primary" data-action="leave-match">
+                <button type="button" className="secondary" data-action="leave-match">
                   Leave Match
                 </button>
               </div>

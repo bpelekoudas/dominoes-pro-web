@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Intent, PlayerView } from "@uhoh/rules";
-import { tableLink } from "./link.js";
+import { shareText, smsHref, tableLink } from "./link.js";
+import { pulse } from "./pulse";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { sliverGap } from "./edge-slivers.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
@@ -795,6 +796,7 @@ function Lobby({
   onSend: (message: object) => void;
 }) {
   const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard" | "expert">("medium");
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const host = view.yourId === view.hostId;
   const openSeats = view.settings.playerCount - view.players.length;
   const mode = view.settings.boneyardMode === "draw_one" ? "Draw one, then pass if it doesn't fit." : "Draw until you can play.";
@@ -808,9 +810,15 @@ function Lobby({
         Link
         <input readOnly value={link} data-share-link={link} onFocus={(event) => event.currentTarget.select()} />
       </label>
-      <button type="button" className="primary" onClick={() => copyText(link)}>
-        Copy link
-      </button>
+      <div className="share-actions">
+        <button type="button" className="primary" data-action="text-link" onClick={() => void textLink(link, setShareNote)}>
+          Text a friend
+        </button>
+        <button type="button" className="secondary" data-action="copy-link" onClick={() => copyText(link)}>
+          Copy link
+        </button>
+      </div>
+      {shareNote ? <p className="hint">{shareNote}</p> : null}
       <ul className="seat-list">
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
@@ -1345,11 +1353,21 @@ function HandSummary({
       ) : view.phase === "over" || view.status === "complete" ? (
         <div className="match-over-actions">
           {view.canRematch ? (
-            <button type="button" className="secondary" data-action="rematch" onClick={onRematch}>
-              Play Again
+            <button
+              type="button"
+              className="primary"
+              data-action="rematch"
+              onClick={() => {
+                pulse("rematch");
+                onRematch();
+              }}
+            >
+              Play again
             </button>
+          ) : view.status === "complete" ? (
+            <p className="hint">Play again is ready when the host starts it and everyone is still here.</p>
           ) : null}
-          <button type="button" className="primary" data-action="leave-match" onClick={onLeaveMatch}>
+          <button type="button" className="secondary" data-action="leave-match" onClick={onLeaveMatch}>
             Leave Match
           </button>
         </div>
@@ -1576,6 +1594,26 @@ function copyText(value: string) {
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(value).catch(() => undefined);
   }
+}
+
+async function textLink(link: string, note: (value: string | null) => void) {
+  pulse("share");
+  const payload = { title: "UhOh Dominoes", text: shareText(link), url: link };
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share(payload);
+      note(null);
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }
+  if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    window.location.href = smsHref(link);
+    return;
+  }
+  copyText(link);
+  note("Link copied. Paste it into a text.");
 }
 
 function socketUrl(): string {

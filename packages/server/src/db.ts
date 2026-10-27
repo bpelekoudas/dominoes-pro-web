@@ -472,6 +472,17 @@ export class Store {
         coins INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS pulses (
+        day TEXT NOT NULL,
+        name TEXT NOT NULL,
+        n INTEGER NOT NULL,
+        PRIMARY KEY (day, name)
+      );
+      CREATE TABLE IF NOT EXISTS client_errors (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        message TEXT NOT NULL
+      );
     `);
   }
 
@@ -619,6 +630,38 @@ export class Store {
       .prepare(`SELECT COUNT(*) AS n FROM player_reports WHERE reporter_user_id = ? AND created_at > ?`)
       .get(userId, since) as { n: number };
     return row.n;
+  }
+
+  bumpPulse(name: string, day: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO pulses (day, name, n) VALUES (?, ?, 1)
+         ON CONFLICT (day, name) DO UPDATE SET n = n + 1`,
+      )
+      .run(day, name);
+  }
+
+  pulseCounts(): Array<{ day: string; name: string; n: number }> {
+    return this.db.prepare(`SELECT day, name, n FROM pulses ORDER BY day ASC, name ASC`).all() as Array<{
+      day: string;
+      name: string;
+      n: number;
+    }>;
+  }
+
+  noteClientError(id: string, message: string, at: string): void {
+    this.db.prepare(`INSERT INTO client_errors (id, created_at, message) VALUES (?, ?, ?)`).run(id, at, message);
+    const rows = this.db.prepare(`SELECT id FROM client_errors ORDER BY created_at ASC`).all() as Array<{ id: string }>;
+    const extra = rows.length - 200;
+    if (extra <= 0) return;
+    const drop = this.db.prepare(`DELETE FROM client_errors WHERE id = ?`);
+    for (const row of rows.slice(0, extra)) drop.run(row.id);
+  }
+
+  clientErrors(): Array<{ id: string; message: string }> {
+    return this.db
+      .prepare(`SELECT id, message FROM client_errors ORDER BY created_at ASC`)
+      .all() as Array<{ id: string; message: string }>;
   }
 
   insertReport(row: {

@@ -8,6 +8,8 @@ import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume,
 import { hapticsOn, setHaptics } from "./feel/haptics";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
 import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
+import { pulse } from "./pulse";
+import { Domino } from "./table";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -198,6 +200,10 @@ export function ArcadeHome({
     setGuideStep(0);
   }, [introBusy, presetCode]);
 
+  useEffect(() => {
+    pulse("home");
+  }, []);
+
   const closeGuide = () => {
     try {
       localStorage.setItem(HOWTO_KEY, "1");
@@ -350,6 +356,39 @@ export function ArcadeHome({
           Sign in
         </button>
       </div>
+
+      <section className="landing" data-screen="landing">
+        <h2>Match the ends. Race to 150.</h2>
+        <p>Text a friend a table link, or sit down with the computer.</p>
+        <div className="shot-row">
+          <figure className="shot">
+            <div className="shot-frame" data-shot="table">
+              <span className="shot-chain">
+                <Domino a={6} b={1} orientation="horizontal" />
+                <Domino a={1} b={4} orientation="horizontal" />
+              </span>
+            </div>
+            <figcaption>The table</figcaption>
+          </figure>
+          <figure className="shot">
+            <div className="shot-frame" data-shot="hand">
+              <span className="shot-hand">
+                <Domino a={2} b={3} orientation="vertical" />
+                <Domino a={5} b={5} orientation="vertical" />
+                <Domino a={0} b={6} orientation="vertical" />
+              </span>
+            </div>
+            <figcaption>Your hand</figcaption>
+          </figure>
+          <figure className="shot">
+            <div className="shot-frame" data-shot="score">
+              <p className="shot-score">1/2</p>
+              <p className="shot-score-note">First to 2 games</p>
+            </div>
+            <figcaption>The score</figcaption>
+          </figure>
+        </div>
+      </section>
       {onPreview ? (
         <button type="button" className="uhoh-test" data-demo="uhoh" onClick={onPreview}>
           Preview UH-OH
@@ -616,6 +655,7 @@ export function ArcadeHome({
             <p className="hint">Age confirmed. You need to be 13 or older.</p>
           )}
           <p className="hint">During a game, open Table talk to report or block a player. Names and table talk are checked for slurs.</p>
+          <p className="hint">We count visits and crashes on this server. No name is stored with them. <a href="/privacy">Privacy</a></p>
           {user && onDelete ? (
             deleteArmed ? (
               <div className="safety-confirm">

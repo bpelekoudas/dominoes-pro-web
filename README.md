@@ -150,6 +150,16 @@ node scripts/restore-db.mjs --data /var/data --file /var/data/backups/uhoh-YYYY-
 
 Start the service again. The previous live file is left at `/var/data/uhoh.sqlite.before-restore`. Build the server before using that command on a machine that does not already have `packages/server/dist`. On Render the start command has already built it.
 
+## Counts
+
+Visits, texted invites, play-again taps, and short crash notes are stored in the same game file. A count is a day, a name, and a number. A crash note is one line, with any email removed. No nickname is stored with them. There is no third-party tracker.
+
+On the Render shell:
+
+```bash
+node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/var/data/uhoh.sqlite',{readOnly:true}); console.log(db.prepare('SELECT day,name,n FROM pulses ORDER BY day,name').all()); console.log(db.prepare('SELECT created_at,message FROM client_errors ORDER BY created_at DESC LIMIT 20').all());"
+```
+
 ## What is deliberately not here yet
 
 Tile skins, table themes, avatars, ratings, tournaments, accounts, and anything involving real money. The seat is a name plus a token stored on the phone. If that phone is wiped, that seat cannot be recovered. A player who walks away in the middle of a hand leaves the table waiting on their turn.

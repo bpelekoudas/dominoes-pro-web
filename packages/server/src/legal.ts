@@ -54,6 +54,7 @@ function privacyBody(): string {
     <p>Purchases are handled by Stripe. We never see your card number.</p>
     <p>You need to be 13 or older. Settings asks for that before an account is created.</p>
     <p>Settings can delete the account. That removes the nickname, the email, and the sign-in. Wins and rating stay, under the name Deleted.</p>
+    <p>We count visits, texted invites, and play-again taps, and we keep a short note when the page crashes. Those counts have no name and no email. We do not use a third-party tracker.</p>
     <p>Questions: <a href="mailto:${escapeHtml(SUPPORT_EMAIL)}">${escapeHtml(SUPPORT_EMAIL)}</a></p>
   `;
 }
