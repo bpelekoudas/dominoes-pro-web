@@ -233,18 +233,15 @@ export function Leaderboard({
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [ends, setEnds] = useState("");
   const [seasonId, setSeasonId] = useState<number | null>(null);
-  const [hideBots, setHideBots] = useState(false);
-  const [botsHidden, setBotsHidden] = useState(false);
   useEffect(() => {
     let stopped = false;
-    void fetch(`/api/leaderboard?board=${board}&bots=${hideBots ? "0" : "1"}`)
+    void fetch(`/api/leaderboard?board=${board}&bots=0`)
       .then((response) => response.json())
-      .then((body: { rows?: BoardRow[]; seasonEndsAt?: string; seasonId?: number; includeBots?: boolean }) => {
+      .then((body: { rows?: BoardRow[]; seasonEndsAt?: string; seasonId?: number }) => {
         if (stopped) return;
         setRows(body.rows ?? []);
         setEnds(body.seasonEndsAt ?? "");
         setSeasonId(body.seasonId ?? null);
-        setBotsHidden(body.includeBots === false);
       })
       .catch(() => {
         if (!stopped) setRows([]);
@@ -252,7 +249,7 @@ export function Leaderboard({
     return () => {
       stopped = true;
     };
-  }, [board, hideBots]);
+  }, [board]);
   return (
     <section className="leaderboard" data-screen="leaderboard" data-board={board}>
       <div className="board-switch">
@@ -262,11 +259,8 @@ export function Leaderboard({
         <button type="button" className={board === "season" ? "primary" : "secondary"} onClick={() => onBoard("season")}>
           Season
         </button>
-        <button type="button" className="secondary" data-action="toggle-bots" onClick={() => setHideBots((value) => !value)}>
-          {hideBots ? "Show bots" : "Hide bots"}
-        </button>
       </div>
-      {botsHidden && !hideBots ? <p className="hint">This server is hiding bot accounts.</p> : null}
+      <p className="hint">Computers play at the table. They are not on this board.</p>
       <p className="hint">
         {board === "rating" ? "Lifetime rating. It never resets." : `Season ${seasonId ?? ""} points. Ends ${prettyDate(ends)}.`}
       </p>

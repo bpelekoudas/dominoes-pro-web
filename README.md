@@ -150,6 +150,10 @@ node scripts/restore-db.mjs --data /var/data --file /var/data/backups/uhoh-YYYY-
 
 Start the service again. The previous live file is left at `/var/data/uhoh.sqlite.before-restore`. Build the server before using that command on a machine that does not already have `packages/server/dist`. On Render the start command has already built it.
 
+## Board
+
+The public rating board and the season board show people. Computer accounts stay in the game as opponents, and soak test accounts stay off the board. `LEADERBOARD_INCLUDE_BOTS=1` is only for a private check.
+
 ## Counts
 
 Visits, texted invites, play-again taps, and short crash notes are stored in the same game file. A count is a day, a name, and a number. A crash note is one line, with any email removed. No nickname is stored with them. There is no third-party tracker.

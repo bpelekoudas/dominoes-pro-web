@@ -84,7 +84,7 @@ export function botsOn(env: NodeJS.ProcessEnv = process.env): boolean {
 
 export function leaderboardIncludesBots(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.LEADERBOARD_INCLUDE_BOTS;
-  if (raw == null || raw.trim() === "") return true;
+  if (raw == null || raw.trim() === "") return false;
   return !/^(0|false|off|no)$/i.test(raw.trim());
 }
 

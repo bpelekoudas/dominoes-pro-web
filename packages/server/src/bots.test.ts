@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CATALOG, canBuy, isWithheldId } from "@uhoh/rules";
-import { BotLeague } from "./bots.js";
+import { BotLeague, leaderboardIncludesBots } from "./bots.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
 import {
@@ -188,6 +188,13 @@ describe("bot economy", () => {
     const ids = owned.map((row) => row.item_id);
     for (const pass of SEASON_PASS_ONLY) expect(ids).not.toContain(pass);
     expect(ids).not.toContain("CHR-015");
+  });
+
+  it("keeps computer accounts off the public board", () => {
+    expect(leaderboardIncludesBots({})).toBe(false);
+    expect(leaderboardIncludesBots({ LEADERBOARD_INCLUDE_BOTS: "" })).toBe(false);
+    expect(leaderboardIncludesBots({ LEADERBOARD_INCLUDE_BOTS: "0" })).toBe(false);
+    expect(leaderboardIncludesBots({ LEADERBOARD_INCLUDE_BOTS: "1" })).toBe(true);
   });
 
   it("ranks account bots and can hide them on the board", () => {

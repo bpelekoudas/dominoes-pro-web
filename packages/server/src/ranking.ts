@@ -331,7 +331,7 @@ export function seatRankOf(standing: PublicStanding): SeatRank {
   };
 }
 
-export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50, includeBots = true) {
+export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50, includeBots = false) {
   const season = currentSeason(store, now);
   for (const user of store.allUsers()) {
     if ((user.is_soak ?? 0) === 1) continue;

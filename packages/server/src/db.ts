@@ -911,14 +911,14 @@ export class Store {
     return this.db.prepare(`SELECT * FROM users`).all() as unknown as UserRow[];
   }
 
-  topBySeason(limit: number, includeBots = true): UserRow[] {
+  topBySeason(limit: number, includeBots = false): UserRow[] {
     const sql = includeBots
       ? `SELECT * FROM users WHERE COALESCE(is_soak, 0) = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`
       : `SELECT * FROM users WHERE is_bot = 0 AND COALESCE(is_soak, 0) = 0 ORDER BY season_points DESC, rating DESC, display_name ASC LIMIT ?`;
     return this.db.prepare(sql).all(limit) as unknown as UserRow[];
   }
 
-  topByRating(limit: number, includeBots = true): UserRow[] {
+  topByRating(limit: number, includeBots = false): UserRow[] {
     const sql = includeBots
       ? `SELECT * FROM users WHERE COALESCE(is_soak, 0) = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`
       : `SELECT * FROM users WHERE is_bot = 0 AND COALESCE(is_soak, 0) = 0 ORDER BY rating DESC, ranked_games DESC, display_name ASC LIMIT ?`;
