@@ -1394,6 +1394,16 @@ function HandSummary({
           </p>
         ) : null}
       </div>
+      {gameOver && view.playAccuracy ? (
+        <div className="accuracy-result" data-accuracy={view.playAccuracy.percent}>
+          <p className="accuracy-line">Play Accuracy: {view.playAccuracy.percent}%</p>
+          {view.playAccuracy.missPoints > 0 && view.playAccuracy.missTileId ? (
+            <p className="accuracy-miss" data-miss-tile={view.playAccuracy.missTileId}>
+              {accuracyMissLine(view.playAccuracy.missTileId, view.playAccuracy.missPoints)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <ScoreList view={view} />
       <p>{hand.summary}</p>
       <p className="round-note">Leftovers round to the nearest 5. A tie rounds each share the same way.</p>
@@ -1657,6 +1667,11 @@ function playerFaces(view: PlayerView): Map<string, string> {
 function pretty(tileId: string): string {
   const [low, high] = tileId.split("-");
   return `${high}–${low}`;
+}
+
+function accuracyMissLine(tileId: string, points: number): string {
+  const face = faceOf(tileId);
+  return `The ${face.high}–${face.low} cost you ~${points} points.`;
 }
 
 function faceOf(tileId: string): { low: number; high: number } {

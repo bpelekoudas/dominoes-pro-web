@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { LoggedAction } from "@uhoh/rules";
+import { ACCURACY_RECENT_GAMES, parseAccuracyRecent, type LoggedAction } from "@uhoh/rules";
 
 export interface RoomRow {
   id: string;
@@ -68,6 +68,14 @@ export interface UserRow {
   soak_run?: string | null;
   /** 1 after the player confirms they are 13 or older. */
   age_ok?: number;
+  /** Choice-moves that matched a best play. Weighted lifetime numerator. */
+  accuracy_matched?: number;
+  /** Choice-moves scored. Weighted lifetime denominator. */
+  accuracy_choices?: number;
+  /** Games that had at least one real choice. */
+  accuracy_games?: number;
+  /** JSON array of the last counted games, each `{ matched, choices }`. */
+  accuracy_recent?: string | null;
 }
 
 export interface StandingUpdate {
@@ -151,6 +159,19 @@ export interface MagicLinkRow {
   created_at: string;
   /** 1 when the player confirmed 13+ before asking for this link. */
   age_ok?: number;
+}
+
+export interface PlayAccuracyRow {
+  user_id: string;
+  room_id: string;
+  series_id: string;
+  game_number: number;
+  player_id: string;
+  matched: number;
+  choices: number;
+  miss_tile: string | null;
+  miss_points: number;
+  created_at: string;
 }
 
 export interface HandRow {
@@ -416,6 +437,10 @@ export class Store {
     addUser("is_soak", "is_soak INTEGER NOT NULL DEFAULT 0");
     addUser("soak_run", "soak_run TEXT");
     addUser("age_ok", "age_ok INTEGER NOT NULL DEFAULT 0");
+    addUser("accuracy_matched", "accuracy_matched INTEGER NOT NULL DEFAULT 0");
+    addUser("accuracy_choices", "accuracy_choices INTEGER NOT NULL DEFAULT 0");
+    addUser("accuracy_games", "accuracy_games INTEGER NOT NULL DEFAULT 0");
+    addUser("accuracy_recent", "accuracy_recent TEXT NOT NULL DEFAULT '[]'");
     const walletCols = this.db.prepare(`PRAGMA table_info(wallets)`).all() as Array<{ name: string }>;
     const walletNames = new Set(walletCols.map((column) => column.name));
     if (!walletNames.has("earned_day")) this.db.exec(`ALTER TABLE wallets ADD COLUMN earned_day TEXT`);
@@ -510,6 +535,19 @@ export class Store {
         matches INTEGER NOT NULL DEFAULT 0,
         locks INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id, day)
+      );
+      CREATE TABLE IF NOT EXISTS play_accuracy (
+        user_id TEXT NOT NULL,
+        room_id TEXT NOT NULL,
+        series_id TEXT NOT NULL,
+        game_number INTEGER NOT NULL,
+        player_id TEXT NOT NULL,
+        matched INTEGER NOT NULL,
+        choices INTEGER NOT NULL,
+        miss_tile TEXT,
+        miss_points INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, room_id, series_id, game_number)
       );
       CREATE TABLE IF NOT EXISTS challenge_claims (
         user_id TEXT NOT NULL,
@@ -930,6 +968,80 @@ export class Store {
 
   setMeta(key: string, value: string): void {
     this.db.prepare(`INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`).run(key, value);
+  }
+
+  playAccuracyForGame(roomId: string, seriesId: string, gameNumber: number): PlayAccuracyRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM play_accuracy WHERE room_id = ? AND series_id = ? AND game_number = ? ORDER BY player_id`,
+      )
+      .all(roomId, seriesId, gameNumber) as unknown as PlayAccuracyRow[];
+  }
+
+  /**
+   * Record one seat's grade for a finished game. A second call for the same
+   * game does not add the totals again. A game with no real choice is stored
+   * so the replay is not repeated, and it does not move the profile numbers.
+   */
+  savePlayAccuracy(input: {
+    userId: string;
+    roomId: string;
+    seriesId: string;
+    gameNumber: number;
+    playerId: string;
+    matched: number;
+    choices: number;
+    missTile: string | null;
+    missPoints: number;
+    createdAt: string;
+  }): boolean {
+    this.db.exec(`BEGIN IMMEDIATE`);
+    try {
+      const inserted = this.db
+        .prepare(
+          `INSERT OR IGNORE INTO play_accuracy (
+            user_id, room_id, series_id, game_number, player_id,
+            matched, choices, miss_tile, miss_points, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.userId,
+          input.roomId,
+          input.seriesId,
+          input.gameNumber,
+          input.playerId,
+          input.matched,
+          input.choices,
+          input.missTile,
+          input.missPoints,
+          input.createdAt,
+        );
+      if (Number(inserted.changes) === 0) {
+        this.db.exec(`COMMIT`);
+        return false;
+      }
+      if (input.choices > 0) {
+        const user = this.user(input.userId);
+        const recent = parseAccuracyRecent(user?.accuracy_recent);
+        recent.push({ matched: input.matched, choices: input.choices });
+        const trimmed = recent.slice(-ACCURACY_RECENT_GAMES);
+        this.db
+          .prepare(
+            `UPDATE users SET
+              accuracy_matched = COALESCE(accuracy_matched, 0) + ?,
+              accuracy_choices = COALESCE(accuracy_choices, 0) + ?,
+              accuracy_games = COALESCE(accuracy_games, 0) + 1,
+              accuracy_recent = ?
+            WHERE id = ?`,
+          )
+          .run(input.matched, input.choices, JSON.stringify(trimmed), input.userId);
+      }
+      this.db.exec(`COMMIT`);
+      return true;
+    } catch (error) {
+      this.db.exec(`ROLLBACK`);
+      throw error;
+    }
   }
 
   saveStanding(userId: string, patch: StandingUpdate): void {

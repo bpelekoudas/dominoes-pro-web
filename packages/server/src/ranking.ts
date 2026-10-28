@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { resolveAvatar, type PointBreakdown, type RankRecap, type RankedPlayerRecap, type SeatRank, type TierStep } from "@uhoh/rules";
+import {
+  accuracyPercent,
+  parseAccuracyRecent,
+  recentAccuracyPercent,
+  resolveAvatar,
+  type PointBreakdown,
+  type RankRecap,
+  type RankedPlayerRecap,
+  type SeatRank,
+  type TierStep,
+} from "@uhoh/rules";
 import type { StandingUpdate, Store, UserRow } from "./db.js";
 import { applyGameBones, grantSeasonRewards } from "./economy.js";
 
@@ -84,6 +94,12 @@ export interface PublicStanding {
   peakTierId: string;
   peakTierName: string;
   peakStep: TierStep | null;
+  /** Decision-weighted share of best moves. Null until a game had a real choice. */
+  playAccuracy: number | null;
+  /** Average of each of the last 10 counted games. Null until one is counted. */
+  playAccuracyRecent: number | null;
+  /** Games that had at least one real choice. */
+  playAccuracyGames: number;
 }
 
 interface SeasonWindow {
@@ -653,6 +669,9 @@ function toStanding(user: UserRow, season: SeasonWindow): Standing {
     peakStep: (user.peak_step as TierStep | null) ?? null,
     winStreak: user.win_streak ?? 0,
     lastWinDay: user.last_win_day ?? null,
+    playAccuracy: accuracyPercent(user.accuracy_matched ?? 0, user.accuracy_choices ?? 0),
+    playAccuracyRecent: recentAccuracyPercent(parseAccuracyRecent(user.accuracy_recent)),
+    playAccuracyGames: user.accuracy_games ?? 0,
   };
 }
 

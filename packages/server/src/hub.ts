@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { blockedSpeech } from "./language.js";
 import {
+  accuracyPercent,
   allTileIds,
   applyIntent,
   beginHand,
@@ -34,11 +35,13 @@ import {
   type Intent,
   type MatchState,
   type PlayerView,
+  type PlayAccuracyView,
   type RankRecap,
   type SeriesLength,
   type SoakFixture,
   type TableMeta,
 } from "@uhoh/rules";
+import { gradeAndStore, type SeatAccuracyView } from "./accuracy.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store, type ChatRow, type RoomRow } from "./db.js";
 import { boardHasDouble, noteHand, noteScore } from "./daily.js";
@@ -155,6 +158,11 @@ interface LiveRoom {
   /** When account bots sit down if the table is still open. Null when bots are off. */
   botFillAt: number | null;
   recap: RankRecap | null;
+  /** Human grades for the game on the summary. Null until that game is scored. */
+  playAccuracy: Map<string, SeatAccuracyView> | null;
+  playAccuracyGame: number | null;
+  /** Rules copy this table was dealt with. The post-game replay uses the same one. */
+  rulesVersion: number;
   status: "lobby" | "playing" | "complete" | "abandoned";
   seats: LiveSeat[];
   match: MatchState | null;
@@ -181,6 +189,13 @@ export interface BoundSession {
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const BOT_NAMES = ["Bones", "Pips", "Lucky"] as const;
+
+/** A computer's saved move is marked so a person who takes that seat is not graded for it. */
+function savedPayload(bot: boolean, intent: { type: string; tileId?: string; endId?: string; bot?: boolean }): string {
+  const rest = { ...intent };
+  delete rest.bot;
+  return JSON.stringify(bot ? { ...rest, bot: true } : rest);
+}
 
 /** Computers wait this long before they play, so a person can watch the tile. */
 export const BOT_TURN_MS = 2_000;
@@ -616,6 +631,9 @@ export class Hub {
       quickWaitUntil: listed ? Date.now() + this.quickWaitMs : null,
       botFillAt: null,
       recap: null,
+      playAccuracy: null,
+      playAccuracyGame: null,
+      rulesVersion: RULES_VERSION,
       status: "lobby",
       seats: [],
       match: null,
@@ -894,7 +912,7 @@ export class Hub {
       hand_id: room.handId,
       seq: room.actionSeq,
       player_id: seat.id,
-      payload_json: JSON.stringify(intent),
+      payload_json: savedPayload(seat.bot, intent),
       created_at: nowIso(),
     });
     room.match = result.match;
@@ -969,7 +987,7 @@ export class Hub {
       hand_id: room.handId,
       seq: room.actionSeq,
       player_id: seat.id,
-      payload_json: JSON.stringify({ type: "timeout" }),
+      payload_json: savedPayload(seat.bot, { type: "timeout" }),
       created_at: nowIso(),
     });
     const nextMatch = result.match;
@@ -1071,6 +1089,8 @@ export class Hub {
     room.handId = handId;
     room.actionSeq = 0;
     room.recap = null;
+    room.playAccuracy = null;
+    room.playAccuracyGame = null;
     room.handSeed = seed.toString("hex");
     room.dailyNotes = {};
   }
@@ -1095,6 +1115,8 @@ export class Hub {
     room.handId = handId;
     room.actionSeq = 0;
     room.recap = null;
+    room.playAccuracy = null;
+    room.playAccuracyGame = null;
     room.handSeed = null;
     room.dailyNotes = {};
   }
@@ -1431,6 +1453,9 @@ export class Hub {
       quickWaitUntil: row.listed === 1 && row.status === "lobby" ? Date.now() + this.quickWaitMs : null,
       botFillAt: null,
       recap: null,
+      playAccuracy: null,
+      playAccuracyGame: null,
+      rulesVersion: row.rules_version ?? RULES_VERSION,
       status: row.status as LiveRoom["status"],
       seats: [],
       match: null,
@@ -2075,21 +2100,59 @@ export class Hub {
     const hand = room.match?.lastHand;
     if (!hand?.gameWinnerId || !room.match) return;
     if (this.skipSettle(room)) return;
-    if (room.recap?.gameNumber === hand.gameNumber) return;
+    if (room.recap?.gameNumber !== hand.gameNumber) {
+      try {
+        room.recap = settleGame(this.store, {
+          roomId: room.id,
+          seriesId: room.seriesId,
+          gameNumber: hand.gameNumber,
+          casual: room.casual,
+          completed: true,
+          winnerId: hand.gameWinnerId,
+          now: new Date(),
+          seats: this.finishSeats(room, hand.scoresAfter, null, hand.gameNumber),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "The rating could not be saved.";
+        console.warn(`Room ${room.id} rating was not saved (${detail}).`);
+      }
+    }
+    if (room.playAccuracyGame !== hand.gameNumber) this.notePlayAccuracy(room, hand.gameNumber);
+  }
+
+  /** Replay this game's saved hands after it ends. Never called from a live turn. */
+  private notePlayAccuracy(room: LiveRoom, gameNumber: number): void {
+    const humans = room.seats
+      .filter((seat) => !seat.bot && seat.userId)
+      .map((seat) => ({ playerId: seat.id, userId: seat.userId! }));
+    if (humans.length === 0 || !room.match) {
+      room.playAccuracy = new Map();
+      room.playAccuracyGame = gameNumber;
+      return;
+    }
     try {
-      room.recap = settleGame(this.store, {
+      const logged = this.store
+        .handsForSeries(room.id, room.seriesId)
+        .filter((hand) => hand.game_number === gameNumber)
+        .map((hand) => ({
+          deck: JSON.parse(hand.deck_json) as string[],
+          actions: this.store.actions(hand.id),
+        }));
+      room.playAccuracy = gradeAndStore(this.store, {
         roomId: room.id,
         seriesId: room.seriesId,
-        gameNumber: hand.gameNumber,
-        casual: room.casual,
-        completed: true,
-        winnerId: hand.gameWinnerId,
-        now: new Date(),
-        seats: this.finishSeats(room, hand.scoresAfter, null, hand.gameNumber),
+        gameNumber,
+        players: room.seats.map((seat) => ({ id: seat.id, name: seat.name })),
+        config: { ...room.settings, targetScore: room.match.config.targetScore },
+        hands: logged,
+        humans,
+        rulesVersion: room.rulesVersion,
+        now: nowIso(),
       });
+      room.playAccuracyGame = gameNumber;
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "The rating could not be saved.";
-      console.warn(`Room ${room.id} rating was not saved (${detail}).`);
+      const detail = error instanceof Error ? error.message : "Play accuracy was not saved.";
+      console.warn(`Room ${room.id} play accuracy was not saved (${detail}).`);
     }
   }
 
@@ -2149,6 +2212,22 @@ export class Hub {
     } catch {
       return null;
     }
+  }
+
+  private accuracyFor(room: LiveRoom, youId: string): PlayAccuracyView | null {
+    if (!this.showRecap(room) || room.playAccuracyGame == null) return null;
+    if (room.match?.lastHand?.gameNumber !== room.playAccuracyGame) return null;
+    const seat = room.seats.find((candidate) => candidate.id === youId);
+    if (!seat || seat.bot) return null;
+    const row = room.playAccuracy?.get(youId);
+    if (!row || row.choices <= 0) return null;
+    const percent = accuracyPercent(row.matched, row.choices);
+    if (percent == null) return null;
+    return {
+      percent,
+      missTileId: row.missPoints > 0 ? row.missTileId : null,
+      missPoints: row.missPoints > 0 ? row.missPoints : 0,
+    };
   }
 
   private showRecap(room: LiveRoom): boolean {
@@ -2211,6 +2290,7 @@ export class Hub {
       youBotGames: this.botGamesFor(youId, room),
       sharedTableId: this.sharedTableId(room),
       recap: this.showRecap(room) ? room.recap : null,
+      playAccuracy: this.accuracyFor(room, youId),
       quick:
         room.listed && room.status === "lobby"
           ? {

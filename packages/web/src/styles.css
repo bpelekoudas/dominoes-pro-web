@@ -1402,6 +1402,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   margin-bottom: 8px;
 }
 .winner-row h2 { margin: 0; }
+.accuracy-result { display: grid; gap: 2px; margin: 4px 0 8px; }
+.accuracy-line { margin: 0; color: var(--gold); font-weight: 700; }
+.accuracy-miss { margin: 0; color: var(--paper); }
 .daily-lines { display: grid; gap: 2px; }
 .daily-line { margin: 0; color: var(--gold); font-weight: 700; }
 .daily-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -1776,6 +1779,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .stat-grid dt { color: var(--muted); font-size: 0.75rem; }
 .stat-grid dd { margin: 2px 0 0; font-size: 1.15rem; font-weight: 700; }
 .stat-grid small { color: var(--muted); font-weight: 500; font-size: 0.75rem; }
+.stat-grid .accuracy-stat { grid-column: 1 / -1; }
+.stat-grid .accuracy-stat small { display: block; margin-top: 2px; }
 .season-points { margin: 0; font-size: 1.6rem; font-weight: 700; }
 .season-points span { font-size: 0.85rem; color: var(--muted); }
 .tier-bar { height: 10px; margin: 8px 0; border-radius: 999px; background: rgba(0, 0, 0, 0.35); overflow: hidden; }

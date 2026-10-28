@@ -23,6 +23,18 @@ export interface RankFacts {
   peakTierId: string;
   peakTierName: string;
   peakStep: "III" | "II" | "I" | null;
+  /** Decision-weighted lifetime. Missing until the profile has a counted game. */
+  playAccuracy?: number | null;
+  /** Average of the last 10 counted games, or of every counted game when fewer than 10. */
+  playAccuracyRecent?: number | null;
+  playAccuracyGames?: number;
+}
+
+function accuracyDetail(recent: number | null | undefined, games: number): string {
+  if (games <= 0 || recent == null) return "No counted games yet";
+  const window = Math.min(10, games);
+  const label = window === 1 ? "Last game" : `Last ${window} games`;
+  return `${label} ${recent}% · ${games} ${games === 1 ? "game" : "games"}`;
 }
 
 export function RankBadge({ tier }: { tier: string }) {
@@ -112,6 +124,15 @@ export function ProfileStats({ user, avatarId }: { user: RankFacts; avatarId?: s
           <dd>
             {user.vsComputerWins}–{user.vsComputerLosses}
             <small> of {user.vsComputerGames}</small>
+          </dd>
+        </div>
+        <div className="accuracy-stat" data-accuracy={user.playAccuracy ?? ""} data-accuracy-games={user.playAccuracyGames ?? 0}>
+          <dt>Play accuracy</dt>
+          <dd>
+            {user.playAccuracy == null ? "—" : `${user.playAccuracy}%`}
+            <small>
+              {accuracyDetail(user.playAccuracyRecent, user.playAccuracyGames ?? 0)}
+            </small>
           </dd>
         </div>
       </dl>

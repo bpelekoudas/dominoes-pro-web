@@ -74,6 +74,13 @@ export interface RankedPlayerRecap {
   nextAt: number | null;
 }
 
+/** This viewer's grade for the game that just ended. Absent when they had no real choice. */
+export interface PlayAccuracyView {
+  percent: number;
+  missTileId: string | null;
+  missPoints: number;
+}
+
 /** Shown once, when a game to 150 ends or someone leaves for good. */
 export interface RankRecap {
   gameNumber: number;
@@ -165,6 +172,8 @@ export interface PlayerView {
     handNumber: number;
   } | null;
   recap: RankRecap | null;
+  /** Set on the game-over screen for a human who had a real choice in that game. */
+  playAccuracy?: PlayAccuracyView | null;
   /** Set while a public quick table is still waiting for people. */
   quick: {
     waitUntil: number;
@@ -218,6 +227,7 @@ export interface TableMeta {
     casual?: boolean;
   };
   recap?: RankRecap | null;
+  playAccuracy?: PlayAccuracyView | null;
   quick?: {
     waitUntil: number;
     canFill: boolean;
@@ -365,6 +375,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
         }
       : null,
     recap: meta.recap ?? null,
+    playAccuracy: meta.playAccuracy ?? null,
     quick: meta.quick ?? null,
     tableId: meta.sharedTableId || "TBL-001",
     lastPlay: match?.lastPlay ?? null,

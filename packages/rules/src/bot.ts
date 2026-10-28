@@ -44,16 +44,57 @@ export function chooseBotIntent(
     return plays[index] ?? null;
   }
 
-  const owned = match.hand?.hands[playerId] ?? [];
   const board = match.hand?.board;
   if (!board) return plays[0] ?? null;
-    const blocked = blockedSuits(match);
+
+  const ranked = scorePlays(match, playerId, difficulty).map((play) => ({ ...play, roll: rng() }));
+  ranked.sort((a, b) => {
+    if (b.value !== a.value) return b.value - a.value;
+    return a.roll - b.roll;
+  });
+  return ranked[0]?.intent ?? null;
+}
+
+export interface RankedPlay {
+  intent: Extract<Intent, { type: "play" }>;
+  value: number;
+  /** Board points this play would award. A total under 10, or not a multiple of 5, is 0. */
+  awarded: number;
+}
+
+/**
+ * Expert order with the wobble and the random tie-break turned off.
+ * Two plays match when their values are equal. Hidden hands are not read.
+ */
+export function rankExpertPlays(match: MatchState, playerId: string): RankedPlay[] {
+  const ranked = scorePlays(match, playerId, "expert");
+  ranked.sort((a, b) => {
+    if (b.value !== a.value) return b.value - a.value;
+    if (a.intent.tileId !== b.intent.tileId) return a.intent.tileId < b.intent.tileId ? -1 : 1;
+    if (a.intent.endId !== b.intent.endId) return a.intent.endId < b.intent.endId ? -1 : 1;
+    return 0;
+  });
+  return ranked;
+}
+
+function scorePlays(
+  match: MatchState,
+  playerId: string,
+  difficulty: Exclude<BotDifficulty, "easy">,
+): RankedPlay[] {
+  const plays = legalIntents(match, playerId).filter(
+    (intent): intent is Extract<Intent, { type: "play" }> => intent.type === "play",
+  );
+  const owned = match.hand?.hands[playerId] ?? [];
+  const board = match.hand?.board;
+  if (!board) return [];
+  const blocked = blockedSuits(match);
   const nextId = nextPlayerId(match, playerId);
   const myScore = match.scores[playerId] ?? 0;
   const bestScore = Math.max(0, ...match.players.map((player) => match.scores[player.id] ?? 0));
   const behind = bestScore - myScore;
 
-  const ranked = plays.map((intent) => {
+  return plays.map((intent) => {
     const next = placeTile(board, intent.endId, tileById(intent.tileId));
     const remaining = owned.filter((id) => id !== intent.tileId);
     const awarded = openScore(next).awarded;
@@ -90,14 +131,8 @@ export function chooseBotIntent(
         value -= Math.min((Number.isFinite(threat) ? threat : 0) * 3, 40);
       }
     }
-    return { intent, value, roll: rng() };
+    return { intent, value, awarded };
   });
-
-  ranked.sort((a, b) => {
-    if (b.value !== a.value) return b.value - a.value;
-    return a.roll - b.roll;
-  });
-  return ranked[0]?.intent ?? null;
 }
 
 function nextPlayerId(match: MatchState, playerId: string): string | null {
