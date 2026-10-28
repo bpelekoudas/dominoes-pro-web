@@ -12,6 +12,7 @@ import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
 import { pulse } from "./pulse";
 import { Domino } from "./table";
 import { DailyHome } from "./daily";
+import { PlayerHome } from "./home-screen";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -160,16 +161,18 @@ export function ArcadeHome({
   const [wearTick, setWearTick] = useState(0);
   const [frameId, setFrameId] = useState<string | null>(null);
   const [goldBones, setGoldBones] = useState<number | null>(null);
+  const [bones, setBones] = useState<number | null>(null);
   const heroFrame = frameId ?? (user?.avatarId === "pitmaster" ? "FRM-015" : null);
   useEffect(() => {
     if (!user) return;
     let stopped = false;
     void fetch("/api/store")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { loadout?: { frameId?: string | null }; goldBones?: number } | null) => {
+      .then((body: { loadout?: { frameId?: string | null }; goldBones?: number; bones?: number } | null) => {
         if (stopped || !body) return;
         setFrameId(body.loadout?.frameId ?? null);
         setGoldBones(body.goldBones ?? 0);
+        setBones(body.bones ?? 0);
       })
       .catch(() => undefined);
     return () => {
@@ -243,16 +246,44 @@ export function ArcadeHome({
   };
 
   return (
-    <main className="arcade-home" data-screen="home" data-skin="ivory">
+    <main className={user ? "player-home" : "arcade-home"} data-screen="home" data-skin="ivory">
+      {user ? (
+        <>
+        <PlayerHome
+          userId={user.id}
+          displayName={user.displayName}
+          avatarId={user.avatarId}
+          rating={user.rating}
+          bones={bones}
+          goldBones={goldBones}
+          connecting={connecting}
+          onSettings={() => setSheet("settings")}
+          onStore={() => setSheet("store")}
+          onCharacters={onLook}
+          onRanks={onBoard}
+          onMulti={() => setSheet("multi")}
+          onVersus={() =>
+            gate(() => onSolo(readyName || user.displayName || "Guest", 2, "draw_until", 3, "easy", true))
+          }
+          onQuickPlay={(series) => gate(() => onQuickPlay(readyName || user.displayName || "Guest", series))}
+        />
+        {needsAge ? (
+          <label className="age-gate ph-age">
+            <input type="checkbox" data-action="age-13" checked={ageChecked} onChange={(event) => onAge(event.target.checked)} />
+            I am 13 or older
+          </label>
+        ) : null}
+        {error ? <p className="banner error">{error}</p> : notice ? <p className="banner">{notice}</p> : null}
+        {connecting ? <p className="banner">Connecting…</p> : null}
+        </>
+      ) : null}
+      {user ? null : (
+      <>
       <header className="arcade-bar">
-        {user ? (
-          <AccountChip user={user} onOpen={onAccount} />
-        ) : (
           <button type="button" className="profile-chip" onClick={press(onAccount)}>
             <span className="avatar">?</span>
             <span className="profile-name">Sign in</span>
           </button>
-        )}
         <div className="arcade-tools">
           <button type="button" className="icon-button" aria-label="Settings" onClick={press(() => setSheet("settings"))}>
             <GearIcon />
@@ -274,15 +305,15 @@ export function ArcadeHome({
 
       <div className="hero-stage">
         <span className="hero-portrait">
-          <Portrait id={user?.avatarId} size="hero" />
+          <Portrait id="2hot4tv" size="hero" />
           {heroFrame ? <img className="hero-frame" src={`/store/${heroFrame}.webp`} alt="" draggable={false} /> : null}
         </span>
         <button
           type="button"
           className="change-look"
-          disabled={!user && !readyName}
+          disabled={!readyName}
           onClick={press(() => {
-            if (!user && readyName) onGuest(readyName);
+            if (readyName) onGuest(readyName);
             onLook();
           })}
         >
@@ -330,7 +361,7 @@ export function ArcadeHome({
           data-action="play-now"
           disabled={connecting}
           onClick={press(() =>
-            gate(() => onSolo(readyName || user?.displayName || "Guest", 2, "draw_until", 3, "easy", true)),
+            gate(() => onSolo(readyName || "Guest", 2, "draw_until", 3, "easy", true)),
           )}
         >
           Play
@@ -364,7 +395,7 @@ export function ArcadeHome({
           className="text-button"
           data-action="quick-play"
           disabled={connecting}
-          onClick={press(() => gate(() => onQuickPlay(readyName || user?.displayName || "Guest", 5)))}
+          onClick={press(() => gate(() => onQuickPlay(readyName || "Guest", 5)))}
         >
           Quick Play
         </button>
@@ -375,7 +406,7 @@ export function ArcadeHome({
           Sign in
         </button>
       </div>
-      <DailyHome userId={user?.id ?? null} />
+      <DailyHome userId={null} />
       </div>
 
       <section className="landing" data-screen="landing">
@@ -415,6 +446,8 @@ export function ArcadeHome({
           Preview UH-OH
         </button>
       ) : null}
+      </>
+      )}
 
       {sheet === "mode" ? (
         <section className="arcade-modal" role="dialog" aria-label="Play vs computer" data-screen="mode">
@@ -729,12 +762,17 @@ export function ArcadeHome({
           <button type="button" className="capsule capsule-back" onClick={press(() => setSheet(null))}>
             Back
           </button>
+          <button type="button" className="text-button" data-action="solo" onClick={press(() => setSheet("mode"))}>
+            Choose seats
+          </button>
         </section>
       ) : null}
-      <nav className="arcade-legal" aria-label="Legal">
-        <a href="/terms">Terms</a>
-        <a href="/privacy">Privacy</a>
-      </nav>
+      {user ? null : (
+        <nav className="arcade-legal" aria-label="Legal">
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </nav>
+      )}
     </main>
   );
 }

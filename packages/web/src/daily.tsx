@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { dailyChallengeMark, dailyLoginMark } from "./home-model";
 import { playUiClick, unlockSound } from "./sound";
 
 const OFFER_KEY = "uhoh.login-offer";
@@ -62,7 +63,7 @@ function rememberOffer(today: string): void {
   }
 }
 
-export function DailyHome({ userId }: { userId: string | null }) {
+export function DailyHome({ userId, variant = "row" }: { userId: string | null; variant?: "row" | "icons" }) {
   const [status, setStatus] = useState<DailyStatus | null>(null);
   const [sheet, setSheet] = useState<"login" | "challenge" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -113,8 +114,37 @@ export function DailyHome({ userId }: { userId: string | null }) {
     }
   };
 
+  const loginLabel = dailyLoginMark(status ? ladder : null);
+  const challengeLabel = dailyChallengeMark(status ? done : null);
+
   return (
     <>
+      {variant === "icons" ? (
+        <div className="ph-dailies">
+          <button type="button" className="ph-side-btn" data-action="daily-login" onClick={press(() => setSheet("login"))}>
+            <span className="ph-side-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="9" width="18" height="11" rx="2" />
+                <path d="M3 13h18M12 9v11M7 9c-2-4 3-5 5 0M17 9c2-4-3-5-5 0" />
+              </svg>
+            </span>
+            <span className="ph-side-label">{loginLabel}</span>
+            {status && !claimed ? <i className="daily-dot" aria-label="Reward ready" /> : null}
+          </button>
+          <button type="button" className="ph-side-btn" data-action="daily-challenge" onClick={press(() => setSheet("challenge"))}>
+            <span className="ph-side-icon ph-side-icon-red" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="4" y="3" width="10" height="18" rx="2" />
+                <path d="M4 12h10" />
+                <circle cx="9" cy="7.5" r="0.8" fill="currentColor" />
+                <circle cx="9" cy="16.5" r="0.8" fill="currentColor" />
+              </svg>
+            </span>
+            <span className="ph-side-label">{challengeLabel}</span>
+          </button>
+        </div>
+      ) : (
+        <>
       {showOffer && status ? (
         <div className="daily-offer">
           <button type="button" className="text-button" data-action="daily-offer" onClick={press(() => setSheet("login"))}>
@@ -145,6 +175,8 @@ export function DailyHome({ userId }: { userId: string | null }) {
           <strong>Daily {done}/3</strong>
         </button>
       </div>
+        </>
+      )}
 
       {sheet === "login" ? (
         <section className="arcade-modal" role="dialog" aria-label="Daily login" data-screen="daily-login">
