@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StoreItem } from "../../rules/src/catalog.js";
 import { AVATAR_ART } from "./avatars";
+import { winPoseSrc } from "./lineup";
 import { playUiClick } from "./sound";
 
 const TABS: Array<{ id: StoreItem["category"]; label: string }> = [
@@ -160,6 +161,7 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
             ))
           : null}
       </section>
+      {shop?.open ? <p className="hint">Pay opens Stripe Checkout. Apple Pay and Google Pay show up there when this phone has them.</p> : null}
       <nav className="store-legal" aria-label="Legal">
         <a href="/terms">Terms</a>
         <a href="/privacy">Privacy</a>
@@ -267,11 +269,18 @@ function ItemDetail({
   onEquip: () => void;
 }) {
   const sale = forSale(item);
+  const pose = item.category === "character" ? winPoseSrc(item.avatarId) : null;
   return (
     <div className="store-detail" role="dialog" aria-label={item.name} data-item-detail={item.id}>
       <span className="store-art-frame">
         <ItemArt item={item} />
       </span>
+      {pose ? (
+        <figure className="pose-preview">
+          <img src={pose} alt="" />
+          <figcaption>Win pose</figcaption>
+        </figure>
+      ) : null}
       <h3>{item.name}</h3>
       <p className={`rarity-badge rarity-${item.rarity.toLowerCase()}`}>{item.rarity}</p>
       <Badges item={item} owned={owned} wearing={wearing} />

@@ -13,6 +13,8 @@ import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
+import { hintText, markHint, playHint } from "./play-hints";
+import { scoreHintChoice, setScoreHintChoice, showScoreNumbers, type ScoreHintChoice } from "./score-hints";
 import { AvatarFace, BotBadge } from "./avatars";
 import { CheckoutBanner, useMatchCosmetics } from "./store";
 import { MatchLineup } from "./lineup";
@@ -270,7 +272,7 @@ export function App() {
           onCreate={(name, playerCount, boneyardMode, seriesLength) =>
             void begin({ type: "create", name, playerCount, boneyardMode, seriesLength })
           }
-          onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty) => {
+          onSolo={(name, playerCount, boneyardMode, seriesLength, difficulty, casual) => {
             const reel =
               new URLSearchParams(location.search).get("reel") === "score" &&
               name.trim().toLowerCase().startsWith("soak-");
@@ -281,6 +283,7 @@ export function App() {
               boneyardMode,
               seriesLength,
               difficulty,
+              ...(casual ? { casual: true } : {}),
               ...(reel ? { fixture: "score-reel" } : {}),
             });
           }}
@@ -504,7 +507,13 @@ export function Game({
   const heard = chat.filter((line) => !mutedSpeakers.includes(line.playerId));
   const bubble = useTalkBubble(heard);
   const unread = useUnread(heard, chatOpen);
-  const play = (tileId: string, endId: string) => onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
+  const play = (tileId: string, endId: string) => {
+    if (coach) {
+      markHint(coach);
+      setCoach(null);
+    }
+    onSend({ type: "intent", intent: { type: "play", tileId, endId } satisfies Intent });
+  };
   const around = seatAround(view.players);
   const opponents = (["left", "top", "right"] as const).flatMap((edge) => {
     const seat = around.find((item) => item.edge === edge);
@@ -512,6 +521,22 @@ export function Game({
   });
   const you = around.find((seat) => seat.edge === "bottom") ?? null;
   const yourTurn = view.turnPlayerId === view.yourId && view.phase !== "over" && view.phase !== "lobby" && view.phase !== "between";
+  const [scoreChoice, setScoreChoice] = useState<ScoreHintChoice>(scoreHintChoice);
+  const scoreNumbers = showScoreNumbers(view.easyPractice, view.botGames, scoreChoice);
+  const severalEnds = view.legalPlays.some((play) => view.legalPlays.filter((other) => other.tileId === play.tileId).length > 1);
+  const [coach, setCoach] = useState<"tap" | "drag" | null>(null);
+  const coachTurn = useRef(false);
+  useEffect(() => {
+    const next = playHint(yourTurn, view.legalPlays.length > 0, severalEnds);
+    setCoach((current) => current ?? next);
+  }, [yourTurn, view.legalPlays, severalEnds]);
+  useEffect(() => {
+    if (coachTurn.current && !yourTurn && coach) {
+      markHint(coach);
+      setCoach(null);
+    }
+    coachTurn.current = yourTurn;
+  }, [yourTurn, coach]);
   const notice = useFleetingNotice(view);
   const [muted, setMute] = useState(isMuted);
   const [replayToken, setReplayToken] = useState(0);
@@ -664,6 +689,7 @@ export function Game({
                 onSelect={onSelect}
                 replayToken={replayToken}
                 tableArt={tableArt}
+                showScores={scoreNumbers}
               />
               {opponents.map((seat) => (
                 <EdgeSeat
@@ -698,8 +724,39 @@ export function Game({
                   </p>
                 ) : null}
               </div>
-              {yourTurn ? <p className="your-turn">Your turn</p> : null}
-              {yourTurn ? <TurnBar view={view} /> : null}
+              {view.phase === "play" && view.turnPlayerId ? (
+                <p className="your-turn" data-you={yourTurn ? "true" : "false"}>
+                  {coach ? hintText(coach) : yourTurn ? "Your turn" : `${view.players.find((player) => player.id === view.turnPlayerId)?.name ?? "Their"}'s turn`}
+                  {coach ? (
+                    <button
+                      type="button"
+                      className="hint-dismiss"
+                      onClick={() => {
+                        markHint(coach);
+                        setCoach(null);
+                      }}
+                    >
+                      Got it
+                    </button>
+                  ) : null}
+                </p>
+              ) : null}
+              {view.phase === "play" && view.turnDeadline ? <TurnBar view={view} /> : null}
+              {view.easyPractice ? (
+                <button
+                  type="button"
+                  className="text-button score-hint-toggle"
+                  data-action="score-hints"
+                  aria-pressed={scoreNumbers}
+                  onClick={() => {
+                    const next = scoreNumbers ? "off" : "on";
+                    setScoreChoice(next);
+                    setScoreHintChoice(next);
+                  }}
+                >
+                  {scoreNumbers ? "Score hints on" : "Score hints off"}
+                </button>
+              ) : null}
               <StatusLine view={view} />
               {notice && you && notice.playerId === you.player.id ? (
                 <p className="seat-notice local-notice">{notice.text}</p>
@@ -717,6 +774,7 @@ export function Game({
                 selectedTile={selectedTile}
                 onSelect={onSelect}
                 onPlay={play}
+                showScores={scoreNumbers}
                 onDragTile={(tileId, aimEndId) => setDrag(tileId ? { tileId, aimEndId } : null)}
               />
               <YardPile
@@ -819,6 +877,7 @@ function Lobby({
         </button>
       </div>
       {shareNote ? <p className="hint">{shareNote}</p> : null}
+      <p className="eyebrow">At the table</p>
       <ul className="seat-list">
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
@@ -1317,6 +1376,7 @@ function HandSummary({
           </p>
         ) : null}
       </div>
+      <ScoreList view={view} />
       <p>{hand.summary}</p>
       <p className="round-note">Leftovers round to the nearest 5. A tie rounds each share the same way.</p>
       <ol className="place-list">
@@ -1342,7 +1402,6 @@ function HandSummary({
             </div>
           ))}
       </div>
-      <ScoreList view={view} />
       {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} faces={playerFaces(view)} /> : null}
       {view.betweenHands ? (
         <div className="match-over-actions">

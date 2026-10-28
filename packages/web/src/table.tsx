@@ -75,8 +75,15 @@ function Half({ value }: { value: number }) {
       {(PIPS[value] ?? []).map((pos) => (
         <i key={pos} data-pos={pos} />
       ))}
+      <b className="pip-num">{value}</b>
     </span>
   );
+}
+
+function endPoints(plays: Array<{ endId: string; points: number }>, endId: string): string {
+  const found = plays.find((play) => play.endId === endId);
+  const points = found?.points ?? 0;
+  return points > 0 ? `+${points}` : "0";
 }
 
 export function Table({
@@ -88,6 +95,7 @@ export function Table({
   onSelect,
   replayToken = 0,
   tableArt = null,
+  showScores = false,
 }: {
   view: PlayerView;
   selectedTile: string | null;
@@ -97,6 +105,8 @@ export function Table({
   onSelect: (tileId: string | null) => void;
   tableArt?: string | null;
   replayToken?: number;
+  /** Points for each open end. Easy practice only, and only while hints are on. */
+  showScores?: boolean;
 }) {
   const board = view.board;
   // The felt the chain should fold into, in design pixels, at the readable floor.
@@ -155,7 +165,8 @@ export function Table({
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
       const zones = measureZones(viewport);
       const felt = { w: width, h: height };
-      const readablePx = screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+      const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
+      const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
       const room = fitInsets(felt, zones, nextReserve);
       const designW = Math.max(160, ((width - room.left - room.right) * TILE_SHORT) / readablePx);
       const designH = Math.max(160, ((height - room.top - room.bottom) * TILE_SHORT) / readablePx);
@@ -425,7 +436,9 @@ export function Table({
                   data-hot={hot ? "true" : "false"}
                   onClick={() => chooseEnd(end.id)}
                   aria-label={`Open ${end.id} end, match ${end.match}`}
-                />
+                >
+                  {showScores && hot ? <em className="end-points">{endPoints(focusPlays, end.id)}</em> : null}
+                </button>
               );
             })}
           </div>
@@ -900,12 +913,14 @@ export function Hand({
   onSelect,
   onPlay,
   onDragTile,
+  showScores = false,
 }: {
   view: PlayerView;
   selectedTile: string | null;
   onSelect: (tileId: string | null) => void;
   onPlay: (tileId: string, endId: string) => void;
   onDragTile: (tileId: string | null, aimEndId: string | null) => void;
+  showScores?: boolean;
 }) {
   const mine = view.turnPlayerId === view.yourId;
   const session = useRef<Session | null>(null);
@@ -930,12 +945,14 @@ export function Hand({
     const el = handRef.current;
     const frame = el?.parentElement;
     if (!el || !frame) return;
-    const natural = () =>
-      window.matchMedia("(min-width: 880px) and (min-height: 640px)").matches
+    const natural = () => {
+      const base = window.matchMedia("(min-width: 880px) and (min-height: 640px)").matches
         ? 68
         : window.matchMedia("(min-width: 720px)").matches
           ? 58
           : 44;
+      return document.documentElement.dataset.tileSize === "large" ? Math.round(base * 1.28) : base;
+    };
     const apply = () => {
       const next = handFit(el.clientWidth, count, natural());
       el.style.setProperty("--hand-tile", `${next.tile}px`);
@@ -977,6 +994,7 @@ export function Hand({
       {view.you.hand.map((tile) => {
         const plays = view.legalPlays.filter((play) => play.tileId === tile.id);
         const playable = mine && plays.length > 0;
+        const best = plays.reduce((high, play) => Math.max(high, play.points), 0);
         const selected = selectedTile === tile.id;
         const lifted = liftedId === tile.id;
         return (
@@ -1021,6 +1039,7 @@ export function Hand({
               onSelect(selected ? null : tile.id);
             }}
           >
+            {showScores && playable && best > 0 ? <em className="play-points">+{best}</em> : null}
             <Domino a={tile.high} b={tile.low} orientation="vertical" />
           </button>
         );

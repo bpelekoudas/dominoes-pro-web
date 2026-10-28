@@ -7,6 +7,7 @@ import { RankLine } from "./rank";
 import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume, type MusicChoice } from "./music";
 import { hapticsOn, setHaptics } from "./feel/haptics";
 import { isMuted, playUiClick, setMuted, unlockSound } from "./sound";
+import { applyA11y, largeTilesOn, pipMarksOn, setLargeTiles, setPipMarks } from "./a11y";
 import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
 import { pulse } from "./pulse";
 import { Domino } from "./table";
@@ -90,7 +91,7 @@ export function ArcadeHome({
   onRefresh,
   onPreview,
   forced = null,
-  introBusy = false,
+  introBusy: _introBusy = false,
   needsAge = false,
   ageChecked = false,
   onAge = () => undefined,
@@ -104,7 +105,7 @@ export function ArcadeHome({
   initialName: string;
   user: AccountUser | null;
   onCreate: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength) => void;
-  onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength, difficulty: Difficulty) => void;
+  onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength, difficulty: Difficulty, casual?: boolean) => void;
   onJoin: (name: string, code: string) => void;
   onQuick: (name: string, size: QuickSize) => void;
   onGuest: (name: string) => void;
@@ -135,7 +136,9 @@ export function ArcadeHome({
   const [sheet, setSheet] = useState<Sheet>(forced);
   const [guide, setGuide] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
-  const [practiceOffer, setPracticeOffer] = useState(() => !stored(PRACTICE_KEY));
+  const [practiceOffer, setPracticeOffer] = useState(false);
+  const [largeTiles, setLargeTileState] = useState(largeTilesOn);
+  const [pipNumbers, setPipNumberState] = useState(pipMarksOn);
   const [tables, setTables] = useState<OpenTable[]>([]);
   const [muted, setMuteState] = useState(isMuted);
   const [haptics, setHapticState] = useState(hapticsOn);
@@ -153,14 +156,17 @@ export function ArcadeHome({
   };
   const [wearTick, setWearTick] = useState(0);
   const [frameId, setFrameId] = useState<string | null>(null);
+  const [goldBones, setGoldBones] = useState<number | null>(null);
   const heroFrame = frameId ?? (user?.avatarId === "pitmaster" ? "FRM-015" : null);
   useEffect(() => {
     if (!user) return;
     let stopped = false;
     void fetch("/api/store")
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { loadout?: { frameId?: string | null } } | null) => {
-        if (!stopped) setFrameId(body?.loadout?.frameId ?? null);
+      .then((body: { loadout?: { frameId?: string | null }; goldBones?: number } | null) => {
+        if (stopped || !body) return;
+        setFrameId(body.loadout?.frameId ?? null);
+        setGoldBones(body.goldBones ?? 0);
       })
       .catch(() => undefined);
     return () => {
@@ -193,12 +199,6 @@ export function ArcadeHome({
     if (!readyName) return;
     action();
   };
-
-  useEffect(() => {
-    if (introBusy || presetCode || stored(HOWTO_KEY)) return;
-    setGuide(true);
-    setGuideStep(0);
-  }, [introBusy, presetCode]);
 
   useEffect(() => {
     pulse("home");
@@ -257,6 +257,12 @@ export function ArcadeHome({
           <button type="button" className="icon-button" aria-label="Leaderboard" onClick={press(onBoard)}>
             <BoardIcon />
           </button>
+          {goldBones != null ? (
+            <span className="gold-home" aria-label={`${goldBones} Gold Bones`}>
+              <i className="gold-pip" aria-hidden="true" />
+              {goldBones}
+            </span>
+          ) : null}
           <button type="button" className="icon-button" aria-label="Store" onClick={press(() => setSheet("store"))}>
             <BagIcon />
           </button>
@@ -313,23 +319,21 @@ export function ArcadeHome({
       {error ? <p className="banner error">{error}</p> : notice ? <p className="banner">{notice}</p> : null}
       {connecting ? <p className="banner">Connecting…</p> : null}
 
+      <div className="home-play">
       <div className="arcade-actions">
-        <button type="button" className="capsule" data-action="solo" disabled={connecting || !readyName} onClick={press(() => setSheet("mode"))}>
-          Play vs computer
-        </button>
-        <button type="button" className="capsule capsule-red" data-action="multi" disabled={connecting || !readyName} onClick={press(() => setSheet("multi"))}>
-          Multiplayer
-        </button>
         <button
           type="button"
           className="capsule"
-          data-action="store"
-          onClick={press(() => {
-            if (!user && readyName) onGuest(readyName);
-            setSheet("store");
-          })}
+          data-action="play-now"
+          disabled={connecting}
+          onClick={press(() =>
+            gate(() => onSolo(readyName || user?.displayName || "Guest", 2, "draw_until", 3, "easy", true)),
+          )}
         >
-          Store
+          Play
+        </button>
+        <button type="button" className="capsule capsule-red" data-action="multi" disabled={connecting} onClick={press(() => setSheet("multi"))}>
+          Multiplayer
         </button>
       </div>
 
@@ -349,12 +353,16 @@ export function ArcadeHome({
         </label>
       ) : null}
       <div className="account-row">
+        <button type="button" className="text-button" data-action="solo" disabled={connecting} onClick={press(() => setSheet("mode"))}>
+          Choose seats
+        </button>
         <button type="button" className="text-button" disabled={connecting || !readyName} onClick={press(() => gate(() => onGuest(readyName)))}>
           Continue as guest
         </button>
         <button type="button" className="text-button" onClick={press(onAccount)}>
           Sign in
         </button>
+      </div>
       </div>
 
       <section className="landing" data-screen="landing">
@@ -597,6 +605,35 @@ export function ArcadeHome({
             })}
           >
             {haptics ? "Haptics on" : "Haptics off"}
+          </button>
+          <h3>Accessibility</h3>
+          <button
+            type="button"
+            className="capsule"
+            aria-pressed={largeTiles}
+            data-action="large-tiles"
+            onClick={press(() => {
+              const next = !largeTiles;
+              setLargeTileState(next);
+              setLargeTiles(next);
+              applyA11y();
+            })}
+          >
+            {largeTiles ? "Larger tiles on" : "Larger tiles off"}
+          </button>
+          <button
+            type="button"
+            className="capsule"
+            aria-pressed={pipNumbers}
+            data-action="pip-numbers"
+            onClick={press(() => {
+              const next = !pipNumbers;
+              setPipNumberState(next);
+              setPipMarks(next);
+              applyA11y();
+            })}
+          >
+            {pipNumbers ? "Numbers on the tiles" : "Dots on the tiles"}
           </button>
           <h3>Music</h3>
           <div className="choices music-choices" data-music={music} role="group" aria-label="Music">

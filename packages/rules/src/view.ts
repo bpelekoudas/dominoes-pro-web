@@ -1,5 +1,5 @@
 import { DEFAULT_AVATAR } from "./avatars.js";
-import { openEnds, openScore, type BoardState } from "./board.js";
+import { openEnds, openScore, placeTile, type BoardState } from "./board.js";
 import { winsNeeded } from "./score.js";
 import { tauntsForPlayer, type AvailableTaunt } from "./taunts.js";
 import { tileById } from "./tiles.js";
@@ -134,7 +134,12 @@ export interface PlayerView {
   continueDeadline: number | null;
   ended: { reason: "player_left"; playerId: string; name: string } | null;
   prompt: string;
-  legalPlays: Array<{ tileId: string; endId: string }>;
+  /** `points` is the board award for that play, before the tile is committed. */
+  legalPlays: Array<{ tileId: string; endId: string; points: number }>;
+  /** Casual table where every opponent is an easy computer. Score numbers are allowed only here. */
+  easyPractice: boolean;
+  /** Finished games this account has played against a computer. */
+  botGames: number;
   canDraw: boolean;
   canKnock: boolean;
   canStart: boolean;
@@ -209,6 +214,8 @@ export interface TableMeta {
   /** Shared table skin. The hub picks the host, never a bot while a human is seated. */
   sharedTableId?: string | null;
   youId: string;
+  /** Finished computer games for the seated account. Guests count too. */
+  youBotGames?: number;
   turnDeadline?: number | null;
   turnBudgetMs?: number;
   serverNow?: number;
@@ -219,13 +226,23 @@ export interface TableMeta {
 
 const EMPTY_DRAW: LastDraw | null = null;
 
+/** Score numbers belong on an easy practice table, never on a ranked or human table. */
+function easyTable(meta: TableMeta): boolean {
+  if (meta.settings.casual !== true) return false;
+  const others = meta.seats.filter((seat) => seat.id !== meta.youId);
+  return others.length > 0 && others.every((seat) => seat.bot && seat.difficulty === "easy");
+}
+
 export function project(match: MatchState | null, meta: TableMeta): PlayerView {
   const targetScore = match?.config.targetScore ?? 150;
   const turnPlayerId = match ? currentPlayerId(match) : null;
   const intents = match ? legalIntents(match, meta.youId) : [];
-  const legalPlays: Array<{ tileId: string; endId: string }> = [];
+  const legalPlays: Array<{ tileId: string; endId: string; points: number }> = [];
+  const playBoard = match?.hand?.board ?? null;
   for (const intent of intents) {
-    if (intent.type === "play") legalPlays.push({ tileId: intent.tileId, endId: intent.endId });
+    if (intent.type !== "play" || !playBoard) continue;
+    const placed = placeTile(playBoard, intent.endId, tileById(intent.tileId));
+    legalPlays.push({ tileId: intent.tileId, endId: intent.endId, points: openScore(placed).awarded });
   }
   const handTiles = match?.hand?.hands[meta.youId] ?? [];
   const youHand = handTiles
@@ -284,6 +301,8 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
     phase,
     prompt: promptFor(match, meta, phase, turnPlayerId),
     legalPlays,
+    easyPractice: easyTable(meta),
+    botGames: meta.youBotGames ?? 0,
     canDraw: intents.some((intent) => intent.type === "draw"),
     canKnock: intents.some((intent) => intent.type === "knock"),
     canStart:

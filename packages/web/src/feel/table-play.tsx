@@ -250,6 +250,8 @@ function makeView(input: HandInput): PlayerView {
     ended: null,
     prompt: "",
     legalPlays: input.plays ?? [],
+    easyPractice: false,
+    botGames: 0,
     canDraw: false,
     canKnock: false,
     canStart: false,
@@ -596,7 +598,7 @@ export function crowdView(): PlayerView {
     turn: "you",
     handNumber: 1,
     seats,
-    plays: long ? [{ tileId: "4-5", endId: "north" }] : [],
+    plays: long ? [{ tileId: "4-5", endId: "north", points: 0 }] : [],
   });
 }
 

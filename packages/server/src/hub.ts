@@ -93,6 +93,7 @@ export type ClientMessage =
       boneyardMode?: string;
       seriesLength?: number;
       difficulty?: string;
+      casual?: boolean;
       /** Soak tables only. A normal solo game leaves this off. */
       fixture?: string;
     }
@@ -1036,6 +1037,7 @@ export class Hub {
         playerCount,
         boneyardMode,
         seriesLength,
+        casual: message.casual === true,
       },
       send,
       close,
@@ -1945,6 +1947,12 @@ export class Hub {
     return { ...projected, taunts: [...projected.taunts, ...extra] };
   }
 
+  private botGamesFor(youId: string, room: LiveRoom): number {
+    const seat = room.seats.find((candidate) => candidate.id === youId);
+    if (!seat?.userId) return 0;
+    return this.store.user(seat.userId)?.vs_games ?? 0;
+  }
+
   private meta(room: LiveRoom, youId: string): TableMeta {
     return {
       roomCode: room.code,
@@ -1970,6 +1978,7 @@ export class Hub {
         };
       }),
       settings: { ...room.settings, casual: room.casual },
+      youBotGames: this.botGamesFor(youId, room),
       sharedTableId: this.sharedTableId(room),
       recap: this.showRecap(room) ? room.recap : null,
       quick:
