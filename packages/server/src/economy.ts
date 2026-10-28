@@ -9,6 +9,15 @@ export const GAME_WIN_BONES = 40;
 export const GAME_MOMENT_BONES = 10;
 /** Game Bones stop here for the Denver day. Login and challenges are separate and not paid here. */
 export const GAME_BONES_DAILY_CAP = 600;
+/**
+ * Bones that are not game earnings. They never change earned_today and never
+ * count toward GAME_BONES_DAILY_CAP. Login is the 7-day ladder. The three
+ * daily challenges pay 25, 35, and 40, which is 100 if all three are done.
+ */
+export const LOGIN_STREAK_BONES = [50, 50, 75, 75, 100, 100, 150] as const;
+export const CHALLENGE_EASY_BONES = 25;
+export const CHALLENGE_MEDIUM_BONES = 35;
+export const CHALLENGE_HARD_BONES = 40;
 
 /**
  * Free season-track items. Pass-only extras stay out of this list.
@@ -103,6 +112,29 @@ export function applyGameBones(
     )
     .run(userId, input.roomId, input.seriesId, input.gameNumber, awarded, input.at);
   return { awarded, balance: next, gross, already: false };
+}
+
+/**
+ * Pay Bones that are not from a game. The daily cap is left alone.
+ * A missing human wallet is opened at the test balance first, same as a game payout.
+ */
+export function grantBonusBones(
+  store: Store,
+  userId: string,
+  amount: number,
+  at: string,
+): { awarded: number; balance: number } {
+  const user = store.user(userId);
+  const whole = Math.floor(amount);
+  if (!user || whole <= 0) {
+    const wallet = readWallet(store, userId);
+    return { awarded: 0, balance: wallet?.bones ?? 0 };
+  }
+  const opened = ensureWallet(store, user, at);
+  const next = opened.bones + whole;
+  if (next < 0) return { awarded: 0, balance: opened.bones };
+  store.db.prepare(`UPDATE wallets SET bones = ? WHERE user_id = ?`).run(next, userId);
+  return { awarded: whole, balance: next };
 }
 
 /** Grant every free-track item the account's season points have reached. Idempotent. */

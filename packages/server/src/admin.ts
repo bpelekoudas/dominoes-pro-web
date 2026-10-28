@@ -2,6 +2,7 @@ import { statfsSync, statSync } from "node:fs";
 import type { Store } from "./db.js";
 import { listBackups } from "./backup.js";
 import { COIN_PACKS } from "./coins.js";
+import { dailyAdmin, type DailyAdmin } from "./daily.js";
 import type { Hub } from "./hub.js";
 
 /** Used when ADMIN_EMAILS is unset. An env value replaces this list. */
@@ -158,6 +159,7 @@ export interface AdminStats {
     playingTables: number;
     capacity: Capacity;
   };
+  daily: DailyAdmin;
   omitted: string[];
 }
 
@@ -543,6 +545,7 @@ export function collectAdminStats(input: {
       playingTables: live.playingTables,
       capacity: capacityFor(live.playingTables),
     },
+    daily: dailyAdmin(input.store, now),
     omitted: [
       "Bones spent are not in a ledger, so only Bones earned and Bones still held are shown.",
       "Each purchase does not record whether that charge was test or live. The shop mode shown is the mode right now.",

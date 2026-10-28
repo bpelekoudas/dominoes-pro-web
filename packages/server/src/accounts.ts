@@ -5,6 +5,7 @@ import { cleanName, cleanSoakRun, isSoakName } from "./hub.js";
 import { blockedSpeech } from "./language.js";
 import { isAvatarId, isWithheldId, resolveAvatar } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
+import { mergeDaily } from "./daily.js";
 import { describePlayer, type PublicStanding } from "./ranking.js";
 
 export type ProviderName = "google" | "apple" | "email" | "guest";
@@ -444,6 +445,7 @@ export class Accounts {
         existing: this.present(ownerId)!,
       };
     }
+    if (currentUserId && currentUserId !== ownerId && confirm) mergeDaily(this.store, currentUserId, ownerId, this.now());
     return { outcome: "ok", user: this.present(ownerId)!, token: this.issue(ownerId) };
   }
 

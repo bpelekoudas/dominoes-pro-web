@@ -1368,6 +1368,13 @@ function HandSummary({
       </p>
       <div className="winner-row">
         <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>
+        {view.dailyNotes && view.dailyNotes.length > 0 ? (
+          <div className="daily-lines">
+            {view.dailyNotes.map((line, index) => (
+              <p key={`${line}-${index}`} className="daily-line">{line}</p>
+            ))}
+          </div>
+        ) : null}
         {last && lastFace ? (
           <p className="last-tile-line" data-last-tile={last.tileId} data-last-player={last.playerId}>
             <span>{wentOut ? "Went out with" : "Last played"}</span>

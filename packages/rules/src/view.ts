@@ -179,6 +179,8 @@ export interface PlayerView {
   knockStreak: number;
   lastDraw: { playerId: string; count: number; tileIds: string[] | null } | null;
   taunts: AvailableTaunt[];
+  /** Lines for challenges that just paid. Empty until a hand earns one. */
+  dailyNotes?: string[];
 }
 
 export interface TableSeat {
@@ -222,6 +224,7 @@ export interface TableMeta {
   betweenHands?: boolean;
   continueDeadline?: number | null;
   ended?: { reason: "player_left"; playerId: string; name: string } | null;
+  dailyNotes?: string[];
 }
 
 const EMPTY_DRAW: LastDraw | null = null;
@@ -358,6 +361,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
     knockStreak: knockStreakOf(match?.log ?? []),
     lastDraw,
     taunts: tauntsForPlayer(),
+    dailyNotes: meta.dailyNotes ?? [],
   };
 }
 

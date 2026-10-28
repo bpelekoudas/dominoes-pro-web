@@ -11,6 +11,7 @@ import { applyA11y, largeTilesOn, pipMarksOn, setLargeTiles, setPipMarks } from 
 import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
 import { pulse } from "./pulse";
 import { Domino } from "./table";
+import { DailyHome } from "./daily";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -363,6 +364,7 @@ export function ArcadeHome({
           Sign in
         </button>
       </div>
+      <DailyHome userId={user?.id ?? null} />
       </div>
 
       <section className="landing" data-screen="landing">

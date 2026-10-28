@@ -41,6 +41,7 @@ import {
 } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
 import { Store, type ChatRow, type RoomRow } from "./db.js";
+import { boardHasDouble, noteHand, noteScore } from "./daily.js";
 import { describePlayer, seatRankOf, settleGame } from "./ranking.js";
 
 export interface ChatLine {
@@ -163,6 +164,8 @@ interface LiveRoom {
   soakRun: string | null;
   /** Seed of the hand in progress. Sent to browsers only while soak is set. */
   handSeed: string | null;
+  /** Challenge lines for the hand in progress, shown on the hand-over sheet. */
+  dailyNotes: Record<string, string[]>;
 }
 
 export interface BoundSession {
@@ -601,6 +604,7 @@ export class Hub {
       soak,
       soakRun,
       handSeed: null,
+      dailyNotes: {},
     };
     const seat = this.makeSeat(
       room.hostId,
@@ -859,7 +863,9 @@ export class Hub {
     });
     room.match = result.match;
     this.noteBigMoment(room, before, room.match);
+    this.noteDailyScore(room, before);
     if (room.match.hand?.phase === "complete" && room.match.lastHand) {
+      this.noteDailyHand(room);
       this.store.setHandResult(room.handId, JSON.stringify(room.match.lastHand));
       if (room.match.phase === "series_over") {
         room.status = "complete";
@@ -933,7 +939,9 @@ export class Hub {
     const nextMatch = result.match;
     room.match = nextMatch;
     this.noteBigMoment(room, before, room.match);
+    this.noteDailyScore(room, before);
     if (nextMatch.hand?.phase === "complete" && nextMatch.lastHand) {
+      this.noteDailyHand(room);
       this.store.setHandResult(room.handId, JSON.stringify(nextMatch.lastHand));
       if (nextMatch.phase === "series_over") {
         room.status = "complete";
@@ -1028,6 +1036,7 @@ export class Hub {
     room.actionSeq = 0;
     room.recap = null;
     room.handSeed = seed.toString("hex");
+    room.dailyNotes = {};
   }
 
   /** A fixed soak deal. The hand seed stays hidden because the deck is not a shuffle. */
@@ -1051,6 +1060,7 @@ export class Hub {
     room.actionSeq = 0;
     room.recap = null;
     room.handSeed = null;
+    room.dailyNotes = {};
   }
 
   private solo(
@@ -1395,6 +1405,7 @@ export class Hub {
       soak: row.soak === 1,
       soakRun: row.soak_run ?? null,
       handSeed: null,
+      dailyNotes: {},
     };
     const worn = new Set<string>();
     for (const player of players) {
@@ -2028,7 +2039,57 @@ export class Hub {
       betweenHands: room.betweenHands,
       continueDeadline: room.continueDeadline,
       ended: room.ended,
+      dailyNotes: room.dailyNotes[youId] ?? [],
     };
+  }
+
+  private noteDailyScore(room: LiveRoom, before: MatchState): void {
+    if (this.skipSettle(room) || !room.match?.lastPlay) return;
+    const play = room.match.lastPlay;
+    if (before.lastPlay?.seq === play.seq) return;
+    const seat = room.seats.find((candidate) => candidate.id === play.playerId);
+    if (!seat?.userId || seat.bot) return;
+    for (const line of noteScore(this.store, seat.userId, play.awarded, new Date())) {
+      this.pushDailyNote(room, seat.id, line);
+    }
+  }
+
+  private noteDailyHand(room: LiveRoom): void {
+    const match = room.match;
+    const hand = match?.lastHand;
+    if (this.skipSettle(room) || !match || !hand) return;
+    const doubleOnBoard = boardHasDouble(match.hand?.board);
+    const now = new Date();
+    for (const seat of room.seats) {
+      if (!seat.userId || seat.bot) continue;
+      let next = 0;
+      for (const [id, score] of Object.entries(hand.scoresAfter)) {
+        if (id === seat.id) continue;
+        if (score > next) next = score;
+      }
+      const lines = noteHand(
+        this.store,
+        {
+          userId: seat.userId,
+          gameFinished: Boolean(hand.gameWinnerId),
+          gameWon: hand.gameWinnerId === seat.id,
+          wonHand: hand.winnerIds.includes(seat.id),
+          drew: match.log.some((event) => event.kind === "draw" && event.playerId === seat.id),
+          doubleOnBoard,
+          margin: (hand.scoresAfter[seat.id] ?? 0) - next,
+          matchWon: hand.seriesWinnerId === seat.id,
+          lockGame: hand.reason === "locked" && hand.gameWinnerId === seat.id && hand.winnerIds.includes(seat.id),
+        },
+        now,
+      );
+      for (const line of lines) this.pushDailyNote(room, seat.id, line);
+    }
+  }
+
+  private pushDailyNote(room: LiveRoom, seatId: string, line: string): void {
+    const notes = room.dailyNotes[seatId] ?? [];
+    notes.push(line);
+    room.dailyNotes[seatId] = notes;
   }
 
   /**

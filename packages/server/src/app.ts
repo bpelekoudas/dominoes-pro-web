@@ -17,7 +17,7 @@ import { BotLeague, leaderboardIncludesBots } from "./bots.js";
 import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
-import { leaderboard } from "./ranking.js";
+import { denverDay, leaderboard } from "./ranking.js";
 import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
 import { cleanPulseNote, pulseName } from "./pulse.js";
@@ -32,6 +32,7 @@ import {
   userIsAdmin,
 } from "./admin.js";
 import { adminDashboardHtml, adminSignInHtml } from "./admin-page.js";
+import { claimLogin, dailyStatus, previewDaily } from "./daily.js";
 
 export interface AppOptions {
   store?: Store;
@@ -137,6 +138,31 @@ export async function createApp(options: AppOptions = {}) {
     if (!user) return reply.code(401).send({ error: "Sign in to see this profile." });
     notePresence(store, user.id);
     return { user };
+  });
+
+  app.get("/api/daily", async (request, reply) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to see this." });
+    return dailyStatus(store, user.id, new Date());
+  });
+
+  app.post("/api/daily/claim", async (request, reply) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to see this." });
+    return claimLogin(store, user.id, new Date());
+  });
+
+  app.get("/api/admin/daily", async (request, reply) => {
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to see this." });
+    if (!userIsAdmin(store, user.id)) {
+      return reply.code(403).send({ error: adminDeniedMessage(accountEmails(store, user.id)) });
+    }
+    const query = request.query as { day?: unknown };
+    const day = typeof query.day === "string" && query.day.trim() ? query.day.trim() : denverDay(new Date());
+    const preview = previewDaily(day);
+    if (!preview) return reply.code(400).send({ error: "Use a day like 2026-10-29." });
+    return preview;
   });
 
   app.get("/admin", async (request, reply) => {

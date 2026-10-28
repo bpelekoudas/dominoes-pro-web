@@ -488,6 +488,38 @@ export class Store {
         user_id TEXT NOT NULL,
         PRIMARY KEY (day, user_id)
       );
+      CREATE TABLE IF NOT EXISTS login_claims (
+        user_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        streak_day INTEGER NOT NULL,
+        streak_total INTEGER NOT NULL,
+        bones INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, day)
+      );
+      CREATE TABLE IF NOT EXISTS daily_progress (
+        user_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        games INTEGER NOT NULL DEFAULT 0,
+        wins INTEGER NOT NULL DEFAULT 0,
+        no_draw_hands INTEGER NOT NULL DEFAULT 0,
+        double_hands INTEGER NOT NULL DEFAULT 0,
+        score15 INTEGER NOT NULL DEFAULT 0,
+        score25 INTEGER NOT NULL DEFAULT 0,
+        margin50 INTEGER NOT NULL DEFAULT 0,
+        matches INTEGER NOT NULL DEFAULT 0,
+        locks INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, day)
+      );
+      CREATE TABLE IF NOT EXISTS challenge_claims (
+        user_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        challenge_id TEXT NOT NULL,
+        tier TEXT NOT NULL,
+        bones INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, day, challenge_id)
+      );
     `);
   }
 

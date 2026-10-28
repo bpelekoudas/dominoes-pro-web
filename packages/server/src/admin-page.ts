@@ -137,6 +137,23 @@ export function adminDashboardHtml(): string {
         section("Safety", grid([
           ["Reports", s.reports], ["Blocks", s.blocks], ["Age gate stopped", s.ageBlocked], ["Accounts deleted", s.accountsDeleted],
         ])),
+        section("Daily", grid([
+          ["Logins today", data.daily.loginsToday],
+          ["Login Bones today", data.daily.loginBonesToday],
+          ["Login Bones, 7 days", data.daily.loginBonesWeek],
+          ["Easy done today", data.daily.challengesToday.easy],
+          ["Medium done today", data.daily.challengesToday.medium],
+          ["Hard done today", data.daily.challengesToday.hard],
+          ["Easy done, 7 days", data.daily.challengesWeek.easy],
+          ["Medium done, 7 days", data.daily.challengesWeek.medium],
+          ["Hard done, 7 days", data.daily.challengesWeek.hard],
+          ["Easy Bones today", data.daily.challengeBonesToday.easy],
+          ["Medium Bones today", data.daily.challengeBonesToday.medium],
+          ["Hard Bones today", data.daily.challengeBonesToday.hard],
+          ["Easy Bones, 7 days", data.daily.challengeBonesWeek.easy],
+          ["Medium Bones, 7 days", data.daily.challengeBonesWeek.medium],
+          ["Hard Bones, 7 days", data.daily.challengeBonesWeek.hard],
+        ]), grid(data.daily.streak.map((n, index) => ["Streak day " + (index + 1), n]))),
         section("Server", cap, grid([
           ["Up minutes", Math.round(h.uptimeSeconds / 60)], ["Memory MB", h.memoryMb],
           ["CPU % of one core", h.cpuPercent], ["Sockets", h.sockets],
@@ -151,13 +168,13 @@ export function adminDashboardHtml(): string {
       err.hidden = true;
       when.textContent = "Loading…";
       const response = await fetch("/api/admin/stats", { headers: { accept: "application/json" } });
-      if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) {
         err.hidden = false;
-        err.textContent = response.status === 401 ? "Sign in, then open this page again." : "Not found.";
+        err.textContent = (data && data.error) || (response.status === 401 ? "Sign in, then open this page again." : "The numbers could not be loaded.");
         when.textContent = "";
         return;
       }
-      const data = await response.json();
       when.textContent = "Updated " + new Date(data.generatedAt).toLocaleString() + ". Numbers refresh about once a minute.";
       draw(data);
     }
