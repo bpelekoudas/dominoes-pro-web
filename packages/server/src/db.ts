@@ -483,6 +483,11 @@ export class Store {
         created_at TEXT NOT NULL,
         message TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS daily_presence (
+        day TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        PRIMARY KEY (day, user_id)
+      );
     `);
   }
 
@@ -630,6 +635,10 @@ export class Store {
       .prepare(`SELECT COUNT(*) AS n FROM player_reports WHERE reporter_user_id = ? AND created_at > ?`)
       .get(userId, since) as { n: number };
     return row.n;
+  }
+
+  notePresence(userId: string, day: string): void {
+    this.db.prepare(`INSERT INTO daily_presence (day, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING`).run(day, userId);
   }
 
   bumpPulse(name: string, day: string): void {

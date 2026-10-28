@@ -22,6 +22,8 @@ import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
 import { cleanPulseNote, pulseName } from "./pulse.js";
 import { CoinShop, shopFromEnv, WEBHOOK_PATH } from "./stripe-shop.js";
+import { collectAdminStats, noteAgeBlocked, notePresence, noteServerError, userIsAdmin } from "./admin.js";
+import { adminDashboardHtml, adminSignInHtml } from "./admin-page.js";
 
 export interface AppOptions {
   store?: Store;
@@ -125,12 +127,35 @@ export async function createApp(options: AppOptions = {}) {
   app.get("/api/me", async (request, reply) => {
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to see this profile." });
+    notePresence(store, user.id);
     return { user };
+  });
+
+  app.get("/admin", async (request, reply) => {
+    reply.header("cache-control", "no-store").header("x-robots-tag", "noindex");
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).type("text/html; charset=utf-8").send(adminSignInHtml());
+    if (!userIsAdmin(store, user.id)) return reply.code(404).type("text/plain; charset=utf-8").send("Not found.");
+    return reply.type("text/html; charset=utf-8").send(adminDashboardHtml());
+  });
+
+  app.get("/api/admin/stats", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!user) return reply.code(401).send({ error: "Sign in to see this." });
+    if (!userIsAdmin(store, user.id)) return reply.code(404).send({ error: "Not found." });
+    const shape = shop.statusReport().secretKey;
+    return collectAdminStats({ store, hub, dataDir, dbFile, shopShape: shape });
   });
 
   app.get("/api/open-tables", async (request) => {
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     return { tables: hub.openTables(user?.id ?? null) };
+  });
+
+  app.addHook("onResponse", async (_request, reply) => {
+    if (reply.statusCode < 500) return;
+    noteServerError(store);
   });
 
   app.get("/api/leaderboard", async (request) => {
@@ -171,6 +196,7 @@ export async function createApp(options: AppOptions = {}) {
       reply,
       request,
       accounts.createGuest(body.displayName ?? "", current, cleanSoakRun(body.soakRun), body.age13 === true),
+      store,
     );
   });
 
@@ -181,9 +207,9 @@ export async function createApp(options: AppOptions = {}) {
     const body = request.body as { displayName?: string; avatarId?: string };
     if (typeof body.avatarId === "string") {
       const saved = accounts.setAvatar(user.id, body.avatarId);
-      if (saved.outcome !== "ok" || typeof body.displayName !== "string") return sendAuth(reply, request, saved);
+      if (saved.outcome !== "ok" || typeof body.displayName !== "string") return sendAuth(reply, request, saved, store);
     }
-    return sendAuth(reply, request, accounts.rename(user.id, body.displayName ?? ""));
+    return sendAuth(reply, request, accounts.rename(user.id, body.displayName ?? ""), store);
   });
 
   app.get("/api/store/status", async () => shop.statusReport());
@@ -222,7 +248,7 @@ export async function createApp(options: AppOptions = {}) {
     const body = request.body as { idToken?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
     const result = await accounts.signInGoogle(body.idToken ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
-    return sendAuth(reply, request, result);
+    return sendAuth(reply, request, result, store);
   });
 
   app.post("/api/auth/apple", async (request, reply) => {
@@ -230,7 +256,7 @@ export async function createApp(options: AppOptions = {}) {
     const body = request.body as { idToken?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
     const result = await accounts.signInApple(body.idToken ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
-    return sendAuth(reply, request, result);
+    return sendAuth(reply, request, result, store);
   });
 
   app.post("/api/auth/email", async (request, reply) => {
@@ -244,7 +270,10 @@ export async function createApp(options: AppOptions = {}) {
       origin: pageOrigin(request),
       age13: body.age13 === true,
     });
-    if (!result.ok) return reply.code(result.status).send({ error: result.error });
+    if (!result.ok) {
+      if (/13 or older/i.test(result.error)) noteAgeBlocked(store);
+      return reply.code(result.status).send({ error: result.error });
+    }
     return result.devLink ? { ok: true, devLink: result.devLink } : { ok: true };
   });
 
@@ -253,7 +282,7 @@ export async function createApp(options: AppOptions = {}) {
     const body = request.body as { token?: string; confirm?: boolean; age13?: boolean };
     const current = accounts.userFromCookieHeader(request.headers.cookie);
     const result = await accounts.consumeMagicLink(body.token ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
-    return sendAuth(reply, request, result);
+    return sendAuth(reply, request, result, store);
   });
 
   app.post("/api/account/delete", async (request, reply) => {
@@ -371,6 +400,7 @@ export async function createApp(options: AppOptions = {}) {
     }
     let session: { playerId: string; generation: number } | null = null;
     const accountUserId = accounts.userFromCookieHeader(request.headers.cookie)?.id ?? null;
+    if (accountUserId) notePresence(store, accountUserId);
     let sawPong = true;
     const beat = setInterval(() => {
       if (socket.readyState !== 1) return;
@@ -470,9 +500,12 @@ function requestPath(url: string): string {
   return (url.split("?")[0] ?? "/").replace(/\/+$/, "") || "/";
 }
 
-function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {
+function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult, store: Store) {
   if (result.outcome === "not-configured") return reply.code(503).send({ error: result.error });
-  if (result.outcome === "invalid") return reply.code(400).send({ error: result.error });
+  if (result.outcome === "invalid") {
+    if (/13 or older/i.test(result.error)) noteAgeBlocked(store);
+    return reply.code(400).send({ error: result.error });
+  }
   if (result.outcome === "limited") return reply.code(429).send({ error: result.error });
   if (result.outcome === "already-claimed") {
     return reply.code(409).send({ outcome: "already-claimed", current: result.current, existing: result.existing });

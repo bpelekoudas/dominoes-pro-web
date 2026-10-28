@@ -401,6 +401,38 @@ export class Hub {
     return opened;
   }
 
+  /** Seats and tables in memory. Soak and equip probes are left out. */
+  liveCensus(): {
+    openTables: number;
+    playingTables: number;
+    humanSeats: number;
+    botSeats: number;
+    humansOnline: number;
+    sockets: number;
+  } {
+    let openTables = 0;
+    let playingTables = 0;
+    let humanSeats = 0;
+    let botSeats = 0;
+    let humansOnline = 0;
+    let sockets = 0;
+    for (const room of this.rooms.values()) {
+      if (room.soak || room.probe) continue;
+      if (room.status !== "lobby" && room.status !== "playing") continue;
+      openTables += 1;
+      if (room.status === "playing") playingTables += 1;
+      for (const seat of room.seats) {
+        if (seat.send) sockets += 1;
+        if (seat.bot) botSeats += 1;
+        else {
+          humanSeats += 1;
+          if (seat.connected) humansOnline += 1;
+        }
+      }
+    }
+    return { openTables, playingTables, humanSeats, botSeats, humansOnline, sockets };
+  }
+
   /** Close every live socket. A deploy does this so seats reconnect on the new process. */
   closeConnections(): void {
     for (const room of this.rooms.values()) {

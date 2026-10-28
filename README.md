@@ -154,6 +154,10 @@ Start the service again. The previous live file is left at `/var/data/uhoh.sqlit
 
 The public rating board and the season board show people. Computer accounts stay in the game as opponents, and soak test accounts stay off the board. `LEADERBOARD_INCLUDE_BOTS=1` is only for a private check.
 
+## Admin
+
+`https://uhohdominoes.com/admin` is a private read-only page. It opens for a signed-in account whose email is on the allowlist. The list in the code is enough. Set `ADMIN_EMAILS` on Render only when that list should change, and set the full comma-separated list. A value there replaces the emails in the code. It does not add to them.
+
 ## Counts
 
 Visits, texted invites, play-again taps, and short crash notes are stored in the same game file. A count is a day, a name, and a number. A crash note is one line, with any email removed. No nickname is stored with them. There is no third-party tracker.
