@@ -289,6 +289,7 @@ export function App() {
           }}
           onJoin={(name, code) => void begin({ type: "join", name, code })}
           onQuick={(name, size) => void begin({ type: "quick", name, size })}
+          onQuickPlay={(name, seriesLength) => void begin({ type: "quick-play", name, seriesLength })}
           onGuest={(name) => void account.ensureGuest(name)}
           onAccount={() => account.openSheet("profile")}
           onBoard={() => account.showBoard("rating")}
@@ -673,6 +674,10 @@ export function Game({
           onFill={() => onSend({ type: "fill-quick" })}
           onFillBots={() => onSend({ type: "fill-bots" })}
           onKeep={() => onSend({ type: "keep-waiting" })}
+          autoStartAt={view.quick.autoStartAt ?? null}
+          seriesLength={view.settings.seriesLength}
+          youAreHost={view.yourId === view.hostId}
+          onSeries={(seriesLength) => onSend({ type: "set-series", seriesLength })}
         />
       ) : view.status === "lobby" ? (
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />

@@ -85,6 +85,7 @@ export function ArcadeHome({
   onSolo,
   onJoin,
   onQuick,
+  onQuickPlay,
   onGuest,
   onAccount,
   onBoard,
@@ -109,6 +110,7 @@ export function ArcadeHome({
   onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength, difficulty: Difficulty, casual?: boolean) => void;
   onJoin: (name: string, code: string) => void;
   onQuick: (name: string, size: QuickSize) => void;
+  onQuickPlay: (name: string, seriesLength: 3 | 5 | 7) => void;
   onGuest: (name: string) => void;
   onAccount: () => void;
   onBoard: () => void;
@@ -356,6 +358,15 @@ export function ArcadeHome({
       <div className="account-row">
         <button type="button" className="text-button" data-action="solo" disabled={connecting} onClick={press(() => setSheet("mode"))}>
           Choose seats
+        </button>
+        <button
+          type="button"
+          className="text-button"
+          data-action="quick-play"
+          disabled={connecting}
+          onClick={press(() => gate(() => onQuickPlay(readyName || user?.displayName || "Guest", 5)))}
+        >
+          Quick Play
         </button>
         <button type="button" className="text-button" disabled={connecting || !readyName} onClick={press(() => gate(() => onGuest(readyName)))}>
           Continue as guest
@@ -739,6 +750,10 @@ export function QuickWait({
   onFill,
   onFillBots,
   onKeep,
+  autoStartAt = null,
+  seriesLength = 3,
+  youAreHost = false,
+  onSeries,
 }: {
   players: Array<{
     id: string;
@@ -758,22 +773,46 @@ export function QuickWait({
   onFill: () => void;
   onFillBots?: () => void;
   onKeep: () => void;
+  autoStartAt?: number | null;
+  seriesLength?: 3 | 5 | 7;
+  youAreHost?: boolean;
+  onSeries?: (length: 3 | 5 | 7) => void;
 }) {
   const clock = useServerClock(serverNow);
   const left = Math.max(0, waitUntil - clock);
   const botLeft = botFillAt == null ? null : Math.max(0, botFillAt - clock);
+  const autoLeft = autoStartAt == null ? null : Math.max(0, autoStartAt - clock);
   const open = Math.max(0, playerCount - players.length);
-  const offer = canFill || left <= 0;
+  const offer = autoStartAt == null && (canFill || left <= 0);
+  const finding = autoStartAt != null;
   return (
     <section className="quick-wait" data-screen="quick-wait">
-      <p className="eyebrow">Quick match</p>
-      <h2>Finding a table</h2>
+      <p className="eyebrow">{finding ? "Quick Play" : "Quick match"}</p>
+      <h2>{finding ? "Finding players..." : "Finding a table"}</h2>
       <p className="hint">
-        Best of 3. Draw until you can play.
-        {botFillAt != null
-          ? " A bot sits down if the seat stays open, and the game still counts toward your rating."
-          : " All human, so this one counts toward your rating."}
+        {finding
+          ? `Best of ${seriesLength}. Computers sit down in ${Math.max(0, Math.round((autoLeft ?? 0) / 1000))}s if these seats stay open. A computer game stays off the rating. For the first two hands, someone can take a computer's seat between hands.`
+          : `Best of 3. Draw until you can play.${
+              botFillAt != null
+                ? " A bot sits down if the seat stays open, and the game still counts toward your rating."
+                : " All human, so this one counts toward your rating."
+            }`}
       </p>
+      {finding && youAreHost && onSeries ? (
+        <div className="choices">
+          {([3, 5, 7] as const).map((length) => (
+            <button
+              type="button"
+              key={length}
+              aria-pressed={seriesLength === length}
+              data-action={`series-${length}`}
+              onClick={press(() => onSeries(length))}
+            >
+              Best of {length}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <ul className="quick-seats">
         {players.map((player) => (
           <li key={player.id}>
@@ -819,7 +858,7 @@ export function QuickWait({
             Fill with computers
           </button>
         </div>
-      ) : botFillAt == null ? (
+      ) : !finding && botFillAt == null ? (
         <p className="hint">Asking again in {Math.ceil(left / 1000)}s if the table is still open.</p>
       ) : null}
       <button type="button" className="capsule capsule-back" data-action="cancel-quick" onClick={press(onCancel)}>
@@ -928,6 +967,7 @@ const demoHome = {
   onSolo: () => undefined,
   onJoin: () => undefined,
   onQuick: () => undefined,
+  onQuickPlay: () => undefined,
   onGuest: () => undefined,
   onAccount: () => undefined,
   onBoard: () => undefined,

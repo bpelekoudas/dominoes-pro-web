@@ -74,6 +74,8 @@ export type ClientMessage =
     }
   | { type: "set-casual"; casual: boolean }
   | { type: "quick"; name: string; size: number | "any" }
+  | { type: "quick-play"; name: string; seriesLength?: number }
+  | { type: "set-series"; seriesLength: number }
   | { type: "fill-quick" }
   | { type: "fill-bots" }
   | { type: "keep-waiting" }
@@ -141,6 +143,10 @@ interface LiveRoom {
   casual: boolean;
   /** Public quick-match table others can find while it is waiting. */
   listed: boolean;
+  /** Home Quick Play. Computers fill the open seats when the short wait ends. */
+  quickPlay: boolean;
+  /** When Quick Play seats computers and deals. Null once the table has started. */
+  quickPlayFillAt: number | null;
   /** Equip check. Not listed, and not something another player can join. */
   probe: boolean;
   createdAt: number;
@@ -201,6 +207,16 @@ export const QUICK_WAIT_MS = 60_000;
 
 /** How long a quick table waits before account bots take the open seats. */
 export const QUICK_BOT_FILL_MS = 15_000;
+
+/**
+ * Quick Play looks for a real table, then fills the open seats with computers.
+ * Eight seconds is long enough for someone already waiting, and short enough
+ * that a player is not left sitting on the finding screen.
+ */
+export const QUICK_PLAY_WAIT_MS = 8_000;
+
+/** A real player may take a computer's seat only during these opening hands. */
+export const QUICK_PLAY_JOIN_HANDS = 2;
 
 function defaultAccountPace(): number {
   return 1_000 + Math.floor(Math.random() * 2_001);
@@ -281,6 +297,7 @@ export class Hub {
   private readonly turnTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly continueTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly botFillTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly quickPlayTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private roster: () => AccountBotCard[] = () => [];
 
   constructor(
@@ -292,6 +309,7 @@ export class Hub {
     private readonly quickWaitMs = QUICK_WAIT_MS,
     private readonly quickBotFillMs = QUICK_BOT_FILL_MS,
     private readonly accountBotPace: () => number = defaultAccountPace,
+    private readonly quickPlayWaitMs = QUICK_PLAY_WAIT_MS,
   ) {
     this.restore();
     const sweep = setInterval(() => this.sweepBots(), BOT_SWEEP_MS);
@@ -373,6 +391,7 @@ export class Hub {
       this.clearTimer(this.turnTimers, room.id);
       this.clearTimer(this.continueTimers, room.id);
       this.clearTimer(this.botFillTimers, room.id);
+      this.clearTimer(this.quickPlayTimers, room.id);
       for (const seat of room.seats) this.byPlayer.delete(seat.id);
       this.rooms.delete(room.id);
       this.byCode.delete(room.code);
@@ -472,6 +491,7 @@ export class Hub {
     if (message.type === "reconnect") return this.reconnect(message.token, send, close, accountUserId);
     if (message.type === "solo") return this.solo(message, send, close, accountUserId);
     if (message.type === "quick") return this.quick(message, send, close, accountUserId);
+    if (message.type === "quick-play") return this.quickPlay(message, send, close, accountUserId);
     return { ok: false, error: "Join a table first." };
   }
 
@@ -492,6 +512,7 @@ export class Hub {
     else if (message.type === "fill-bots") this.fillAccountBots(room.id, seat);
     else if (message.type === "keep-waiting") this.keepWaiting(room, seat);
     else if (message.type === "cancel-quick") this.cancelQuick(room, seat);
+    else if (message.type === "set-series") this.setSeries(room, seat, message.seriesLength);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
   }
 
@@ -557,6 +578,7 @@ export class Hub {
     send: (message: ServerMessage) => void,
     close: () => void,
     accountUserId: string | null,
+    quickPlay = false,
   ): { ok: true; session: BoundSession } | { ok: false; error: string } {
     const named = acceptedName(message.name);
     if (!named.ok) return named;
@@ -587,6 +609,8 @@ export class Hub {
       },
       casual: soak ? true : listed ? false : message.casual === true,
       listed,
+      quickPlay,
+      quickPlayFillAt: null,
       probe: false,
       createdAt: Date.now(),
       quickWaitUntil: listed ? Date.now() + this.quickWaitMs : null,
@@ -647,7 +671,8 @@ export class Hub {
     });
     this.remember(room);
     this.releaseAccount(accountUserId, room.id);
-    this.armBotFill(room);
+    if (room.quickPlay) this.armQuickPlayFill(room);
+    else this.armBotFill(room);
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
     return { ok: true, session: { playerId: seat.id, generation } };
@@ -709,7 +734,15 @@ export class Hub {
     });
     const generation = this.bind(seat, send, close);
     this.welcome(room, seat);
-    if (room.listed) {
+    if (room.listed && room.quickPlay) {
+      if (room.seats.length >= room.settings.playerCount) {
+        this.clearTimer(this.quickPlayTimers, room.id);
+        room.quickPlayFillAt = null;
+        const host = room.seats.find((candidate) => candidate.id === room.hostId);
+        if (host) this.start(room, host);
+        return { ok: true, session: { playerId: seat.id, generation } };
+      }
+    } else if (room.listed) {
       room.quickWaitUntil = Date.now() + this.quickWaitMs;
       if (room.seats.length >= room.settings.playerCount) {
         const host = room.seats.find((candidate) => candidate.id === room.hostId);
@@ -764,7 +797,9 @@ export class Hub {
       return;
     }
     this.clearTimer(this.botFillTimers, room.id);
+    this.clearTimer(this.quickPlayTimers, room.id);
     room.botFillAt = null;
+    room.quickPlayFillAt = null;
     const match = createMatch(
       room.seats.map((player) => ({ id: player.id, name: player.name })),
       { ...room.settings, targetScore: 150 },
@@ -778,7 +813,8 @@ export class Hub {
       room.status = "lobby";
       room.match = null;
       this.store.updateRoom(room.id, { status: "lobby" });
-      this.armBotFill(room);
+      if (room.quickPlay) this.armQuickPlayFill(room);
+      else this.armBotFill(room);
       const message =
         fixture && error instanceof Error && error.message
           ? error.message
@@ -1319,6 +1355,7 @@ export class Hub {
     this.clearTimer(this.turnTimers, room.id);
     this.clearTimer(this.continueTimers, room.id);
     this.clearTimer(this.botFillTimers, room.id);
+    this.clearTimer(this.quickPlayTimers, room.id);
     for (const seat of room.seats) this.byPlayer.delete(seat.id);
     this.rooms.delete(room.id);
     this.byCode.delete(room.code);
@@ -1347,7 +1384,8 @@ export class Hub {
       room.hostId = human.id;
       this.store.updateRoom(room.id, { host_id: room.hostId });
     }
-    if (room.listed && room.status === "lobby") this.armBotFill(room);
+    if (room.quickPlay && room.status === "lobby") this.armQuickPlayFill(room, room.quickPlayFillAt ?? undefined);
+    else if (room.listed && room.status === "lobby") this.armBotFill(room);
     this.broadcast(room);
   }
 
@@ -1406,6 +1444,8 @@ export class Hub {
       soakRun: row.soak_run ?? null,
       handSeed: null,
       dailyNotes: {},
+      quickPlay: false,
+      quickPlayFillAt: null,
     };
     const worn = new Set<string>();
     for (const player of players) {
@@ -1651,6 +1691,153 @@ export class Hub {
     const timer = setTimeout(() => this.onTurnTimeout(room.id, seat.id), budget);
     timer.unref?.();
     this.turnTimers.set(room.id, timer);
+  }
+
+  private quickPlay(
+    message: Extract<ClientMessage, { type: "quick-play" }>,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+    accountUserId: string | null,
+  ): { ok: true; session: BoundSession } | { ok: false; error: string } {
+    const named = acceptedName(message.name);
+    if (!named.ok) return named;
+    if (this.accountIsSoak(accountUserId, named.name)) {
+      return { ok: false, error: "Soak accounts use a private table." };
+    }
+    const seriesLength = message.seriesLength === 3 || message.seriesLength === 7 ? message.seriesLength : 5;
+    const waiting = this.findQuickPlayLobby(accountUserId);
+    if (waiting) {
+      this.releaseAccount(accountUserId, waiting.id);
+      return this.join({ type: "join", name: named.name, code: waiting.code }, send, close, accountUserId);
+    }
+    const taken = this.takeBotSeat(named.name, send, close, accountUserId);
+    if (taken) return taken;
+    return this.create(
+      {
+        type: "create",
+        name: named.name,
+        playerCount: 4,
+        boneyardMode: "draw_until",
+        seriesLength,
+        listed: true,
+      },
+      send,
+      close,
+      accountUserId,
+      true,
+    );
+  }
+
+  /** Oldest public lobby with a real player and an open seat. First come, first served. */
+  private findQuickPlayLobby(viewerId: string | null): LiveRoom | null {
+    const open = [...this.rooms.values()].filter(
+      (room) =>
+        room.listed &&
+        this.openToHumans(room) &&
+        room.seats.length < room.settings.playerCount &&
+        room.seats.some((seat) => !seat.bot) &&
+        room.seats.every((seat) => !seat.bot) &&
+        !this.blockedTable(room, viewerId),
+    );
+    open.sort((a, b) => a.createdAt - b.createdAt);
+    return open[0] ?? null;
+  }
+
+  private takeBotSeat(
+    name: string,
+    send: (message: ServerMessage) => void,
+    close: () => void,
+    accountUserId: string | null,
+  ): { ok: true; session: BoundSession } | null {
+    const open = [...this.rooms.values()]
+      .filter((room) => this.botSeatOpen(room, accountUserId))
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const room = open[0];
+    if (!room || !this.botSeatOpen(room, accountUserId)) return null;
+    const seat = room.seats.find((candidate) => candidate.bot && !candidate.accountBot);
+    if (!seat || !room.betweenHands) return null;
+    this.releaseAccount(accountUserId, room.id);
+    seat.name = name;
+    seat.bot = false;
+    seat.accountBot = false;
+    seat.difficulty = null;
+    seat.userId = accountUserId;
+    seat.avatarId = this.portraitFor(accountUserId);
+    seat.missedTurn = false;
+    const named = room.match?.players.find((player) => player.id === seat.id);
+    if (named) named.name = name;
+    this.store.giveSeatToHuman(seat.id, { name, userId: accountUserId, avatarId: seat.avatarId });
+    if (!room.casual) {
+      room.casual = true;
+      this.store.updateRoom(room.id, { casual: true });
+    }
+    const generation = this.bind(seat, send, close);
+    this.welcome(room, seat);
+    this.broadcast(room);
+    return { ok: true, session: { playerId: seat.id, generation } };
+  }
+
+  /** A computer's seat on a public table, between hands, during the opening hands only. */
+  private botSeatOpen(room: LiveRoom, viewerId: string | null): boolean {
+    if (!room.listed || room.soak || room.id.startsWith("bot_")) return false;
+    if (room.status !== "playing" || !room.betweenHands || !room.match) return false;
+    if (room.match.gameNumber !== 1 || room.match.handNumber > QUICK_PLAY_JOIN_HANDS) return false;
+    if (this.blockedTable(room, viewerId)) return false;
+    return room.seats.some((seat) => seat.bot && !seat.accountBot);
+  }
+
+  private armQuickPlayFill(room: LiveRoom, deadline = Date.now() + Math.max(0, this.quickPlayWaitMs)): void {
+    this.clearTimer(this.quickPlayTimers, room.id);
+    if (!room.quickPlay || room.status !== "lobby") return;
+    if (room.seats.length >= room.settings.playerCount) return;
+    if (!room.seats.some((seat) => !seat.bot)) return;
+    room.quickPlayFillAt = deadline;
+    const wait = Math.max(0, deadline - Date.now());
+    if (wait === 0) {
+      this.fillQuickPlay(room.id);
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.quickPlayTimers.delete(room.id);
+      this.fillQuickPlay(room.id);
+    }, wait);
+    timer.unref?.();
+    this.quickPlayTimers.set(room.id, timer);
+  }
+
+  private fillQuickPlay(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room?.quickPlay || room.status !== "lobby") return;
+    if (!room.seats.some((seat) => !seat.bot)) {
+      this.dropRoom(room);
+      return;
+    }
+    this.clearTimer(this.quickPlayTimers, room.id);
+    room.quickPlayFillAt = null;
+    while (room.seats.length < room.settings.playerCount) this.pushBot(room, "medium");
+    room.casual = true;
+    this.store.updateRoom(room.id, { casual: true });
+    const host = room.seats.find((candidate) => candidate.id === room.hostId && !candidate.bot);
+    if (!host) return;
+    this.start(room, host);
+  }
+
+  private setSeries(room: LiveRoom, seat: LiveSeat, seriesLength: number): void {
+    if (!room.quickPlay || room.status !== "lobby") {
+      this.tell(seat, { type: "error", message: "The series is already set." });
+      return;
+    }
+    if (seat.id !== room.hostId) {
+      this.tell(seat, { type: "error", message: "Only the host can change the series." });
+      return;
+    }
+    if (seriesLength !== 3 && seriesLength !== 5 && seriesLength !== 7) {
+      this.tell(seat, { type: "error", message: "A series is best of 3, 5, or 7." });
+      return;
+    }
+    room.settings.seriesLength = seriesLength;
+    this.store.updateRoom(room.id, { series_length: seriesLength });
+    this.broadcast(room);
   }
 
   private quick(
@@ -2028,8 +2215,9 @@ export class Hub {
         room.listed && room.status === "lobby"
           ? {
               waitUntil: room.quickWaitUntil ?? 0,
-              canFill: Date.now() >= (room.quickWaitUntil ?? 0),
-              botFillAt: room.botFillAt,
+              canFill: !room.quickPlay && Date.now() >= (room.quickWaitUntil ?? 0),
+              botFillAt: room.quickPlay ? null : room.botFillAt,
+              autoStartAt: room.quickPlay ? room.quickPlayFillAt : null,
             }
           : null,
       youId,

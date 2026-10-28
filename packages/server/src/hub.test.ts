@@ -1719,3 +1719,119 @@ function boardIds(view: PlayerView | null): string[] {
   }
   return ids;
 }
+
+describe("quick play", () => {
+  it("waits eight seconds before computers sit down", () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30);
+    const messages: ServerMessage[] = [];
+    const seated = hub.connect({ type: "quick-play", name: "Ada" }, (message) => messages.push(message), () => undefined);
+    expect(seated.ok).toBe(true);
+    const view = latestView(messages);
+    const untilFill = (view?.quick?.autoStartAt ?? 0) - (view?.serverNow ?? 0);
+    expect(untilFill).toBeGreaterThan(7_000);
+    expect(untilFill).toBeLessThanOrEqual(8_000);
+    expect(view?.status).toBe("lobby");
+  });
+
+  function playHub(waitMs: number) {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0, 30_000, 60_000, 60_000, 15_000, () => 0, waitMs);
+    const connect = (name: string, seriesLength?: 3 | 5 | 7) => {
+      const messages: ServerMessage[] = [];
+      const result = hub.connect(
+        { type: "quick-play", name, ...(seriesLength ? { seriesLength } : {}) },
+        (outgoing) => messages.push(outgoing),
+        () => undefined,
+      );
+      if (!result.ok) throw new Error(result.error);
+      return { ...result.session, messages };
+    };
+    return { store, hub, connect };
+  }
+
+  it("matches the oldest open table, defaults to best of 5, and lets the host change the series", () => {
+    const { store, hub, connect } = playHub(60_000);
+    const ada = connect("Ada");
+    const waiting = latestView(ada.messages);
+    expect(waiting?.status).toBe("lobby");
+    expect(waiting?.settings.playerCount).toBe(4);
+    expect(waiting?.settings.seriesLength).toBe(5);
+    expect(waiting?.quick?.autoStartAt).toBeTypeOf("number");
+    const untilFill = (waiting?.quick?.autoStartAt ?? 0) - (waiting?.serverNow ?? 0);
+    expect(untilFill).toBeGreaterThan(59_000);
+    expect(untilFill).toBeLessThanOrEqual(60_000);
+    expect(waiting?.quick?.canFill).toBe(false);
+    expect(waiting?.settings.casual).toBe(false);
+
+    const older = connect("Bo");
+    expect(latestView(older.messages)?.roomCode).toBe(waiting?.roomCode);
+    expect(latestView(older.messages)?.players.filter((player) => !player.bot)).toHaveLength(2);
+
+    hub.command(ada.playerId, { type: "set-series", seriesLength: 7 });
+    expect(latestView(ada.messages)?.settings.seriesLength).toBe(7);
+    expect(store.roomByCode(waiting?.roomCode ?? "")?.series_length).toBe(7);
+    hub.command(older.playerId, { type: "set-series", seriesLength: 3 });
+    expect(older.messages.at(-1)?.type).toBe("error");
+
+    const full = [connect("Cy"), connect("Dee")];
+    const started = latestView(full[1]?.messages ?? []);
+    expect(started?.status).toBe("playing");
+    expect(started?.players.every((player) => !player.bot)).toBe(true);
+    expect(started?.settings.casual).toBe(false);
+    expect(store.roomByCode(waiting?.roomCode ?? "")?.casual).toBe(0);
+  });
+
+  it("fills the open seats with computers when nobody else arrives, and keeps that game off the rating", () => {
+    const { store, connect } = playHub(0);
+    const ada = connect("Ada", 3);
+    const view = latestView(ada.messages);
+    expect(view?.status).toBe("playing");
+    expect(view?.settings.seriesLength).toBe(3);
+    expect(view?.players.filter((player) => player.bot && !player.accountBot)).toHaveLength(3);
+    expect(view?.settings.casual).toBe(true);
+    const room = store.roomByCode(view?.roomCode ?? "");
+    expect(room?.casual).toBe(1);
+    const seated = store.players(room?.id ?? "");
+    expect(seated.filter((player) => player.bot === 1).every((player) => !player.user_id)).toBe(true);
+  });
+
+  it("cancels a search and will not take a computer's seat in the middle of a hand", () => {
+    const waiting = playHub(60_000);
+    const ada = waiting.connect("Ada");
+    waiting.hub.command(ada.playerId, { type: "cancel-quick" });
+    expect(waiting.hub.openTables()).toHaveLength(0);
+
+    const { connect } = playHub(0);
+    const playing = connect("Ada");
+    const live = latestView(playing.messages);
+    expect(live?.betweenHands).toBe(false);
+    const next = connect("Bo");
+    expect(latestView(next.messages)?.roomCode).not.toBe(live?.roomCode);
+    expect(latestView(playing.messages)?.players.filter((player) => player.bot)).toHaveLength(3);
+  });
+
+  it("lets a real player take a computer's seat between the first hands", async () => {
+    const { hub, connect } = playHub(0);
+    const ada = connect("Ada");
+    for (let step = 0; step < 800 && latestView(ada.messages)?.betweenHands !== true; step += 1) {
+      const view = latestView(ada.messages);
+      if (view?.turnPlayerId === ada.playerId) {
+        const play = view.legalPlays[0];
+        if (play) hub.command(ada.playerId, { type: "intent", intent: { type: "play", ...play } });
+        else if (view.canDraw) hub.command(ada.playerId, { type: "intent", intent: { type: "draw" } });
+        else if (view.canKnock) hub.command(ada.playerId, { type: "intent", intent: { type: "knock" } });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const summary = latestView(ada.messages);
+    expect(summary?.betweenHands).toBe(true);
+    expect(summary?.handNumber).toBeLessThanOrEqual(2);
+    const bo = connect("Bo");
+    const joined = latestView(bo.messages);
+    expect(joined?.roomCode).toBe(summary?.roomCode);
+    expect(joined?.betweenHands).toBe(true);
+    expect(joined?.players.filter((player) => player.bot)).toHaveLength(2);
+    expect(joined?.players.some((player) => player.name === "Bo")).toBe(true);
+  });
+});

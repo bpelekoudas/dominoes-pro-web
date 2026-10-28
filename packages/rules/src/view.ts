@@ -166,7 +166,13 @@ export interface PlayerView {
   } | null;
   recap: RankRecap | null;
   /** Set while a public quick table is still waiting for people. */
-  quick: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
+  quick: {
+    waitUntil: number;
+    canFill: boolean;
+    botFillAt?: number | null;
+    /** Quick Play deals with computers at this time if the seats are still open. */
+    autoStartAt?: number | null;
+  } | null;
   /**
    * One table skin for the whole match. Every client renders this.
    * It is the host's equipped table, or the first human's when the host is a bot.
@@ -212,7 +218,12 @@ export interface TableMeta {
     casual?: boolean;
   };
   recap?: RankRecap | null;
-  quick?: { waitUntil: number; canFill: boolean; botFillAt?: number | null } | null;
+  quick?: {
+    waitUntil: number;
+    canFill: boolean;
+    botFillAt?: number | null;
+    autoStartAt?: number | null;
+  } | null;
   /** Shared table skin. The hub picks the host, never a bot while a human is seated. */
   sharedTableId?: string | null;
   youId: string;

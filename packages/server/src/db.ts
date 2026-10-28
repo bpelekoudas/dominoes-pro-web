@@ -557,6 +557,7 @@ export class Store {
       rules_version?: number | null;
       casual?: boolean;
       listed?: boolean;
+      series_length?: number;
     },
   ): void {
     const current = this.room(id);
@@ -564,9 +565,10 @@ export class Store {
     const version = patch.rules_version === undefined ? current.rules_version : patch.rules_version;
     const casual = patch.casual === undefined ? (current.casual ? 1 : 0) : patch.casual ? 1 : 0;
     const listed = patch.listed === undefined ? (current.listed ? 1 : 0) : patch.listed ? 1 : 0;
+    const seriesLength = patch.series_length ?? current.series_length;
     this.db
       .prepare(
-        `UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ?, casual = ?, listed = ? WHERE id = ?`,
+        `UPDATE rooms SET host_id = ?, series_id = ?, status = ?, rules_version = ?, casual = ?, listed = ?, series_length = ? WHERE id = ?`,
       )
       .run(
         patch.host_id ?? current.host_id,
@@ -575,8 +577,16 @@ export class Store {
         version,
         casual,
         listed,
+        seriesLength,
         id,
       );
+  }
+
+  /** A person takes a computer's seat. The seat id stays so the hand scores stay put. */
+  giveSeatToHuman(id: string, input: { name: string; userId: string | null; avatarId: string }): void {
+    this.db
+      .prepare(`UPDATE players SET name = ?, bot = 0, difficulty = NULL, user_id = ?, avatar_id = ? WHERE id = ?`)
+      .run(input.name, input.userId, input.avatarId, id);
   }
 
   deleteRoom(id: string): void {
