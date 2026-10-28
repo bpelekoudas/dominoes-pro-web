@@ -398,6 +398,7 @@ export class Accounts {
   }): SignInResult {
     const byProvider = this.store.identity(input.provider, input.subject);
     if (byProvider) {
+      if (input.email && !byProvider.email) this.store.setIdentityEmail(byProvider.id, input.email);
       const gate = this.allowAge(byProvider.user_id, input.age13);
       if (gate) return gate;
       return this.useExisting(byProvider.user_id, input.currentUserId, input.confirm);

@@ -22,7 +22,15 @@ import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
 import { cleanPulseNote, pulseName } from "./pulse.js";
 import { CoinShop, shopFromEnv, WEBHOOK_PATH } from "./stripe-shop.js";
-import { collectAdminStats, noteAgeBlocked, notePresence, noteServerError, userIsAdmin } from "./admin.js";
+import {
+  accountEmails,
+  adminDeniedMessage,
+  collectAdminStats,
+  noteAgeBlocked,
+  notePresence,
+  noteServerError,
+  userIsAdmin,
+} from "./admin.js";
 import { adminDashboardHtml, adminSignInHtml } from "./admin-page.js";
 
 export interface AppOptions {
@@ -135,7 +143,9 @@ export async function createApp(options: AppOptions = {}) {
     reply.header("cache-control", "no-store").header("x-robots-tag", "noindex");
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).type("text/html; charset=utf-8").send(adminSignInHtml());
-    if (!userIsAdmin(store, user.id)) return reply.code(404).type("text/plain; charset=utf-8").send("Not found.");
+    if (!userIsAdmin(store, user.id)) {
+      return reply.code(403).type("text/plain; charset=utf-8").send(adminDeniedMessage(accountEmails(store, user.id)));
+    }
     return reply.type("text/html; charset=utf-8").send(adminDashboardHtml());
   });
 
@@ -143,7 +153,9 @@ export async function createApp(options: AppOptions = {}) {
     reply.header("cache-control", "no-store");
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to see this." });
-    if (!userIsAdmin(store, user.id)) return reply.code(404).send({ error: "Not found." });
+    if (!userIsAdmin(store, user.id)) {
+      return reply.code(403).send({ error: adminDeniedMessage(accountEmails(store, user.id)) });
+    }
     const shape = shop.statusReport().secretKey;
     return collectAdminStats({ store, hub, dataDir, dbFile, shopShape: shape });
   });

@@ -822,6 +822,10 @@ export class Store {
       .run(row.id, row.user_id, row.provider, row.provider_subject, row.email, row.created_at);
   }
 
+  setIdentityEmail(id: string, email: string): void {
+    this.db.prepare(`UPDATE identities SET email = ? WHERE id = ? AND email IS NULL`).run(email, id);
+  }
+
   identity(provider: string, subject: string): IdentityRow | null {
     return (
       (this.db

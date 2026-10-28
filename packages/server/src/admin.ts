@@ -18,25 +18,67 @@ const PLAN_DISK_BYTES = 1024 * 1024 * 1024;
 const BUSY_YELLOW = 15;
 const BUSY_RED = 25;
 
+/**
+ * Same mailbox for Gmail. Dots and +tags in the name do not make a new address,
+ * and googlemail.com is gmail.com. Other domains only get trim and lowercase.
+ */
+export function canonicalEmail(input: string | null | undefined): string | null {
+  if (typeof input !== "string") return null;
+  const email = input.trim().toLowerCase().replace(/^["']+|["']+$/g, "");
+  const at = email.lastIndexOf("@");
+  if (at <= 0 || at !== email.indexOf("@") || at === email.length - 1) return null;
+  let local = email.slice(0, at);
+  let domain = email.slice(at + 1);
+  if (!local || !domain || local.includes(" ") || domain.includes(" ")) return null;
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") {
+    const plus = local.indexOf("+");
+    if (plus >= 0) local = local.slice(0, plus);
+    local = local.replaceAll(".", "");
+  }
+  if (!local) return null;
+  return `${local}@${domain}`;
+}
+
 export function adminEmails(env: NodeJS.ProcessEnv = process.env): Set<string> {
   const raw = env.ADMIN_EMAILS;
-  const source = raw == null || raw.trim() === "" ? DEFAULT_ADMIN_EMAILS.join(",") : raw;
-  return new Set(
-    source
-      .split(",")
-      .map((part) => part.trim().toLowerCase())
-      .filter((part) => part.includes("@")),
-  );
+  const source = raw == null || raw.trim() === "" ? DEFAULT_ADMIN_EMAILS.join(",") : raw.trim().replace(/^["']+|["']+$/g, "");
+  const allow = new Set<string>();
+  for (const part of source.split(/[,;\n]+/)) {
+    const email = canonicalEmail(part);
+    if (email) allow.add(email);
+  }
+  return allow;
 }
 
 export function emailIsAdmin(email: string | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (!email) return false;
-  return adminEmails(env).has(email.trim().toLowerCase());
+  const canonical = canonicalEmail(email);
+  if (!canonical) return false;
+  return adminEmails(env).has(canonical);
+}
+
+export function accountEmails(store: Store, userId: string): string[] {
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const row of store.identitiesForUser(userId)) {
+    const email = row.email?.trim().toLowerCase();
+    if (!email || seen.has(email)) continue;
+    seen.add(email);
+    emails.push(email);
+  }
+  return emails;
 }
 
 export function userIsAdmin(store: Store, userId: string, env: NodeJS.ProcessEnv = process.env): boolean {
-  const allow = adminEmails(env);
-  return store.identitiesForUser(userId).some((row) => row.email != null && allow.has(row.email.trim().toLowerCase()));
+  return accountEmails(store, userId).some((email) => emailIsAdmin(email, env));
+}
+
+/** Shown only after a real session. Names the address on the account so a partner can see a mismatch. */
+export function adminDeniedMessage(emails: string[]): string {
+  if (emails.length === 0) {
+    return "You are signed in, but this account has no email saved. Sign in with Google or an email link, then open this page again.";
+  }
+  return `You are signed in as ${emails.join(", ")}, which is not on the approved list.`;
 }
 
 export type Capacity = "green" | "yellow" | "red";

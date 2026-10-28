@@ -26,6 +26,9 @@ describe("admin allowlist", () => {
     expect(emailIsAdmin("Gipsondre@gmail.com", {})).toBe(true);
     expect(emailIsAdmin("bpelekoudas@gmail.com", { ADMIN_EMAILS: "only@example.com" })).toBe(false);
     expect(emailIsAdmin("Only@example.com", { ADMIN_EMAILS: "only@example.com" })).toBe(true);
+    expect(emailIsAdmin("gip.sondre+game@gmail.com", {})).toBe(true);
+    expect(emailIsAdmin("kyle.edrington@googlemail.com", {})).toBe(true);
+    expect(emailIsAdmin("kyle.edrington@gmail.com", { ADMIN_EMAILS: '"kyleedrington@gmail.com"' })).toBe(true);
   });
 
   it("hides the numbers from everyone who is not on the list", async () => {
@@ -59,10 +62,12 @@ describe("admin allowlist", () => {
 
       clearAdminCache();
       const stranger = await app.inject({ method: "GET", url: "/api/admin/stats", headers: { cookie: pair } });
-      expect(stranger.statusCode).toBe(404);
+      expect(stranger.statusCode).toBe(403);
+      expect(stranger.json().error).toContain("no email saved");
       expect(JSON.stringify(stranger.json())).not.toContain("Secret Guest");
       const strangerPage = await app.inject({ method: "GET", url: "/admin", headers: { cookie: pair } });
-      expect(strangerPage.statusCode).toBe(404);
+      expect(strangerPage.statusCode).toBe(403);
+      expect(strangerPage.body).toContain("no email saved");
 
       store.insertIdentity({
         id: "id-admin",
@@ -89,6 +94,98 @@ describe("admin allowlist", () => {
       expect(dash.statusCode).toBe(200);
       expect(dash.body).toContain("Refresh");
       expect(dash.body).not.toContain("Bryan");
+    } finally {
+      if (previous === undefined) delete process.env.ADMIN_EMAILS;
+      else process.env.ADMIN_EMAILS = previous;
+      clearAdminCache();
+      await app.close();
+    }
+  });
+
+  it("accepts Google and email-link sign-in when Gmail dots or a plus tag differ", async () => {
+    const previous = process.env.ADMIN_EMAILS;
+    delete process.env.ADMIN_EMAILS;
+    let blankEmail: string | null = null;
+    const store = new Store(":memory:");
+    const accounts = new Accounts(store, {
+      secret: SECRET,
+      googleClientId: "google-client",
+      devMagicLink: true,
+      verifyGoogle: async (token) => {
+        if (token === "gip") return { sub: "gip-sub", email: "gip.sondre+game@gmail.com" };
+        if (token === "kyle") return { sub: "kyle-sub", email: "kyle.edrington@gmail.com" };
+        if (token === "blank") return { sub: "blank-sub", email: blankEmail };
+        return { sub: "other-sub", email: "other.person@gmail.com" };
+      },
+    });
+    const { app } = await createApp({ store, accounts, serveWeb: false });
+    try {
+      const gip = await app.inject({ method: "POST", url: "/api/auth/google", payload: { idToken: "gip", age13: true } });
+      expect(gip.statusCode).toBe(200);
+      const gipPage = await app.inject({
+        method: "GET",
+        url: "/admin",
+        headers: { cookie: cookiePair(gip.headers["set-cookie"]) },
+      });
+      expect(gipPage.statusCode).toBe(200);
+
+      const kyle = await app.inject({ method: "POST", url: "/api/auth/google", payload: { idToken: "kyle", age13: true } });
+      expect(kyle.statusCode).toBe(200);
+      const kyleStats = await app.inject({
+        method: "GET",
+        url: "/api/admin/stats",
+        headers: { cookie: cookiePair(kyle.headers["set-cookie"]) },
+      });
+      expect(kyleStats.statusCode).toBe(200);
+
+      const other = await app.inject({ method: "POST", url: "/api/auth/google", payload: { idToken: "other", age13: true } });
+      const denied = await app.inject({
+        method: "GET",
+        url: "/admin",
+        headers: { cookie: cookiePair(other.headers["set-cookie"]) },
+      });
+      expect(denied.statusCode).toBe(403);
+      expect(denied.body).toBe("You are signed in as other.person@gmail.com, which is not on the approved list.");
+
+      const blank = await app.inject({ method: "POST", url: "/api/auth/google", payload: { idToken: "blank", age13: true } });
+      const blankCookie = cookiePair(blank.headers["set-cookie"]);
+      const missing = await app.inject({ method: "GET", url: "/admin", headers: { cookie: blankCookie } });
+      expect(missing.statusCode).toBe(403);
+      expect(missing.body).toContain("no email saved");
+      blankEmail = "gipsondre@gmail.com";
+      const filled = await app.inject({
+        method: "POST",
+        url: "/api/auth/google",
+        headers: { cookie: blankCookie },
+        payload: { idToken: "blank", age13: true },
+      });
+      expect(filled.statusCode).toBe(200);
+      const filledPage = await app.inject({
+        method: "GET",
+        url: "/admin",
+        headers: { cookie: cookiePair(filled.headers["set-cookie"]) },
+      });
+      expect(filledPage.statusCode).toBe(200);
+
+      const asked = await app.inject({
+        method: "POST",
+        url: "/api/auth/email",
+        payload: { email: "Kyle.Edrington@gmail.com", age13: true },
+      });
+      expect(asked.statusCode).toBe(200);
+      const token = new URL(asked.json().devLink as string).searchParams.get("email-token");
+      const consumed = await app.inject({
+        method: "POST",
+        url: "/api/auth/email/consume",
+        payload: { token, age13: true },
+      });
+      expect(consumed.statusCode).toBe(200);
+      const mailPage = await app.inject({
+        method: "GET",
+        url: "/admin",
+        headers: { cookie: cookiePair(consumed.headers["set-cookie"]) },
+      });
+      expect(mailPage.statusCode).toBe(200);
     } finally {
       if (previous === undefined) delete process.env.ADMIN_EMAILS;
       else process.env.ADMIN_EMAILS = previous;
