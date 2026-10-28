@@ -84,7 +84,30 @@ function flush(): void {
   for (const cue of queued) startCue(cue);
 }
 
+let turnTap: HTMLAudioElement | null = null;
+
+/**
+ * The your-turn tap uses an audio element, so a phone's silent switch can mute it.
+ * The other cues stay on the Web Audio bus.
+ */
+function playTurnTap(): void {
+  if (isMuted() || typeof Audio === "undefined") return;
+  const el = turnTap ?? new Audio("/sounds/tap.wav");
+  turnTap = el;
+  el.volume = 0.28;
+  try {
+    el.currentTime = 0;
+  } catch {
+    // A fresh element has not loaded yet. play() still starts at the beginning.
+  }
+  void el.play().catch(() => undefined);
+}
+
 function startCue(cue: Cue): void {
+  if (cue.id === "tap") {
+    playTurnTap();
+    return;
+  }
   const ctx = audio();
   const buffer = decoded.get(cue.id);
   if (!ctx || !buffer) {
@@ -96,7 +119,7 @@ function startCue(cue: Cue): void {
   source.buffer = buffer;
   const spread = cue.vary === "light" ? [0.96, 1.08] : cue.vary === "heavy" ? [0.9, 1.0] : [1, 1];
   source.playbackRate.value = spread[0] + Math.random() * (spread[1] - spread[0]);
-  const base = cue.id === "buzz" ? 0.55 : cue.id === "ching" ? 0.8 : 0.95;
+  const base = cue.id === "ching" ? 0.8 : 0.95;
   const wobble = cue.vary === "none" ? 1 : 0.86 + Math.random() * 0.28;
   gain.gain.value = base * wobble;
   source.connect(gain);
@@ -180,4 +203,11 @@ function reducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
-if (typeof window !== "undefined") preloadSounds();
+if (typeof window !== "undefined") {
+  preloadSounds();
+  if (typeof Audio !== "undefined") {
+    turnTap = new Audio("/sounds/tap.wav");
+    turnTap.preload = "auto";
+    turnTap.volume = 0.28;
+  }
+}

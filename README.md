@@ -22,7 +22,7 @@ Each person has 30 seconds when it is their turn. A ring on their seat and a bar
 
 Talk is a grid of preset lines and a few emoji reactions, opened from the chat icon. There is no box to type in. The server only accepts a line from the list, and only about one every two seconds. Preset packs are set up so a character can bring their own lines later. That pack stays hidden until the player owns the character.
 
-Sound is a short click when a tile lands, a buzz when it becomes your turn, and a cha-ching when a play scores. Mute sits in the header and stays muted on that phone. The first tap unlocks sound, which is what iOS requires.
+Sound is a short click when a tile lands, a quiet wooden tap when it becomes your turn, and a cha-ching when a play scores. Mute sits in the header and stays muted on that phone. The first tap unlocks sound, which is what iOS requires.
 
 ## Rules worth knowing
 

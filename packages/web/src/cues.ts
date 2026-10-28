@@ -8,7 +8,7 @@ export const SOUND_FILES = {
   "clack-heavy": "clack-heavy.mp3",
   ching: "ching.mp3",
   glass: "glass.mp3",
-  buzz: "buzz.mp3",
+  tap: "tap.wav",
 } as const;
 
 export type SoundId = keyof typeof SOUND_FILES;
@@ -47,7 +47,7 @@ export function cuesForPlay(awarded: number, tileId: string): Cue[] {
   return cues;
 }
 
-/** The your-turn nudge. It is not the cha-ching. */
+/** A quiet wooden tap when the turn reaches you. Not a chime, and not the score. */
 export function cuesForTurn(): Cue[] {
-  return [{ id: "buzz", delay: 0, vary: "none" }];
+  return [{ id: "tap", delay: 0, vary: "none" }];
 }
