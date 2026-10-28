@@ -3,7 +3,7 @@ import { Portrait } from "./avatars";
 import { gameTallyText } from "./game-tally.js";
 
 /** Bump when a pose file's bytes change. */
-export const POSE_ART = "1";
+export const POSE_ART = "2";
 
 /**
  * Characters with a cut-out win pose and a lose pose.
@@ -50,7 +50,7 @@ function poseUrl(avatarId: string, role: "winner" | "loser"): string | null {
   return `/poses/${avatarId}-${pose}.webp?v=${POSE_ART}`;
 }
 
-/** Cut-out win pose, including 2 Hot 4 TV's Wildcats sign. Null keeps the portrait. */
+/** Cut-out win pose. Null keeps the portrait. */
 export function winPoseSrc(avatarId: string | null | undefined): string | null {
   if (!avatarId) return null;
   return poseUrl(avatarId, "winner");

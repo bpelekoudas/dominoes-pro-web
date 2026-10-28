@@ -145,7 +145,7 @@ describe("winner pop", () => {
   });
 
   it("keeps 2 Hot 4 TV's win pose and his exact lines", () => {
-    expect(winPoseSrc("2hot4tv")).toBe("/poses/2hot4tv-win.webp?v=1");
+    expect(winPoseSrc("2hot4tv")).toBe("/poses/2hot4tv-win.webp?v=2");
     expect(characterWinLine("2hot4tv", 0)).toBe("Uh-Oh, you KNOW!");
     expect(characterWinLine("2hot4tv", 1)).toBe("From Philly to Okinawa, I own all you!");
     expect(characterWinLine("homescreen", 0)).toBeNull();
