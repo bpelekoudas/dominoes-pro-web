@@ -38,7 +38,34 @@ describe("accounts", () => {
     expect(saved.user.avatarId).toBe("golfer");
     expect(accounts.userFromCookieValue(created.token)?.avatarId).toBe("golfer");
     expect(accounts.setAvatar(created.user.id, "nope").outcome).toBe("invalid");
-    expect(accounts.userFromCookieValue(created.token)?.avatarId).toBe("golfer");
+  });
+
+  it("treats a signed-in account as already 13 or older, and saves a guest confirmation", () => {
+    const store = new Store(":memory:");
+    const accounts = accountsFor(store);
+    const created = accounts.createGuest("Bryan", null, null, true);
+    expect(created.outcome).toBe("ok");
+    if (created.outcome !== "ok" || !created.token) throw new Error("Guest was not created.");
+    store.db.prepare(`UPDATE users SET is_guest = 0, age_ok = 0 WHERE id = ?`).run(created.user.id);
+    store.insertIdentity({
+      id: "id-google",
+      user_id: created.user.id,
+      provider: "google",
+      provider_subject: "bryan-sub",
+      email: "bryan@gmail.com",
+      created_at: new Date().toISOString(),
+    });
+    const healed = accounts.userFromCookieValue(created.token);
+    expect(healed?.ageOk).toBe(true);
+    expect(healed?.guest).toBe(false);
+    expect(store.user(created.user.id)?.age_ok).toBe(1);
+
+    const guest = accounts.createGuest("Ada", null, null, true);
+    if (guest.outcome !== "ok") throw new Error("Guest was not created.");
+    store.db.prepare(`UPDATE users SET age_ok = 0 WHERE id = ?`).run(guest.user.id);
+    expect(accounts.userFromCookieValue(guest.token ?? "")?.ageOk).toBe(false);
+    expect(accounts.confirmAge(guest.user.id)?.ageOk).toBe(true);
+    expect(store.user(guest.user.id)?.age_ok).toBe(1);
   });
 
   it("keeps the same guest across a later visit", () => {

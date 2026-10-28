@@ -1,3 +1,33 @@
+const AGE_KEY = "uhoh.age13";
+
+/** The age question belongs on the first visit only, and it stays gone once answered. */
+export function shouldAskAge(input: {
+  hasAccount: boolean;
+  ageOk: boolean;
+  checked: boolean;
+  remembered: boolean;
+}): boolean {
+  if (input.hasAccount || input.ageOk || input.checked || input.remembered) return false;
+  return true;
+}
+
+export function readRememberedAge(): boolean {
+  try {
+    return localStorage.getItem(AGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberAge(checked: boolean): void {
+  try {
+    if (checked) localStorage.setItem(AGE_KEY, "1");
+    else localStorage.removeItem(AGE_KEY);
+  } catch {
+    // A private browser still keeps the answer for this visit.
+  }
+}
+
 /** Real balances only. A missing wallet shows a dash, never a sample number. */
 export function formatBones(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";

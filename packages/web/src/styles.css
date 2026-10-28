@@ -3441,20 +3441,36 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 .ph-event-sub { display: block; margin-top: 4px; color: var(--gold); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
 .ph-arrow { width: 28px; font-size: 1.4rem; font-weight: 900; }
 .ph-soon { filter: grayscale(1) brightness(0.72); }
-.ph-soon-tag {
+.ph-banner .ph-soon-tag,
+.ph-event .ph-soon-tag {
   position: absolute;
   top: 6px;
   right: 8px;
+}
+.ph-soon-tag {
   border: 1px solid var(--gold);
   border-radius: 8px;
   color: var(--gold);
   background: rgba(0, 0, 0, 0.82);
   font-family: "Bebas Neue", Impact, sans-serif;
-  letter-spacing: 0.08em;
-  font-size: 0.72rem;
-  padding: 1px 6px;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  padding: 0 4px;
 }
-.ph-soon-tab { position: static; margin-top: 2px; font-size: 0.62rem; }
+.ph-side-btn .ph-soon-tag {
+  position: static;
+  max-width: 64px;
+  text-align: center;
+}
+.ph-soon-tab {
+  position: static;
+  display: block;
+  margin-top: 1px;
+  font-size: 0.55rem;
+  letter-spacing: 0.02em;
+  padding: 0 3px;
+}
 .ph-dots { display: flex; justify-content: center; gap: 7px; margin: 6px 0; }
 .ph-dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); }
 .ph-dots i.on { background: #fff; }
@@ -3506,11 +3522,11 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
   filter: drop-shadow(0 18px 18px rgba(0, 0, 0, 0.65));
 }
 .ph-actions { z-index: 2; display: grid; gap: 8px; padding-bottom: 8px; }
-.ph-play-wrap { position: relative; }
+.ph-play-wrap { position: relative; width: min(320px, 100%); margin: 0 auto; }
 .ph-play {
-  width: min(320px, 100%);
-  margin: 0 auto;
-  min-height: 64px;
+  width: 100%;
+  min-height: 72px;
+  padding: 8px 16px 22px;
   border-radius: 16px;
   display: flex;
   align-items: center;
@@ -3529,14 +3545,15 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 .ph-pips i { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
 .ph-series {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 6px;
-  min-height: 28px;
-  font-size: 0.68rem;
+  left: 8px;
+  right: 8px;
+  bottom: 5px;
+  min-height: 22px;
+  font-size: 0.62rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .ph-series-menu {
   position: absolute;
@@ -3609,7 +3626,6 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
   background: var(--gold);
   border-radius: 2px;
 }
-.ph-age { position: absolute; z-index: 4; left: 12px; right: 12px; bottom: 160px; background: rgba(12, 8, 8, 0.92); border-radius: 12px; padding: 8px 12px; }
 .ph-toast {
   position: absolute;
   left: 50%;

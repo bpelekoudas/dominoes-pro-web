@@ -140,6 +140,17 @@ export async function createApp(options: AppOptions = {}) {
     return { user };
   });
 
+  app.post("/api/account/age", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const current = accounts.userFromCookieHeader(request.headers.cookie);
+    if (!current) return reply.code(401).send({ error: "Sign in to save that." });
+    const body = request.body as { age13?: boolean };
+    if (body.age13 !== true) return reply.code(400).send({ error: "Confirm you are 13 or older." });
+    const user = accounts.confirmAge(current.id);
+    if (!user) return reply.code(400).send({ error: "That profile is gone." });
+    return { user };
+  });
+
   app.get("/api/daily", async (request, reply) => {
     const user = accounts.userFromCookieHeader(request.headers.cookie);
     if (!user) return reply.code(401).send({ error: "Sign in to see this." });

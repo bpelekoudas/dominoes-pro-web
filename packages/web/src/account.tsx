@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CATALOG } from "../../rules/src/catalog.js";
 import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
 import { AvatarFace, AvatarPicker } from "./avatars";
+import { readRememberedAge, rememberAge } from "./home-model";
 
 export interface AccountUser extends RankFacts {
   id: string;
@@ -79,12 +80,20 @@ export function useAccount(): AccountController {
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<"profile" | "board" | "look">("profile");
   const [board, setBoard] = useState<"rating" | "season">("rating");
-  const [ageChecked, setAgeCheckedState] = useState(false);
-  const ageRef = useRef(false);
+  const [ageChecked, setAgeCheckedState] = useState(readRememberedAge);
+  const ageRef = useRef(readRememberedAge());
   const pending = useRef<PendingSignIn | null>(null);
   const setAgeChecked = (checked: boolean) => {
     ageRef.current = checked;
     setAgeCheckedState(checked);
+    rememberAge(checked);
+    if (checked) {
+      void postJson("/api/account/age", { age13: true }).then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json().catch(() => ({}))) as { user?: AccountUser };
+        if (body.user) remember(body.user);
+      });
+    }
   };
   const ageOkNow = () => Boolean(user?.ageOk) || ageRef.current;
 

@@ -221,6 +221,13 @@ export class Accounts {
     return { outcome: "ok", user: this.present(userId)!, token: null };
   }
 
+  confirmAge(userId: string): PublicUser | null {
+    const user = this.store.user(userId);
+    if (!user) return null;
+    this.store.markAge(userId, this.stamp());
+    return this.present(userId);
+  }
+
   rename(userId: string, displayName: string): SignInResult {
     const name = cleanName(displayName);
     if (!name) return { outcome: "invalid", error: "Use a name, up to 16 letters." };
@@ -496,6 +503,12 @@ export class Accounts {
     const user = this.store.user(userId);
     if (!user) return null;
     const providers = this.store.identitiesForUser(userId).map((row) => row.provider as ProviderName);
+    // A Google, Apple, or email sign-in already passed the age question.
+    // Older accounts were saved before that answer was stored.
+    if (user.is_guest !== 1 && user.is_bot !== 1 && user.age_ok !== 1 && providers.some((provider) => provider !== "guest")) {
+      this.store.markAge(userId, this.stamp());
+      user.age_ok = 1;
+    }
     const standing = describePlayer(this.store, userId, this.now());
     if (!standing) return null;
     return {

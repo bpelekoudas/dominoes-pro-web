@@ -267,12 +267,6 @@ export function ArcadeHome({
           }
           onQuickPlay={(series) => gate(() => onQuickPlay(readyName || user.displayName || "Guest", series))}
         />
-        {needsAge ? (
-          <label className="age-gate ph-age">
-            <input type="checkbox" data-action="age-13" checked={ageChecked} onChange={(event) => onAge(event.target.checked)} />
-            I am 13 or older
-          </label>
-        ) : null}
         {error ? <p className="banner error">{error}</p> : notice ? <p className="banner">{notice}</p> : null}
         {connecting ? <p className="banner">Connecting…</p> : null}
         </>

@@ -13,6 +13,7 @@ import { Domino, Hand, Table } from "./table";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
+import { shouldAskAge } from "./home-model";
 import { hintText, markHint, playHint } from "./play-hints";
 import { scoreHintChoice, setScoreHintChoice, showScoreNumbers, type ScoreHintChoice } from "./score-hints";
 import { AvatarFace, BotBadge } from "./avatars";
@@ -297,7 +298,12 @@ export function App() {
           onRefresh={() => void account.refresh()}
           onPreview={scoreMathOn() ? () => setPreview(true) : null}
           introBusy={splash}
-          needsAge={!account.user?.ageOk}
+          needsAge={shouldAskAge({
+            hasAccount: Boolean(account.user),
+            ageOk: Boolean(account.user?.ageOk),
+            checked: account.ageChecked,
+            remembered: false,
+          })}
           ageChecked={account.ageChecked}
           onAge={account.setAgeChecked}
           onNeedAge={account.askAge}
