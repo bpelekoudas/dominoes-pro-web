@@ -1121,7 +1121,8 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     if (await splash.count()) await splash.click();
     await page.locator(".arcade-name input").fill("soak-ui");
     const age = page.locator("[data-action=age-13]");
-    if (await age.count()) await age.check();
+    // Ticking the box removes it. check() waits for it to stay checked.
+    if (await age.count()) await age.click();
     await page.locator("[data-action=solo]").click();
     await page.locator("[data-screen=mode] button", { hasText: /^4$/ }).click();
     await page.locator("[data-action=start-solo]").click();
