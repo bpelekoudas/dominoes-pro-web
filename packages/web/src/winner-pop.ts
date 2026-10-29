@@ -1,3 +1,4 @@
+import { motionMs } from "../../rules/src/motion.js";
 import { easeInOut, type Point } from "./win-plan.js";
 
 /**
@@ -5,14 +6,14 @@ import { easeInOut, type Point } from "./win-plan.js";
  * These lengths sit inside the pip tally the table already waits on.
  * They are not extra steps, so the continue clock and the next deal do not move.
  */
-export const HAND_POP_IN_MS = 160;
-export const HAND_POP_HOLD_MS = 420;
-export const HAND_POP_OUT_MS = 280;
+export const HAND_POP_IN_MS = motionMs(160);
+export const HAND_POP_HOLD_MS = motionMs(420);
+export const HAND_POP_OUT_MS = motionMs(280);
 export const HAND_POP_MS = HAND_POP_IN_MS + HAND_POP_HOLD_MS + HAND_POP_OUT_MS;
 
-export const GAME_POP_IN_MS = 180;
-export const GAME_POP_HOLD_MS = 520;
-export const GAME_POP_OUT_MS = 300;
+export const GAME_POP_IN_MS = motionMs(180);
+export const GAME_POP_HOLD_MS = motionMs(520);
+export const GAME_POP_OUT_MS = motionMs(300);
 export const GAME_POP_MS = GAME_POP_IN_MS + GAME_POP_HOLD_MS + GAME_POP_OUT_MS;
 
 /** Reduced motion fades in place. It does not travel. */

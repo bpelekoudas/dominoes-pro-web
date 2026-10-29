@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { MOTION, motionMs } from "../../rules/src/motion.js";
 import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { scorePopupText } from "./feel/score-delta.js";
@@ -109,20 +110,20 @@ export function MomentLayer({
       window.setTimeout(() => {
         setPhase("shatter");
         onPhaseRef.current?.("shatter");
-      }, reduced ? 0 : SLAM_MS),
+      }, reduced ? 0 : motionMs(SLAM_MS)),
       window.setTimeout(() => {
         setPhase("title");
         onPhaseRef.current?.("title");
-      }, reduced ? 0 : 640),
+      }, reduced ? 0 : motionMs(640)),
       window.setTimeout(() => {
         setShake(shake);
         onShakeRef.current(shake);
         if (shake) buzz(shake !== "small");
-      }, reduced ? 0 : 200),
+      }, reduced ? 0 : motionMs(200)),
       window.setTimeout(() => {
         setShake(null);
         onShakeRef.current(null);
-      }, reduced ? 0 : 200 + SHAKE_MS),
+      }, reduced ? 0 : motionMs(200) + motionMs(SHAKE_MS)),
       window.setTimeout(() => onDoneRef.current(), reduced ? REDUCED_MS : TOTAL_MS),
     ];
     return () => {
@@ -156,11 +157,12 @@ export function MomentLayer({
     const root = document.documentElement;
     const draw = (now: number) => {
       const t = now - started;
+      const visual = t / MOTION;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
-      if (glass) drawGlass(ctx, glass, t);
-      else if (themed) drawFx(ctx, themed, t);
-      const glassPhase = t < SLAM_MS ? "impact" : t < BREAK_MS ? "cracks" : t < 500 ? "loose" : t < 640 ? "mid" : "fly";
+      if (glass) drawGlass(ctx, glass, visual);
+      else if (themed) drawFx(ctx, themed, visual);
+      const glassPhase = visual < SLAM_MS ? "impact" : visual < BREAK_MS ? "cracks" : visual < 500 ? "loose" : visual < 640 ? "mid" : "fly";
       if (root.dataset.uhohGlass !== glassPhase) root.dataset.uhohGlass = glassPhase;
       if (t < TOTAL_MS) frame = requestAnimationFrame(draw);
     };

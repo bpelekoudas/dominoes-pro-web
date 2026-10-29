@@ -5,11 +5,13 @@ import { pulse } from "./pulse";
 import { seatAround, type SeatEdge } from "./seats.js";
 import { sliverGap } from "./edge-slivers.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
+import { motionMs } from "../../rules/src/motion.js";
 import { demoAward, demoRequested, FxGallery, fxGalleryRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { primeMusic } from "./music";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
+import { ControlToken, DrawFlight } from "./control-token";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
 import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMotion } from "./arcade";
@@ -556,7 +558,7 @@ export function Game({
     if (!play || bigMomentLevel(play.awarded)) return;
     const opponent = play.playerId !== view.yourId;
     const cues = cuesForPlay(play.awarded, play.tileId).map((cue) =>
-      opponent && (cue.id === "clack" || cue.id === "clack-heavy") ? { ...cue, delay: cue.delay + 0.42 } : cue,
+      opponent && (cue.id === "clack" || cue.id === "clack-heavy") ? { ...cue, delay: cue.delay + motionMs(420) / 1000 } : cue,
     );
     playCues(cues);
   }, [view.lastPlay?.seq]);
@@ -702,6 +704,8 @@ export function Game({
                 tableArt={tableArt}
                 showScores={scoreNumbers}
               />
+              <ControlToken playerId={view.turnPlayerId} />
+              <DrawFlight draw={view.lastDraw} handKey={`${view.gameNumber}:${view.handNumber}`} />
               {opponents.map((seat) => (
                 <EdgeSeat
                   key={seat.player.id}

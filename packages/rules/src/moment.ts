@@ -1,3 +1,5 @@
+import { motionMs } from "./motion.js";
+
 /**
  * A single board score at or above this is the UH-OH moment.
  * 10 and 15 stay the small gold popup. 5 never scores.
@@ -9,7 +11,7 @@ export const BIG_MOMENT_SCORE = 20;
  * added so the animation does not eat their 30 seconds.
  * Long enough for the glass to clear and the words to be read.
  */
-export const BIG_MOMENT_MS = 2400;
+export const BIG_MOMENT_MS = motionMs(2400);
 
 export type BigMomentLevel = "small" | "medium" | "big";
 

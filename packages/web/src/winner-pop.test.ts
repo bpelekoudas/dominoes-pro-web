@@ -7,6 +7,7 @@ import {
   celebrationTimeline,
   planWinPips,
 } from "./win-plan.js";
+import { motionMs } from "../../rules/src/motion.js";
 import {
   GAME_POP_MS,
   HAND_POP_IN_MS,
@@ -27,10 +28,20 @@ function box(left: number, top: number, width: number, height: number): Box {
 
 describe("winner pop", () => {
   it("fits a hand and a game inside the tally the table already waits on", () => {
-    expect(popTiming("hand")).toEqual({ inMs: 160, holdMs: 420, outMs: 280, total: 860 });
-    expect(popTiming("game")).toEqual({ inMs: 180, holdMs: 520, outMs: 300, total: 1000 });
-    expect(HAND_POP_MS).toBe(860);
-    expect(GAME_POP_MS).toBe(1000);
+    expect(popTiming("hand")).toEqual({
+      inMs: motionMs(160),
+      holdMs: motionMs(420),
+      outMs: motionMs(280),
+      total: motionMs(160) + motionMs(420) + motionMs(280),
+    });
+    expect(popTiming("game")).toEqual({
+      inMs: motionMs(180),
+      holdMs: motionMs(520),
+      outMs: motionMs(300),
+      total: motionMs(180) + motionMs(520) + motionMs(300),
+    });
+    expect(HAND_POP_MS).toBe(motionMs(160) + motionMs(420) + motionMs(280));
+    expect(GAME_POP_MS).toBe(motionMs(180) + motionMs(520) + motionMs(300));
     expect(HAND_POP_MS).toBeLessThan(ZERO_HOLD_MS);
     expect(GAME_POP_MS).toBeLessThan(ZERO_HOLD_MS);
     expect(GAME_POP_MS).toBeGreaterThan(HAND_POP_MS);

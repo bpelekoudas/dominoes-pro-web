@@ -24,6 +24,9 @@ import {
   RULES_VERSION,
   canRestoreRules,
   turnHoldMs,
+  BIG_MOMENT_MS,
+  bigMomentLevel,
+  motionMs,
   avatarForSeed,
   pickDistinctAvatar,
   resolveAvatar,
@@ -241,6 +244,25 @@ function defaultBotPace(): number {
   return BOT_TURN_MS;
 }
 
+/**
+ * How long the last move is still on screen. A computer's next play waits
+ * this out when it is longer than the think, so two tiles do not travel at once.
+ * A think of zero (tests, instant pace) does not pick this up.
+ */
+export function tableBusyMs(match: MatchState | null): number {
+  const last = match?.log.at(-1);
+  if (!match || !last) return 0;
+  if (last.kind === "play") {
+    const awarded = match.lastPlay?.awarded ?? 0;
+    if (bigMomentLevel(awarded)) return BIG_MOMENT_MS;
+    if (awarded >= 10) return motionMs(1100);
+    return motionMs(420);
+  }
+  if (last.kind === "draw") return motionMs(420);
+  if (last.kind === "knock") return motionMs(280);
+  return 0;
+}
+
 function asDifficulty(value: unknown): BotDifficulty {
   if (value === "easy" || value === "medium" || value === "hard" || value === "expert") return value;
   if (value === "normal") return "medium";
@@ -320,7 +342,7 @@ export class Hub {
     private readonly lobbyGraceMs = 20_000,
     private readonly botPace: () => number = defaultBotPace,
     private readonly turnLimitMs = 30_000,
-    private readonly continueMs = 9_000,
+    private readonly continueMs = motionMs(9_000),
     private readonly quickWaitMs = QUICK_WAIT_MS,
     private readonly quickBotFillMs = QUICK_BOT_FILL_MS,
     private readonly accountBotPace: () => number = defaultAccountPace,
@@ -1288,7 +1310,9 @@ export class Hub {
   private botWaitMs(room: LiveRoom, seat: LiveSeat, turnId: string): number {
     const paced = seat.accountBot ? Math.max(0, this.accountBotPace()) : Math.max(0, this.botPace());
     const choices = room.match ? legalIntents(room.match, turnId).length : 1;
-    return !seat.accountBot && paced === BOT_TURN_MS ? botThinkMs(Math.max(1, choices)) : paced;
+    const think = !seat.accountBot && paced === BOT_TURN_MS ? botThinkMs(Math.max(1, choices)) : paced;
+    if (think <= 0) return 0;
+    return Math.max(think, tableBusyMs(room.match));
   }
 
   private armBotTimer(room: LiveRoom, seat: LiveSeat, wait: number): void {

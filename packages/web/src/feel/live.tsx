@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { motionMs } from "../../../rules/src/motion.js";
 import type { PlayerView } from "@uhoh/rules";
 import { detectContext, type ContextEvent, type FeelSnap } from "./context.js";
 import { direct } from "./director.js";
@@ -93,18 +94,18 @@ export function useLiveFeel(view: PlayerView): LiveFeel {
       window.setTimeout(() => {
         nodes.forEach((node) => node.removeAttribute("data-feel"));
         hand?.removeAttribute("data-feel");
-      }, 640);
+      }, motionMs(640));
       return;
     }
     if (awarded >= 10) {
       setScoring(true);
-      window.setTimeout(() => setScoring(false), 520);
+      window.setTimeout(() => setScoring(false), motionMs(520));
       // The recorded cha-ching is the reward, timed to the chip. The rare
       // score's glass already has that ching, so it is not played twice.
       pulse(reaction.haptic);
       const seat = document.querySelector<HTMLElement>(`.seat-chip[data-player-id="${CSS.escape(play?.playerId ?? "")}"]`);
       seat?.setAttribute("data-feel", "score");
-      window.setTimeout(() => seat?.removeAttribute("data-feel"), 420);
+      window.setTimeout(() => seat?.removeAttribute("data-feel"), motionMs(420));
     }
   }, [key]);
 

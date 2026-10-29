@@ -6,6 +6,7 @@ import { Portrait, AvatarFace } from "./avatars";
 import { MatchLineup } from "./lineup";
 import { GamePips } from "./game-pips";
 import { gameTallyText } from "./game-tally.js";
+import { motionMs } from "../../rules/src/motion.js";
 import { prefersReducedMotion } from "./moment";
 import { seatAround } from "./seats";
 import { playWinSting } from "./sound";
@@ -272,7 +273,7 @@ export function useHandCelebration(
         playFeel(lock ? "lock" : "domino", reducedNow ? 0 : 150);
         feelPulse(lock ? [18, 40, 18, 50, 24] : [28, 36, 40]);
         // The word confirms the moment. The board reaction starts while it is still up.
-        const boardAt = reducedNow ? 0 : Math.min(460, spokenMs);
+        const boardAt = reducedNow ? 0 : Math.min(motionMs(460), spokenMs);
         timers.current.push(window.setTimeout(startPips, boardAt));
         return;
       }

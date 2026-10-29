@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MOTION } from "../../../rules/src/motion.js";
 import { handTally } from "./tally.js";
 import { playFeel } from "./synth.js";
 
@@ -69,7 +70,7 @@ function TileBurst({ active, reduced }: { active: boolean; reduced: boolean }) {
     let frame = 0;
     const started = performance.now();
     const draw = (now: number) => {
-      const t = (now - started) / 1000;
+      const t = (now - started) / 1000 / MOTION;
       const origin = read();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);

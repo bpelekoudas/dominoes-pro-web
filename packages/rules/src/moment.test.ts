@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BIG_MOMENT_MS, BIG_MOMENT_SCORE, bigMomentLevel, turnHoldMs } from "./moment.js";
+import { motionMs } from "./motion.js";
 
 describe("UH-OH moment", () => {
   it("fires for 20, 25, and 30 or more, and stays quiet for 5 through 15", () => {
@@ -18,7 +19,8 @@ describe("UH-OH moment", () => {
     expect(turnHoldMs(30)).toBe(BIG_MOMENT_MS);
     expect(turnHoldMs(35)).toBe(BIG_MOMENT_MS);
     expect(BIG_MOMENT_SCORE).toBe(20);
-    expect(BIG_MOMENT_MS).toBeGreaterThanOrEqual(1500);
-    expect(BIG_MOMENT_MS).toBeLessThanOrEqual(2500);
+    expect(BIG_MOMENT_MS).toBe(motionMs(2400));
+    expect(BIG_MOMENT_MS).toBeGreaterThanOrEqual(motionMs(1500));
+    expect(BIG_MOMENT_MS).toBeLessThanOrEqual(motionMs(2500));
   });
 });

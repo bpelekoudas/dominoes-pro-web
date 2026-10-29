@@ -1,5 +1,6 @@
 import { SLAM_MS } from "./glass.js";
 import { bigMomentLevel } from "../../rules/src/moment.js";
+import { motionMs } from "../../rules/src/motion.js";
 import { scorePopWindow } from "./feel/score-time.js";
 
 /** Recorded samples in public/sounds. See SOUNDS.md. */
@@ -21,7 +22,7 @@ export interface Cue {
   vary: "light" | "heavy" | "none";
 }
 
-const IMPACT_S = SLAM_MS / 1000;
+const IMPACT_S = motionMs(SLAM_MS) / 1000;
 
 function isDouble(tileId: string): boolean {
   const [low, high] = tileId.split("-");

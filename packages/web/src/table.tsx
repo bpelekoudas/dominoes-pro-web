@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
+import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   chainBounds,
@@ -575,7 +576,7 @@ function Arrival({
       timer = window.setTimeout(() => {
         tile?.classList.remove("is-arriving");
         if (!cancelled) setBox(null);
-      }, 420);
+      }, motionMs(420));
       frame = window.requestAnimationFrame(() => {
         frame = window.requestAnimationFrame(() => {
           if (cancelled || !tile) return;
@@ -827,7 +828,7 @@ function useScorePop(lastPlay: PlayerView["lastPlay"]): { seq: number; awarded: 
   if (pop && `${pop.seq}:${pop.awarded}` !== liveKey) setPop(null);
   useEffect(() => {
     if (!liveKey || label == null) return;
-    // A routine award still appears at 460ms and leaves at 1100ms.
+    // A routine award appears and leaves on the shared motion pace.
     // The flight into the chip happens inside that window.
     const timing = scorePopWindow(label);
     const token = liveKey;

@@ -1,20 +1,21 @@
 import { BIG_MOMENT_MS, bigMomentLevel } from "../../rules/src/moment.js";
+import { motionMs } from "../../rules/src/motion.js";
 
 /** Face-up reveal when the hand pays nothing. */
-export const ZERO_HOLD_MS = 2000;
+export const ZERO_HOLD_MS = motionMs(2000);
 /** Reveal plus the pip flight, before the score pulse finishes. */
-export const HAND_HOLD_MS = 2400;
-export const GAME_BANNER_MS = 2400;
-export const MATCH_BANNER_MS = 2500;
+export const HAND_HOLD_MS = motionMs(2400);
+export const GAME_BANNER_MS = motionMs(2400);
+export const MATCH_BANNER_MS = motionMs(2500);
 /** Domino, then HAND WON, before the pip tally. Shorter when the UH-OH slam already played. */
-export const HAND_CALL_MS = 1500;
-export const HAND_CALL_AFTER_UHOH_MS = 420;
-export const LOCK_CALL_MS = 880;
-export const PIP_START_MS = 420;
-export const PIP_FLIGHT_MS = 680;
+export const HAND_CALL_MS = motionMs(1500);
+export const HAND_CALL_AFTER_UHOH_MS = motionMs(420);
+export const LOCK_CALL_MS = motionMs(880);
+export const PIP_START_MS = motionMs(420);
+export const PIP_FLIGHT_MS = motionMs(680);
 /** The last pip has landed by this time, then the score pulses. */
-export const PIP_LAND_BY_MS = 2200;
-export const PULSE_MS = 350;
+export const PIP_LAND_BY_MS = motionMs(2200);
+export const PULSE_MS = motionMs(350);
 export const MAX_PIPS = 12;
 export const PIP_BEND = 36;
 /** Same shortened UH-OH read as the big-moment title. */
@@ -236,15 +237,15 @@ export function bannerMotion(
     kind === "match"
       ? [
           [0, 0.04],
-          [520, 1.28],
-          [780, 0.94],
-          [980, 1],
+          [motionMs(520), 1.28],
+          [motionMs(780), 0.94],
+          [motionMs(980), 1],
         ]
       : [
           [0, 0.18],
-          [360, 1.14],
-          [520, 0.97],
-          [640, 1],
+          [motionMs(360), 1.14],
+          [motionMs(520), 0.97],
+          [motionMs(640), 1],
         ];
   let scale = keys[0]![1];
   if (elapsed <= keys[0]![0]) scale = keys[0]![1];
@@ -282,8 +283,8 @@ export function confettiAt(kind: "game" | "match", elapsed: number, reduced: boo
   for (let index = 0; index < count; index += 1) {
     const angle = (index / count) * Math.PI * 2 + (index % 5) * 0.08;
     const dist = (kind === "match" ? 220 : 120) + (index % 7) * (kind === "match" ? 26 : 16);
-    const delay = (index % 8) * 28;
-    const life = kind === "match" ? 1200 : 900;
+    const delay = (index % 8) * motionMs(28);
+    const life = kind === "match" ? motionMs(1200) : motionMs(900);
     const local = elapsed - delay;
     if (local <= 0) continue;
     const progress = Math.min(1, local / life);
@@ -305,8 +306,8 @@ export function confettiAt(kind: "game" | "match", elapsed: number, reduced: boo
 
 export function matchImpact(elapsed: number, reduced: boolean): { flash: number; shock: number; shockOpacity: number } {
   if (reduced) return { flash: 0, shock: 1, shockOpacity: 0 };
-  const flash = elapsed < 70 ? elapsed / 70 : elapsed < 300 ? 1 - (elapsed - 70) / 230 : 0;
-  const grow = Math.max(0, Math.min(1, elapsed / 760));
+  const flash = elapsed < motionMs(70) ? elapsed / motionMs(70) : elapsed < motionMs(300) ? 1 - (elapsed - motionMs(70)) / motionMs(230) : 0;
+  const grow = Math.max(0, Math.min(1, elapsed / motionMs(760)));
   return {
     flash: Math.max(0, flash) * 0.72,
     shock: 0.12 + grow * 1.7,

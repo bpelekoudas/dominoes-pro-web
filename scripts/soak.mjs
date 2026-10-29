@@ -1401,6 +1401,25 @@ function auditTable() {
       ...evidence,
     };
   }
+  const token = document.querySelector("[data-control='token']");
+  const turnChip = document.querySelector(".seat-chip.turn");
+  if (turnChip && !token) {
+    return { ok: false, reason: "The control marker is missing.", ...evidence };
+  }
+  if (token) {
+    const tokenBox = token.getBoundingClientRect();
+    const covered = tiles.find((tile) => overlaps(tokenBox, tile.getBoundingClientRect()));
+    const talkHit = [...document.querySelectorAll(".talk-line")].find((line) => overlaps(tokenBox, line.getBoundingClientRect()));
+    if (covered || talkHit) {
+      return {
+        ok: false,
+        reason: "The control marker covers a tile.",
+        token: plain(tokenBox),
+        tile: covered ? covered.getAttribute("data-board-tile") : null,
+        ...evidence,
+      };
+    }
+  }
   return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain` };
 }
 

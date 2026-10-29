@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { BIG_MOMENT_MS } from "../../rules/src/moment.js";
+import { motionMs } from "../../rules/src/motion.js";
 import { scoreDomino, scoreLocked } from "../../rules/src/score.js";
 import {
   GAME_BANNER_MS,
+  HAND_CALL_AFTER_UHOH_MS,
   MATCH_BANNER_MS,
   PIP_BEND,
   PIP_FLIGHT_MS,
   PIP_LAND_BY_MS,
+  PIP_START_MS,
   ZERO_HOLD_MS,
   bannerMotion,
   celebrationTimeline,
@@ -33,10 +37,10 @@ describe("hand win pips", () => {
     expect(plan.pips.every((pip) => pip.sourcePlayerId === "loser")).toBe(true);
     expect(plan.pips.some((pip) => pip.sourceTileId === "6-6")).toBe(true);
     expect(plan.jump).toBe(false);
-    expect(plan.holdMs).toBeGreaterThanOrEqual(2400);
-    expect(plan.holdMs).toBeLessThanOrEqual(3000);
+    expect(plan.holdMs).toBeGreaterThanOrEqual(motionMs(2400));
+    expect(plan.holdMs).toBeLessThanOrEqual(motionMs(3000));
     expect(lastLandMs(plan)).toBeLessThanOrEqual(PIP_LAND_BY_MS);
-    expect(plan.pips[0]?.startMs).toBeGreaterThanOrEqual(420);
+    expect(plan.pips[0]?.startMs).toBeGreaterThanOrEqual(PIP_START_MS);
     expect(plan.pips.every((pip) => pip.flightMs === PIP_FLIGHT_MS)).toBe(true);
   });
 
@@ -115,12 +119,12 @@ describe("win banners", () => {
   });
 
   it("overshoots, then settles, and a match is larger", () => {
-    const game = bannerMotion("game", 360, false);
-    const match = bannerMotion("match", 520, false);
+    const game = bannerMotion("game", motionMs(360), false);
+    const match = bannerMotion("match", motionMs(520), false);
     expect(game.scale).toBeGreaterThan(1);
     expect(match.scale).toBeGreaterThan(game.scale);
-    expect(bannerMotion("game", 640, false).scale).toBe(1);
-    expect(bannerMotion("match", 980, false).scale).toBe(1);
+    expect(bannerMotion("game", motionMs(640), false).scale).toBe(1);
+    expect(bannerMotion("match", motionMs(980), false).scale).toBe(1);
     expect(bannerMotion("match", 280, true).scale).toBe(1);
     expect(confettiAt("match", 280, false).length).toBeGreaterThan(confettiAt("game", 280, false).length);
     expect(confettiAt("game", 280, true)).toEqual([]);
@@ -129,7 +133,7 @@ describe("win banners", () => {
   it("waits out a winning UH-OH, then the sheet, inside the continue clock", () => {
     const awards = scoreDomino({ winner: 0, loser: 19 }, "winner");
     const plan = planWinPips(awards, [{ playerId: "loser", tiles: [{ id: "6-6" }, { id: "3-4" }] }]);
-    expect(uhOhWaitMs("domino", 25, false)).toBe(2400);
+    expect(uhOhWaitMs("domino", 25, false)).toBe(BIG_MOMENT_MS);
     expect(uhOhWaitMs("domino", 25, true)).toBe(900);
     expect(uhOhWaitMs("domino", 15, false)).toBe(0);
     expect(uhOhWaitMs("locked", 40, false)).toBe(0);
@@ -144,11 +148,11 @@ describe("win banners", () => {
       reduced: false,
     });
     expect(worst.steps.map((step) => step.stage)).toEqual(["uhoh", "call", "reveal", "banner", "lineup", "sheet"]);
-    expect(worst.steps[1]).toMatchObject({ stage: "call", call: "domino", ms: 420 });
+    expect(worst.steps[1]).toMatchObject({ stage: "call", call: "domino", ms: HAND_CALL_AFTER_UHOH_MS });
     expect(worst.steps[3]?.banner).toBe("match");
     expect(worst.steps[3]?.ms).toBe(MATCH_BANNER_MS);
     expect(worst.steps[4]).toEqual({ stage: "lineup", ms: 0 });
-    expect(worst.untilSheet).toBeLessThan(9000);
+    expect(worst.untilSheet).toBeLessThan(motionMs(9000));
 
     const game = celebrationTimeline({
       reason: "locked",

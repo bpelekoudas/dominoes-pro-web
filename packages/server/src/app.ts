@@ -14,6 +14,7 @@ import {
   type SignInResult,
 } from "./accounts.js";
 import { BotLeague, leaderboardIncludesBots } from "./bots.js";
+import { motionMs } from "@uhoh/rules";
 import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
@@ -76,7 +77,7 @@ export async function createApp(options: AppOptions = {}) {
     20_000,
     () => envMs("BOT_PACE_MS", BOT_TURN_MS),
     envMs("TURN_LIMIT_MS", 30_000),
-    envMs("CONTINUE_MS", 9_000),
+    envMs("CONTINUE_MS", motionMs(9_000)),
     envMs("QUICK_WAIT_MS", 60_000),
     envMs("QUICK_BOT_FILL_MS", QUICK_BOT_FILL_MS),
   );
