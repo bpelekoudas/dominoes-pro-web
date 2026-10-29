@@ -1377,26 +1377,31 @@ function auditTable() {
     }
   }
   const rail = document.querySelector(".edge-top");
-  if (!rail) return { ok: false, reason: "The top seat is missing, so the reaction bubble was not checked.", ...evidence };
+  const badge = rail?.querySelector(".edge-badge");
+  if (!badge) return { ok: false, reason: "The top seat is missing, so the talk line was not checked.", ...evidence };
   const bubble = document.createElement("p");
-  bubble.className = "talk-bubble talk-reaction";
-  bubble.textContent = "👀";
-  rail.appendChild(bubble);
+  bubble.className = "talk-line";
+  bubble.textContent = "Boneyard called. They want their luck back.";
+  badge.appendChild(bubble);
   const bubbleBox = bubble.getBoundingClientRect();
-  const railBox = rail.getBoundingClientRect();
+  const badgeBox = badge.getBoundingClientRect();
   const onTile = tiles.some((tile) => overlaps(bubbleBox, tile.getBoundingClientRect()));
-  const inRail = bubbleBox.top >= railBox.top - 1 && bubbleBox.bottom <= railBox.bottom + 1;
+  const inBadge =
+    bubbleBox.left >= badgeBox.left - 1 &&
+    bubbleBox.right <= badgeBox.right + 1 &&
+    bubbleBox.top >= badgeBox.top - 1 &&
+    bubbleBox.bottom <= badgeBox.bottom + 1;
   bubble.remove();
-  if (!inRail || onTile) {
+  if (!inBadge || onTile) {
     return {
       ok: false,
-      reason: "The top-seat reaction covers a board tile.",
+      reason: "The talk line covers a board tile.",
       bubble: plain(bubbleBox),
-      rail: plain(railBox),
+      badge: plain(badgeBox),
       ...evidence,
     };
   }
-  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, reaction clear of the chain` };
+  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain` };
 }
 
 function openSocket(url, cookie) {

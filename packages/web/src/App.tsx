@@ -727,12 +727,8 @@ export function Game({
                     pips={showCounts ? view.lastHand?.pipCounts[you.player.id] ?? null : null}
                     low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(you.player.id)}
                     forward={gameFocus === you.player.id}
+                    talk={bubbleText(bubble, you.player.id)}
                   />
-                ) : null}
-                {you && bubbleText(bubble, you.player.id) ? (
-                  <p className={`talk-bubble${isReaction(bubbleText(bubble, you.player.id) ?? "") ? " talk-reaction" : ""}`}>
-                    {bubbleText(bubble, you.player.id)}
-                  </p>
                 ) : null}
               </div>
               {view.phase === "play" && view.turnPlayerId ? (
@@ -1034,7 +1030,9 @@ function EdgeSeat({
       data-tiles={count}
       data-skin={player.tileSkin || "ivory"}
     >
-      {edge === "top" ? null : <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} />}
+      {edge === "top" ? null : (
+        <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+      )}
       <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">
         {Array.from({ length: count }, (_, index) => (
           <i
@@ -1044,9 +1042,9 @@ function EdgeSeat({
           />
         ))}
       </div>
-      {edge === "top" ? <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} /> : null}
-      {bubble ? <p className={`talk-bubble${isReaction(bubble) ? " talk-reaction" : ""}`}>{bubble}</p> : null}
-      {notice ? <p className="talk-bubble seat-notice">{notice}</p> : null}
+      {edge === "top" ? (
+        <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+      ) : null}
       <span className="sr-only">
         {player.name}, {count} tiles
       </span>
@@ -1060,12 +1058,14 @@ function EdgeBadge({
   pips,
   low,
   forward,
+  talk,
 }: {
   player: PlayerView["players"][number];
   view: PlayerView;
   pips: number | null;
   low: boolean;
   forward: boolean;
+  talk: string | null;
 }) {
   const clock = useServerNow(view.serverNow);
   const live = useShownScore(player.id, player.score);
@@ -1087,6 +1087,7 @@ function EdgeBadge({
         <GamePips won={player.gamesWon} needed={view.winsNeeded} />
       </span>
       {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
+      {talk ? <TalkLine text={talk} /> : null}
     </div>
   );
 }
@@ -1105,12 +1106,14 @@ function SeatChip({
   pips = null,
   low = false,
   forward = false,
+  talk = null,
 }: {
   player: PlayerView["players"][number];
   view: PlayerView;
   pips?: number | null;
   low?: boolean;
   forward?: boolean;
+  talk?: string | null;
 }) {
   const clock = useServerNow(view.serverNow);
   const live = useShownScore(player.id, player.score);
@@ -1159,7 +1162,17 @@ function SeatChip({
           {player.isYou ? null : <span className="sr-only">{player.tileCount} tiles</span>}
         </span>
       </span>
+      {talk ? <TalkLine text={talk} /> : null}
     </div>
+  );
+}
+
+/** One line, clipped to the badge. It never hangs over the chain. */
+function TalkLine({ text }: { text: string }) {
+  return (
+    <p className={`talk-line${isReaction(text) ? " talk-reaction" : ""}`} data-talk="1">
+      {text}
+    </p>
   );
 }
 
@@ -1621,7 +1634,7 @@ function useTalkBubble(chat: ChatLine[]): ChatLine | null {
     setBubble(last);
     const timer = window.setTimeout(() => {
       setBubble((current) => (current?.id === last.id ? null : current));
-    }, isReaction(last.text) ? 1_100 : 3_000);
+    }, isReaction(last.text) ? 1_000 : 1_400);
     return () => window.clearTimeout(timer);
   }, [chat]);
   return bubble;

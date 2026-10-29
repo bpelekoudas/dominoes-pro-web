@@ -220,7 +220,7 @@ export function Table({
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
     const app = viewport.closest(".felt-app");
-    app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+    app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips, .talk-line").forEach((node) => {
       observer.observe(node);
     });
     return () => observer.disconnect();
@@ -784,7 +784,7 @@ function measureZones(viewport: HTMLElement): ZoneRect[] {
   const felt = viewport.getBoundingClientRect();
   const zones: ZoneRect[] = [];
   const app = viewport.closest(".felt-app");
-  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips, .talk-line").forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
     const rect = node.getBoundingClientRect();
     const left = Math.max(rect.left, felt.left) - felt.left;
@@ -801,7 +801,7 @@ function measureReserve(viewport: HTMLElement): AxisInsets {
   const felt = viewport.getBoundingClientRect();
   const zones: DOMRect[] = [];
   const app = viewport.closest(".felt-app");
-  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips").forEach((node) => {
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .seat-pips, .talk-line").forEach((node) => {
     if (node instanceof HTMLElement) zones.push(node.getBoundingClientRect());
   });
   return zoneInsets(
