@@ -1222,12 +1222,12 @@ async function probeWinnerPop(page) {
   } catch {
     return { ok: false, reason: "The winner pop did not appear." };
   }
-  // Game pop reaches its hold at 180ms and stays there until 700ms.
-  await page.waitForTimeout(260);
+  // Game pop reaches its hold at 360ms and stays there until 1400ms.
+  await page.waitForTimeout(480);
   const audit = await page.evaluate(auditWinnerPop);
   if (!audit.ok) return audit;
   try {
-    await pop.waitFor({ state: "detached", timeout: 1_800 });
+    await pop.waitFor({ state: "detached", timeout: 2_400 });
   } catch {
     return { ok: false, reason: "The winner pop stayed on screen and would block the next hand.", ...audit };
   }
