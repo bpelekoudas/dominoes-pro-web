@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { layoutBoard, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
@@ -111,7 +111,21 @@ export function Table({
   const board = view.board;
   // The felt the chain should fold into, in design pixels, at the readable floor.
   const [limits, setLimits] = useState<{ width: number; height: number } | null>(null);
-  const layout = useMemo(() => (board?.center ? layoutBoard(board, limits ?? undefined) : null), [board, limits]);
+  const layout = useMemo(() => {
+    if (!board?.center) return null;
+    try {
+      const picture = layoutBoard(board, limits ?? undefined);
+      if (!layoutOverlaps(picture)) return picture;
+      const plain = layoutBoard(board);
+      return layoutOverlaps(plain) ? picture : plain;
+    } catch {
+      try {
+        return layoutBoard(board);
+      } catch {
+        return null;
+      }
+    }
+  }, [board, limits]);
   const frame = useMemo(() => (layout ? chainBounds(layout.tiles, 0) : null), [layout]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);

@@ -368,7 +368,7 @@ function handleMessage(
   } else if (message.type === "chat") {
     setChat((lines) => [...lines, message.line].slice(-40));
   } else if (message.type === "error") {
-    setError(message.message);
+    setError(playerError(message.message));
   }
   return message;
 }
@@ -1680,6 +1680,14 @@ function faceOf(tileId: string): { low: number; high: number } {
     low: Number.isFinite(low) ? low! : 0,
     high: Number.isFinite(high) ? high! : 0,
   };
+}
+
+/** A rules sentence can be shown. An exception cannot. */
+function playerError(message: string): string {
+  if (/cannot read|undefined|typeerror|syntaxerror|is not a function|reading '|broke the board/i.test(message)) {
+    return "That play didn't land. The hand is still going.";
+  }
+  return message;
 }
 
 function copyText(value: string) {

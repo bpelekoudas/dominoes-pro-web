@@ -501,7 +501,13 @@ export async function createApp(options: AppOptions = {}) {
         session = result.session;
         return;
       }
-      hub.command(session.playerId, message);
+      try {
+        hub.command(session.playerId, message);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "play failed";
+        console.warn(`A play failed (${detail}).`);
+        send({ type: "error", message: "That play didn't land. The hand is still going." });
+      }
     });
 
     socket.on("close", () => {

@@ -168,9 +168,24 @@ export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayo
   // Already readable on this table. Keep the phone picture.
   if (phoneBox.w <= limits.width + 1 && phoneBox.h <= limits.height + 1) return phone;
   const folded = withLimit(limits, () => layoutBoardNow(board));
+  // A pile of covered tiles has a small box and would look "more readable".
+  // That picture is never the one we show.
+  if (layoutOverlaps(folded)) return phone;
+  if (layoutOverlaps(phone)) return folded;
   // Fold only when it actually leaves a larger tile. A turn that grows the
   // other side is worse than shrinking the straight chain a little.
   return fitIn(tileSpan(folded.tiles), limits) > fitIn(phoneBox, limits) + 0.02 ? folded : phone;
+}
+
+/** True when two faces share area. Touching edges do not count. */
+export function layoutOverlaps(layout: BoardLayout): boolean {
+  const tiles = layout.tiles;
+  for (let i = 0; i < tiles.length; i += 1) {
+    for (let j = i + 1; j < tiles.length; j += 1) {
+      if (boxesOverlap(tiles[i]!, tiles[j]!)) return true;
+    }
+  }
+  return false;
 }
 
 function layoutBoardNow(board: BoardState): BoardLayout {
@@ -230,6 +245,23 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       holdAhead(arm, nextCursor, occupants, centre);
       grew = true;
     }
+  }
+
+  // A step that still landed on another face is walked into open felt.
+  // The hand keeps going, and no tile is covered.
+  for (let i = 1; i < tiles.length; i += 1) {
+    const tile = tiles[i]!;
+    const earlier = tiles.slice(0, i);
+    if (!earlier.some((other) => boxesOverlap(tile, other))) continue;
+    const parked = nudgeClear(
+      tile,
+      tile.direction,
+      earlier.map((other) => ({ box: other, arm: other.arm })),
+      centre,
+      earlier[earlier.length - 1]!,
+    );
+    tile.x = parked.x;
+    tile.y = parked.y;
   }
 
   const ends: PlacedEnd[] = [];
@@ -328,7 +360,62 @@ function chooseStep(
 
   const escaped = escapeStep(tile, upcoming, cursor, home, occupants, centre);
   if (escaped) return escaped;
-  return keep;
+  // The rest of the arm may not fit, but this tile still needs an open square.
+  // Dropping it on another face is what made a crowded hand look broken.
+  const loose = looseStep(tile, cursor, home, occupants, centre);
+  if (loose) return loose;
+  const parked = nudgeClear(straight, cursor.dir, occupants, centre, cursor.box);
+  return { box: parked, dir: cursor.dir, bends: cursor.bends };
+}
+
+/**
+ * Any clear corner, without reserving the rest of the arm.
+ * Used only after the planned bends have nowhere to go.
+ */
+function looseStep(
+  tile: OrientedTile,
+  cursor: Cursor,
+  home: ArmId,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+): { box: LayoutBox; dir: LayoutDir; bends: number } | null {
+  const isDouble = tile.low === tile.high;
+  const turns = [...sideTurns(cursor.dir), opposite(cursor.dir)];
+  for (const turn of turns) {
+    const choices = bendCandidates(cursor.box, cursor.dir, turn, isDouble);
+    for (const box of choices) {
+      if (!isClear(box, occupants, centre, cursor.box)) continue;
+      return { box, dir: turn, bends: cursor.bends + 1 };
+    }
+  }
+  return null;
+}
+
+/** Walk the tile out along the open directions until it misses every face. */
+function nudgeClear(
+  box: LayoutBox,
+  dir: LayoutDir,
+  occupants: readonly Occupant[],
+  centre: LayoutBox,
+  prev: LayoutBox,
+): LayoutBox {
+  if (isClear(box, occupants, centre, prev)) return box;
+  const step = TILE_SHORT + TILE_GAP;
+  const ways: LayoutDir[] = [dir, ...sideTurns(dir), opposite(dir)];
+  for (let distance = 1; distance <= 60; distance += 1) {
+    for (const way of ways) {
+      const moved = shiftBox(box, way, distance * step);
+      if (isClear(moved, occupants, centre, prev)) return moved;
+    }
+  }
+  return box;
+}
+
+function shiftBox(box: LayoutBox, dir: LayoutDir, distance: number): LayoutBox {
+  if (dir === "east") return { ...box, x: box.x + distance };
+  if (dir === "west") return { ...box, x: box.x - distance };
+  if (dir === "south") return { ...box, y: box.y + distance };
+  return { ...box, y: box.y - distance };
 }
 
 /**

@@ -45,6 +45,8 @@ const {
   scoreDomino,
   scoreLocked,
   shuffleWithSeed,
+  layoutBoard,
+  layoutOverlaps,
   tilesOnBoard,
   winsNeeded,
 } = rules;
@@ -754,6 +756,16 @@ async function playMatch(mode, index, options) {
   }
 
   function checkBoard(view) {
+    if (view.board?.center) {
+      const pictures = [
+        layoutBoard(view.board),
+        layoutBoard(view.board, { width: 220, height: 640 }),
+        layoutBoard(view.board, { width: 344, height: 720 }),
+      ];
+      if (pictures.some((layout) => layoutOverlaps(layout))) {
+        throw new Error("A tile covers another tile.");
+      }
+    }
     if (!view.board?.center) {
       if (view.openTotal !== 0) throw new Error("An empty board reported open points.");
       return;

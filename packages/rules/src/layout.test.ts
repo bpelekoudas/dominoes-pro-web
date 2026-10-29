@@ -18,6 +18,7 @@ import {
   insideHard,
   insidePhone,
   layoutBoard,
+  layoutOverlaps,
   PHONE_HEIGHT,
   PHONE_WIDTH,
   STRAIGHT_CAP,
@@ -707,6 +708,27 @@ describe("board layout", () => {
         }
       }
     }
+  });
+
+  it("never covers a tile, including on a narrow fold", () => {
+    const limits = [undefined, { width: 220, height: 640 }, { width: 280, height: 500 }, { width: 344, height: 720 }] as const;
+    let checked = 0;
+    for (const players of [2, 3, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 6; seed += 1) {
+          for (const board of playHand(players, mode, seed + 180)) {
+            const count = ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, board.center ? 1 : 0);
+            if (count < 8) continue;
+            for (const limit of limits) {
+              const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+              checked += 1;
+              expect(layoutOverlaps(layout), `${players} ${mode} seed ${seed} ${count} tiles`).toBe(false);
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(40);
   });
 
   it("reports a fit box with a margin around the tiles", () => {
