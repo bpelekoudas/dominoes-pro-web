@@ -519,7 +519,17 @@ export async function createApp(options: AppOptions = {}) {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const webDist = path.resolve(here, "../../web/dist");
     if (existsSync(webDist)) {
-      await app.register(fastifyStatic, { root: webDist });
+      await app.register(fastifyStatic, {
+        root: webDist,
+        setHeaders(res, filePath) {
+          const base = path.basename(filePath);
+          if (base === "index.html" || base === "sw.js" || base === "manifest.json") {
+            res.setHeader("cache-control", "no-cache");
+          } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+            res.setHeader("cache-control", "public, max-age=31536000, immutable");
+          }
+        },
+      });
       const indexFile = path.join(webDist, "index.html");
       app.setNotFoundHandler((request, reply) => {
         if (request.method === "GET" && !request.url.startsWith("/ws") && existsSync(indexFile)) {

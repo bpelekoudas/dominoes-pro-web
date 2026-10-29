@@ -10,6 +10,12 @@ import "./styles.css";
 
 applyA11y();
 
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => undefined);
+  });
+}
+
 window.addEventListener("error", (event) => {
   pulse("error", event.message);
 });

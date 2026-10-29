@@ -13,6 +13,7 @@ import { pulse } from "./pulse";
 import { Domino } from "./table";
 import { DailyHome } from "./daily";
 import { PlayerHome } from "./home-screen";
+import { InstallHint } from "./install-hint";
 
 type BoneyardMode = "draw_one" | "draw_until";
 type SeriesLength = 3 | 5 | 7;
@@ -247,6 +248,7 @@ export function ArcadeHome({
 
   return (
     <main className={user ? "player-home" : "arcade-home"} data-screen="home" data-skin="ivory">
+      <InstallHint />
       {user ? (
         <>
         <PlayerHome
