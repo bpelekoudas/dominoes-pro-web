@@ -48,6 +48,18 @@ describe("rating math", () => {
     ]);
     expect(blowout.get("a")).toEqual({ before: 1200, after: 1220, delta: 20 });
     expect(blowout.get("b")).toEqual({ before: 1200, after: 1180, delta: -20 });
+    const single = ratePlayers(
+      [
+        seat("a", 1200, 0, 150, 1),
+        seat("b", 1200, 0, 0, 2),
+      ],
+      0.25,
+    );
+    expect(single.get("a")).toEqual({ before: 1200, after: 1205, delta: 5 });
+    expect(single.get("b")).toEqual({ before: 1200, after: 1195, delta: -5 });
+    expect(single.get("a")!.delta).toBe(Math.round(blowout.get("a")!.delta * 0.25));
+    const flooredSingle = ratePlayers([seat("a", 103, 0, 0, 2), seat("b", 103, 0, 150, 1)], 0.25);
+    expect(flooredSingle.get("a")).toEqual({ before: 103, after: 100, delta: -3 });
     expect(close.get("a")?.delta).toBe(4);
     expect(close.get("b")?.delta).toBe(-4);
     expect(close.get("a")!.delta).toBeLessThan(blowout.get("a")!.delta);
@@ -149,6 +161,18 @@ describe("season points and tiers", () => {
     expect(ranked.win).toBe(0);
     expect(ranked.streak).toBe(0);
     expect(ranked.total).toBe(40);
+    const quarter = seasonAward({
+      completed: true,
+      won: true,
+      second: false,
+      moments: 2,
+      streakBefore: 2,
+      alreadyWonToday: false,
+      ranked: true,
+      weight: 0.25,
+    });
+    expect(quarter.total).toBe(Math.round(10 * 2 * 0.25) + Math.round(25 * 2 * 0.25) + Math.round(10 * 2 * 0.25) + Math.round(15 * 2 * 0.25) + Math.round(20 * 2 * 0.25));
+    expect(quarter.total).toBeLessThan(practice.total);
     const capped = seasonAward({
       completed: true,
       won: true,

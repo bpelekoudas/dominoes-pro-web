@@ -67,6 +67,8 @@ export interface SettleInput {
   seriesId: string;
   gameNumber: number;
   casual: boolean;
+  /** One game to 150. The rating change is a quarter of a series game. */
+  format?: "single" | "series";
   completed: boolean;
   winnerId: string | null;
   now: Date;
@@ -174,7 +176,16 @@ export function finishingPlaces(
   return places;
 }
 
-export function ratePlayers(seats: RateSeat[]): Map<string, { before: number; after: number; delta: number }> {
+/** A single game keeps a quarter of the series-game rating change. */
+export const SINGLE_GAME_WEIGHT = 0.25;
+
+/** The cap is already in `delta`. A single game then keeps a quarter, rounded. */
+export function weighDelta(delta: number, weight: number): number {
+  if (weight === 1) return delta;
+  return Math.round(delta * weight);
+}
+
+export function ratePlayers(seats: RateSeat[], weight = 1): Map<string, { before: number; after: number; delta: number }> {
   const rated = new Map<string, { before: number; after: number; delta: number }>();
   for (const you of seats) {
     const k = kFactor(you.rating, you.rankedGames);
@@ -187,7 +198,7 @@ export function ratePlayers(seats: RateSeat[]): Map<string, { before: number; af
       pairDeltas.push(k * (result - expected));
     }
     const average = pairDeltas.length === 0 ? 0 : pairDeltas.reduce((sum, value) => sum + value, 0) / pairDeltas.length;
-    const rounded = finalizeDelta(average);
+    const rounded = weighDelta(finalizeDelta(average), weight);
     let after = you.rating + rounded;
     if (after < RATING_FLOOR) after = RATING_FLOOR;
     rated.set(you.id, { before: you.rating, after, delta: after - you.rating });
@@ -208,6 +219,8 @@ export function seasonAward(input: {
   streakBefore: number;
   alreadyWonToday: boolean;
   ranked: boolean;
+  /** 1 for a series game. A single game passes 0.25. */
+  weight?: number;
 }): PointBreakdown {
   const finish = 10;
   const win = input.completed && input.won ? 25 : 0;
@@ -218,17 +231,22 @@ export function seasonAward(input: {
   const streak = streakCount > 0 ? Math.min(25, streakCount * 5) : 0;
   const firstWin = input.completed && input.won && !input.alreadyWonToday ? 20 : 0;
   const multiplier = input.ranked ? 2 : 1;
+  const weight = input.weight ?? 1;
+  const scale = (value: number) => (weight === 1 ? value : Math.round(value * weight));
+  const scaled = {
+    finish: scale(finish * multiplier),
+    win: scale(win * multiplier),
+    second: scale(second * multiplier),
+    moments: scale(moments * multiplier),
+    streak: scale(streak * multiplier),
+    firstWin: scale(firstWin * multiplier),
+  };
   return {
-    finish: finish * multiplier,
-    win: win * multiplier,
-    second: second * multiplier,
-    moments: moments * multiplier,
+    ...scaled,
     momentCount,
-    streak: streak * multiplier,
     streakCount,
-    firstWin: firstWin * multiplier,
     doubled: multiplier === 2,
-    total: (finish + win + second + moments + streak + firstWin) * multiplier,
+    total: scaled.finish + scaled.win + scaled.second + scaled.moments + scaled.streak + scaled.firstWin,
   };
 }
 
@@ -379,6 +397,8 @@ export function leaderboard(store: Store, board: "rating" | "season", now: Date,
 export function settleGame(store: Store, input: SettleInput): RankRecap {
   const season = currentSeason(store, input.now);
   const ranked = gameIsRanked(input.seats, input.casual);
+  const format = input.format ?? "series";
+  const weight = format === "single" ? SINGLE_GAME_WEIGHT : 1;
   const vsComputer = input.seats.some((seat) => seat.bot);
   const places = finishingPlaces(input.seats);
   const cached = new Map<string, Standing>();
@@ -404,7 +424,7 @@ export function settleGame(store: Store, input: SettleInput): RankRecap {
       });
     }
   }
-  const changes = ratePlayers(eloSeats);
+  const changes = ratePlayers(eloSeats, weight);
   const today = denverDay(input.now);
   const players: RankedPlayerRecap[] = [];
 
@@ -427,6 +447,7 @@ export function settleGame(store: Store, input: SettleInput): RankRecap {
       streakBefore: standing.winStreak,
       alreadyWonToday: standing.lastWinDay === today,
       ranked,
+      weight,
     });
     const change = changes.get(seat.playerId);
     const ratingBefore = standing.rating;
@@ -553,6 +574,7 @@ export function settleGame(store: Store, input: SettleInput): RankRecap {
 
   return {
     gameNumber: input.gameNumber,
+    format,
     ranked,
     casual: input.casual,
     vsComputer,

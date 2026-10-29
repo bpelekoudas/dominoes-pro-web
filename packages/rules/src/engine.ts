@@ -3,7 +3,7 @@ import { finishingOrder, gameWinnerId, scoreDomino, scoreLocked, winsNeeded, typ
 import { allTileIds, handPips, tileById, tileLabel } from "./tiles.js";
 
 export type BoneyardMode = "draw_one" | "draw_until";
-export type SeriesLength = 3 | 5 | 7;
+export type SeriesLength = 1 | 3 | 5 | 7;
 
 export interface MatchConfig {
   boneyardMode: BoneyardMode;
@@ -124,7 +124,7 @@ export interface LoggedHand {
   actions: LoggedAction[];
 }
 
-const SERIES_LENGTHS = new Set<SeriesLength>([3, 5, 7]);
+const SERIES_LENGTHS = new Set<SeriesLength>([1, 3, 5, 7]);
 
 /**
  * Saved tables replay on this copy of the rules.
@@ -142,7 +142,7 @@ export function createMatch(players: MatchPlayer[], config: MatchConfig): MatchS
     throw new Error("Uh Oh is played by 2 to 4 people.");
   }
   if (!SERIES_LENGTHS.has(config.seriesLength)) {
-    throw new Error("A series is best of 3, 5, or 7.");
+    throw new Error("A table is one game, or best of 3, 5, or 7.");
   }
   if (config.boneyardMode !== "draw_one" && config.boneyardMode !== "draw_until") {
     throw new Error("Pick a boneyard rule.");

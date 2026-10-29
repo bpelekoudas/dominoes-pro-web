@@ -19,6 +19,7 @@ const MODES = [
   { seats: 3, boneyardMode: "draw_one", seriesLength: 3 },
   { seats: 4, boneyardMode: "draw_until", seriesLength: 5 },
   { seats: 2, boneyardMode: "draw_one", seriesLength: 7 },
+  { seats: 4, boneyardMode: "draw_until", seriesLength: 1 },
   { seats: 3, boneyardMode: "draw_until", seriesLength: 3 },
   { seats: 4, boneyardMode: "draw_one", seriesLength: 3 },
   { seats: 2, boneyardMode: "draw_until", seriesLength: 5 },
@@ -107,7 +108,7 @@ try {
   for (let index = 0; index < args.matches; index += 1) {
     const mode = modes[index % modes.length];
     console.log(
-      `Match ${index + 1}/${args.matches}: ${mode.seats} seats, ${mode.boneyardMode}, best of ${mode.seriesLength}`,
+      `Match ${index + 1}/${args.matches}: ${mode.seats} seats, ${mode.boneyardMode}, ${mode.seriesLength === 1 ? "single game" : `best of ${mode.seriesLength}`}`,
     );
     const started = Date.now();
     const result = await playMatch(mode, index, { reconnect: !reconnectUsed });

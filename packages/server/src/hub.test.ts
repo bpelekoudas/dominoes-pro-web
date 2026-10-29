@@ -1737,7 +1737,7 @@ describe("quick play", () => {
   function playHub(waitMs: number) {
     const store = new Store(":memory:");
     const hub = new Hub(store, 30, () => 0, 30_000, 60_000, 60_000, 15_000, () => 0, waitMs);
-    const connect = (name: string, seriesLength?: 3 | 5 | 7) => {
+    const connect = (name: string, seriesLength?: 1 | 3 | 5 | 7) => {
       const messages: ServerMessage[] = [];
       const result = hub.connect(
         { type: "quick-play", name, ...(seriesLength ? { seriesLength } : {}) },
@@ -1774,12 +1774,25 @@ describe("quick play", () => {
     hub.command(older.playerId, { type: "set-series", seriesLength: 3 });
     expect(older.messages.at(-1)?.type).toBe("error");
 
-    const full = [connect("Cy"), connect("Dee")];
+    const other = connect("Eve", 5);
+    expect(latestView(other.messages)?.roomCode).not.toBe(waiting?.roomCode);
+    const full = [connect("Cy", 7), connect("Dee", 7)];
     const started = latestView(full[1]?.messages ?? []);
     expect(started?.status).toBe("playing");
     expect(started?.players.every((player) => !player.bot)).toBe(true);
     expect(started?.settings.casual).toBe(false);
     expect(store.roomByCode(waiting?.roomCode ?? "")?.casual).toBe(0);
+  });
+
+  it("keeps a single game away from a series table", () => {
+    const { connect } = playHub(60_000);
+    const series = connect("Ada", 5);
+    const single = connect("Bo", 1);
+    expect(latestView(series.messages)?.settings.seriesLength).toBe(5);
+    expect(latestView(single.messages)?.roomCode).not.toBe(latestView(series.messages)?.roomCode);
+    expect(latestView(single.messages)?.settings.seriesLength).toBe(1);
+    const next = connect("Cy", 1);
+    expect(latestView(next.messages)?.roomCode).toBe(latestView(single.messages)?.roomCode);
   });
 
   it("fills the open seats with computers when nobody else arrives, and keeps that game off the rating", () => {

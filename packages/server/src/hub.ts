@@ -626,8 +626,8 @@ export class Hub {
     if (message.boneyardMode !== "draw_one" && message.boneyardMode !== "draw_until") {
       return { ok: false, error: "Pick a boneyard rule." };
     }
-    if (message.seriesLength !== 3 && message.seriesLength !== 5 && message.seriesLength !== 7) {
-      return { ok: false, error: "A series is best of 3, 5, or 7." };
+    if (message.seriesLength !== 1 && message.seriesLength !== 3 && message.seriesLength !== 5 && message.seriesLength !== 7) {
+      return { ok: false, error: "A table is one game, or best of 3, 5, or 7." };
     }
     const created = nowIso();
     const soak = this.accountIsSoak(accountUserId, name);
@@ -1753,13 +1753,14 @@ export class Hub {
     if (this.accountIsSoak(accountUserId, named.name)) {
       return { ok: false, error: "Soak accounts use a private table." };
     }
-    const seriesLength = message.seriesLength === 3 || message.seriesLength === 7 ? message.seriesLength : 5;
-    const waiting = this.findQuickPlayLobby(accountUserId);
+    const asked = message.seriesLength;
+    const seriesLength = asked === 1 || asked === 3 || asked === 5 || asked === 7 ? asked : 5;
+    const waiting = this.findQuickPlayLobby(accountUserId, seriesLength);
     if (waiting) {
       this.releaseAccount(accountUserId, waiting.id);
       return this.join({ type: "join", name: named.name, code: waiting.code }, send, close, accountUserId);
     }
-    const taken = this.takeBotSeat(named.name, send, close, accountUserId);
+    const taken = this.takeBotSeat(named.name, send, close, accountUserId, seriesLength);
     if (taken) return taken;
     return this.create(
       {
@@ -1778,10 +1779,12 @@ export class Hub {
   }
 
   /** Oldest public lobby with a real player and an open seat. First come, first served. */
-  private findQuickPlayLobby(viewerId: string | null): LiveRoom | null {
+  private findQuickPlayLobby(viewerId: string | null, seriesLength: SeriesLength): LiveRoom | null {
     const open = [...this.rooms.values()].filter(
       (room) =>
         room.listed &&
+        room.quickPlay &&
+        room.settings.seriesLength === seriesLength &&
         this.openToHumans(room) &&
         room.seats.length < room.settings.playerCount &&
         room.seats.some((seat) => !seat.bot) &&
@@ -1797,12 +1800,13 @@ export class Hub {
     send: (message: ServerMessage) => void,
     close: () => void,
     accountUserId: string | null,
+    seriesLength: SeriesLength,
   ): { ok: true; session: BoundSession } | null {
     const open = [...this.rooms.values()]
-      .filter((room) => this.botSeatOpen(room, accountUserId))
+      .filter((room) => this.botSeatOpen(room, accountUserId, seriesLength))
       .sort((a, b) => a.createdAt - b.createdAt);
     const room = open[0];
-    if (!room || !this.botSeatOpen(room, accountUserId)) return null;
+    if (!room || !this.botSeatOpen(room, accountUserId, seriesLength)) return null;
     const seat = room.seats.find((candidate) => candidate.bot && !candidate.accountBot);
     if (!seat || !room.betweenHands) return null;
     this.releaseAccount(accountUserId, room.id);
@@ -1827,8 +1831,9 @@ export class Hub {
   }
 
   /** A computer's seat on a public table, between hands, during the opening hands only. */
-  private botSeatOpen(room: LiveRoom, viewerId: string | null): boolean {
+  private botSeatOpen(room: LiveRoom, viewerId: string | null, seriesLength: SeriesLength): boolean {
     if (!room.listed || room.soak || room.id.startsWith("bot_")) return false;
+    if (room.settings.seriesLength !== seriesLength) return false;
     if (room.status !== "playing" || !room.betweenHands || !room.match) return false;
     if (room.match.gameNumber !== 1 || room.match.handNumber > QUICK_PLAY_JOIN_HANDS) return false;
     if (this.blockedTable(room, viewerId)) return false;
@@ -1878,6 +1883,10 @@ export class Hub {
     }
     if (seat.id !== room.hostId) {
       this.tell(seat, { type: "error", message: "Only the host can change the series." });
+      return;
+    }
+    if (room.settings.seriesLength === 1) {
+      this.tell(seat, { type: "error", message: "This table is one game." });
       return;
     }
     if (seriesLength !== 3 && seriesLength !== 5 && seriesLength !== 7) {
@@ -2131,6 +2140,7 @@ export class Hub {
           seriesId: room.seriesId,
           gameNumber: hand.gameNumber,
           casual: room.casual,
+          format: room.settings.seriesLength === 1 ? "single" : "series",
           completed: true,
           winnerId: hand.gameWinnerId,
           now: new Date(),
@@ -2191,6 +2201,7 @@ export class Hub {
         seriesId: room.seriesId,
         gameNumber,
         casual: room.casual,
+        format: room.settings.seriesLength === 1 ? "single" : "series",
         completed: false,
         winnerId: null,
         now: new Date(),
@@ -2369,7 +2380,7 @@ export class Hub {
           drew: match.log.some((event) => event.kind === "draw" && event.playerId === seat.id),
           doubleOnBoard,
           margin: (hand.scoresAfter[seat.id] ?? 0) - next,
-          matchWon: hand.seriesWinnerId === seat.id,
+          matchWon: hand.seriesWinnerId === seat.id && room.settings.seriesLength !== 1,
           lockGame: hand.reason === "locked" && hand.gameWinnerId === seat.id && hand.winnerIds.includes(seat.id),
         },
         now,

@@ -12,7 +12,8 @@ import { HOWTO_BEAT_MS, HOWTO_KEY, HOWTO_STEPS, PRACTICE_KEY } from "./howto";
 import { pulse } from "./pulse";
 import { Domino } from "./table";
 import { DailyHome } from "./daily";
-import { PlayerHome } from "./home-screen";
+import { PlayerHome, QuickFormatToggle } from "./home-screen";
+import { readQuickFormat, seriesForFormat, writeQuickFormat, type QuickFormat } from "./quick-format";
 import { InstallHint } from "./install-hint";
 
 type BoneyardMode = "draw_one" | "draw_until";
@@ -112,7 +113,7 @@ export function ArcadeHome({
   onSolo: (name: string, playerCount: number, boneyardMode: BoneyardMode, seriesLength: SeriesLength, difficulty: Difficulty, casual?: boolean) => void;
   onJoin: (name: string, code: string) => void;
   onQuick: (name: string, size: QuickSize) => void;
-  onQuickPlay: (name: string, seriesLength: 3 | 5 | 7) => void;
+  onQuickPlay: (name: string, seriesLength: 1 | 3 | 5 | 7) => void;
   onGuest: (name: string) => void;
   onAccount: () => void;
   onBoard: () => void;
@@ -135,6 +136,7 @@ export function ArcadeHome({
   const [playerCount, setPlayerCount] = useState(2);
   const [boneyardMode, setBoneyardMode] = useState<BoneyardMode>("draw_until");
   const [seriesLength, setSeriesLength] = useState<SeriesLength>(3);
+  const [quickFormat, setQuickFormat] = useState<QuickFormat>(readQuickFormat);
   const [difficulty, setDifficulty] = useState<Difficulty>("medium");
   const [quickSize, setQuickSize] = useState<QuickSize>(4);
   const [code, setCode] = useState(presetCode);
@@ -382,6 +384,13 @@ export function ArcadeHome({
           I am 13 or older
         </label>
       ) : null}
+      <QuickFormatToggle
+        format={quickFormat}
+        onChange={(next) => {
+          setQuickFormat(next);
+          writeQuickFormat(next);
+        }}
+      />
       <div className="account-row">
         <button type="button" className="text-button" data-action="solo" disabled={connecting} onClick={press(() => setSheet("mode"))}>
           Choose seats
@@ -391,7 +400,7 @@ export function ArcadeHome({
           className="text-button"
           data-action="quick-play"
           disabled={connecting}
-          onClick={press(() => gate(() => onQuickPlay(readyName || "Guest", 5)))}
+          onClick={press(() => gate(() => onQuickPlay(readyName || "Guest", seriesForFormat(quickFormat))))}
         >
           Quick Play
         </button>
@@ -808,7 +817,7 @@ export function QuickWait({
   onFillBots?: () => void;
   onKeep: () => void;
   autoStartAt?: number | null;
-  seriesLength?: 3 | 5 | 7;
+  seriesLength?: 1 | 3 | 5 | 7;
   youAreHost?: boolean;
   onSeries?: (length: 3 | 5 | 7) => void;
 }) {
@@ -825,14 +834,14 @@ export function QuickWait({
       <h2>{finding ? "Finding players..." : "Finding a table"}</h2>
       <p className="hint">
         {finding
-          ? `Best of ${seriesLength}. Computers sit down in ${Math.max(0, Math.round((autoLeft ?? 0) / 1000))}s if these seats stay open. A computer game stays off the rating. For the first two hands, someone can take a computer's seat between hands.`
+          ? `${seriesLength === 1 ? "Single game" : `Series, best of ${seriesLength}`}. Computers sit down in ${Math.max(0, Math.round((autoLeft ?? 0) / 1000))}s if these seats stay open. A computer game stays off the rating. For the first two hands, someone can take a computer's seat between hands.`
           : `Best of 3. Draw until you can play.${
               botFillAt != null
                 ? " A bot sits down if the seat stays open, and the game still counts toward your rating."
                 : " All human, so this one counts toward your rating."
             }`}
       </p>
-      {finding && youAreHost && onSeries ? (
+      {finding && youAreHost && onSeries && seriesLength !== 1 ? (
         <div className="choices">
           {([3, 5, 7] as const).map((length) => (
             <button

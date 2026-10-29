@@ -84,6 +84,8 @@ export interface PlayAccuracyView {
 /** Shown once, when a game to 150 ends or someone leaves for good. */
 export interface RankRecap {
   gameNumber: number;
+  /** One game to 150, or a best-of series. A series is still settled after each game. */
+  format: "single" | "series";
   ranked: boolean;
   casual: boolean;
   vsComputer: boolean;

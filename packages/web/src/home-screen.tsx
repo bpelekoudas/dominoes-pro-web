@@ -5,8 +5,26 @@ import { Logo } from "./logo";
 import { winPoseSrc } from "./lineup";
 import { Portrait } from "./avatars";
 import { playUiClick, unlockSound } from "./sound";
+import { readQuickFormat, seriesForFormat, writeQuickFormat, type QuickFormat } from "./quick-format";
 
-type SeriesLength = 3 | 5 | 7;
+export function QuickFormatToggle({
+  format,
+  onChange,
+}: {
+  format: QuickFormat;
+  onChange: (format: QuickFormat) => void;
+}) {
+  return (
+    <div className="ph-format" role="group" aria-label="Quick Play format">
+      <button type="button" data-action="format-series" aria-pressed={format === "series"} onClick={press(() => onChange("series"))}>
+        Series
+      </button>
+      <button type="button" data-action="format-single" aria-pressed={format === "single"} onClick={press(() => onChange("single"))}>
+        Single game
+      </button>
+    </div>
+  );
+}
 
 function press(action: () => void): () => void {
   return () => {
@@ -68,11 +86,14 @@ export function PlayerHome({
   onRanks: () => void;
   onMulti: () => void;
   onVersus: () => void;
-  onQuickPlay: (series: SeriesLength) => void;
+  onQuickPlay: (series: 1 | 5) => void;
 }) {
-  const [series, setSeries] = useState<SeriesLength>(5);
-  const [seriesOpen, setSeriesOpen] = useState(false);
+  const [format, setFormat] = useState<QuickFormat>(readQuickFormat);
   const [soon, setSoon] = useState<string | null>(null);
+  const chooseFormat = (next: QuickFormat) => {
+    setFormat(next);
+    writeQuickFormat(next);
+  };
   const pose = winPoseSrc(avatarId || "2hot4tv");
   const ratingText = ratingLabel(rating);
   const ping = (label: string) => {
@@ -167,41 +188,15 @@ export function PlayerHome({
             className="ph-play"
             data-action="quick-play"
             disabled={connecting}
-            onClick={press(() => onQuickPlay(series))}
+            onClick={press(() => onQuickPlay(seriesForFormat(format)))}
           >
             <span className="ph-pips" aria-hidden="true"><i /><i /><i /><i /></span>
             <span className="ph-play-copy">
               <span>Quick Play</span>
             </span>
           </button>
-          <button
-            type="button"
-            className="ph-series"
-            data-action="series-menu"
-            aria-expanded={seriesOpen}
-            onClick={press(() => setSeriesOpen((open) => !open))}
-          >
-            Open game · Best of {series} ▾
-          </button>
-          {seriesOpen ? (
-            <div className="ph-series-menu" role="listbox" aria-label="Series length">
-              {([3, 5, 7] as const).map((length) => (
-                <button
-                  key={length}
-                  type="button"
-                  data-action={`series-${length}`}
-                  aria-pressed={series === length}
-                  onClick={press(() => {
-                    setSeries(length);
-                    setSeriesOpen(false);
-                  })}
-                >
-                  Best of {length}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
+        <QuickFormatToggle format={format} onChange={chooseFormat} />
         <div className="ph-pills">
           <button type="button" className="ph-pill-btn" data-action="multi" disabled={connecting} onClick={press(onMulti)}>
             Multiplayer

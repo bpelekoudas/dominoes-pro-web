@@ -47,7 +47,7 @@ type ServerMessage =
   | { type: "error"; message: string };
 
 type BoneyardMode = "draw_one" | "draw_until";
-type SeriesLength = 3 | 5 | 7;
+type SeriesLength = 1 | 3 | 5 | 7;
 
 const TOKEN_KEY = "uhoh.token";
 /** Set while this tab is in a game, so a refresh resumes and a new visit deals fresh. */
@@ -595,7 +595,9 @@ export function Game({
         <p className="series-line" data-series-target={view.winsNeeded}>
           {playing ? (
             <>
-              {`Bo${view.settings.seriesLength} to ${view.winsNeeded} · G${view.gameNumber} · H${view.handNumber} · `}
+              {view.settings.seriesLength === 1
+                ? `Single game · H${view.handNumber} · `
+                : `Bo${view.settings.seriesLength} to ${view.winsNeeded} · G${view.gameNumber} · H${view.handNumber} · `}
               <SeriesTarget view={view} />
             </>
           ) : (
@@ -648,8 +650,8 @@ export function Game({
         <section className="ended-screen" data-screen="player-left">
           <div className="hand-summary-scroll">
             <p className="result-kicker">Game ended - {view.ended.name} left</p>
-            <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
-              Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+            <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded} data-format={view.settings.seriesLength === 1 ? "single" : "series"}>
+              {view.settings.seriesLength === 1 ? "Single game" : `Series · Games ${gameTallyText(view.players.map((player) => player.gamesWon))} · first to ${view.winsNeeded}`}
             </p>
             <ScoreList view={view} />
             {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
@@ -970,7 +972,7 @@ function Lobby({
         </div>
       ) : null}
       <p className="rules-note">
-        Best of {view.settings.seriesLength}. {mode} First to {view.settings.targetScore}. {view.prompt}
+        {view.settings.seriesLength === 1 ? "Single game." : `Best of ${view.settings.seriesLength}.`} {mode} First to {view.settings.targetScore}. {view.prompt}
       </p>
       {view.canStart ? (
         <button type="button" className="primary" data-action="start" onClick={onStart}>
@@ -1390,9 +1392,9 @@ function HandSummary({
   const lastFace = last ? faceOf(last.tileId) : null;
   return (
     <section className="hand-summary" data-screen={seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand"}>
-      <p className="result-kicker">{seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
-      <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
-        Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+      <p className="result-kicker">{view.settings.seriesLength === 1 && (seriesOver || gameOver) ? "Single game" : seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
+      <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded} data-format={view.settings.seriesLength === 1 ? "single" : "series"}>
+        {view.settings.seriesLength === 1 ? "Single game" : `Series · Games ${gameTallyText(view.players.map((player) => player.gamesWon))} · first to ${view.winsNeeded}`}
       </p>
       <div className="winner-row">
         <h2>{winners.join(" and ")} {hand.winnerIds.length > 1 ? "split it" : "won the hand"}</h2>

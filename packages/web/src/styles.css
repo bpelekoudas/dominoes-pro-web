@@ -3602,10 +3602,34 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 }
 .ph-actions { z-index: 2; display: grid; gap: 8px; padding-bottom: 8px; }
 .ph-play-wrap { position: relative; width: min(320px, 100%); margin: 0 auto; }
+.ph-format {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: min(320px, 100%);
+  margin: 0 auto;
+}
+.ph-format button {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--paper);
+  font-family: "Bebas Neue", Impact, sans-serif;
+  letter-spacing: 0.06em;
+  font-size: 1.15rem;
+  text-transform: uppercase;
+}
+.ph-format button[aria-pressed="true"] {
+  border-color: var(--gold);
+  background: var(--gold);
+  color: #141414;
+}
+.arcade-home .ph-format { margin: 8px 14px 0; width: auto; }
 .ph-play {
   width: 100%;
   min-height: 72px;
-  padding: 8px 16px 22px;
+  padding: 8px 16px;
   border-radius: 16px;
   display: flex;
   align-items: center;

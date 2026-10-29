@@ -167,7 +167,12 @@ export function RankRecapView({
 }) {
   return (
     <div className="rank-recap" data-ranked={recap.ranked ? "true" : "false"} data-screen="rank-recap">
-      <p className="eyebrow">{recap.ranked ? "Rating" : "Season points"}</p>
+      <p className="eyebrow" data-format={recap.format}>
+        {recap.format === "single" ? "Single game" : "Series"}
+        {" · "}
+        {recap.ranked ? "Rating" : "Season points"}
+      </p>
+      {recap.format === "single" && recap.ranked ? <p className="hint">A single game moves your rating a quarter as much as a series game.</p> : null}
       {!recap.ranked ? (
         <p className="rank-note">
           {recap.casual
@@ -391,6 +396,7 @@ function DemoPopup() {
     gameNumber: 1,
     ranked: true,
     casual: false,
+    format: "series",
     vsComputer: false,
     seasonEndsAt: "2026-12-14T06:00:00.000Z",
     players: [
