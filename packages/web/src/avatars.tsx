@@ -64,15 +64,6 @@ export function AvatarFace({
       ) : null}
       {pose ? <img className="avatar-pose" src={pose} alt="" draggable={false} data-pose="win" /> : <Portrait id={id} size="chip" />}
       {frameId ? <img className="avatar-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
-      {bot ? (
-        <svg className="bot-mark" viewBox="0 0 24 36">
-          <rect x="1.5" y="1.5" width="21" height="33" rx="3" />
-          <line x1="2" y1="18" x2="22" y2="18" />
-          <circle cx="12" cy="9" r="2.2" />
-          <circle cx="8.2" cy="27" r="2" />
-          <circle cx="15.8" cy="27" r="2" />
-        </svg>
-      ) : null}
     </span>
   );
 }

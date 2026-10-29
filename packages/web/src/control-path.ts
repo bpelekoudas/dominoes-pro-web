@@ -1,8 +1,8 @@
 import { motionMs } from "../../rules/src/motion.js";
 
-/** Mini domino. Small enough to sit on a seat badge without covering the talk line. */
-export const CONTROL_W = 16;
-export const CONTROL_H = 24;
+/** One domino, a step larger than the score pips, still clear of the talk line. */
+export const CONTROL_W = 20;
+export const CONTROL_H = 30;
 
 export interface Point {
   x: number;
@@ -29,11 +29,12 @@ export function boxesOverlap(a: Box, b: Box, pad = 0.6): boolean {
   return a.left < b.right - pad && a.right > b.left + pad && a.top < b.bottom - pad && a.bottom > b.top + pad;
 }
 
-/** Rest the token on the avatar side of the badge, above the talk line. */
+/** Rest the token on the avatar, clear of the talk line that starts 30px in. */
 export function parkOnBadge(badge: Box): Point {
+  const height = Math.max(1, badge.bottom - badge.top);
   return {
-    x: Math.round(badge.left + 13),
-    y: Math.round(badge.top + 12),
+    x: Math.round(badge.left + 15),
+    y: Math.round(badge.top + height / 2),
   };
 }
 

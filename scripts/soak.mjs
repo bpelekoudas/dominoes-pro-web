@@ -129,7 +129,7 @@ try {
   }
   if (report.reconnect === "pending") report.reconnect = "skipped";
   if (!args.noUi) {
-    console.log("UI smoke at 390×844");
+    console.log("UI smoke at 390×844 and the Fold cover");
     report.ui = await uiSmoke(pageUrl.origin, args.out);
     console.log(`  ${report.ui.summary}`);
   } else {
@@ -1168,9 +1168,16 @@ async function uiSmoke(origin, outDir = "soak-reports") {
       const saved = await saveUiFailure(page, outDir, audit);
       throw new Error(`${audit.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
+    await page.setViewportSize({ width: 344, height: 882 });
+    await settleCamera(page);
+    const cover = await page.evaluate(auditTable);
+    if (!cover.ok) {
+      const saved = await saveUiFailure(page, outDir, cover);
+      throw new Error(`Fold cover: ${cover.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: `${pop.summary}; ${tally.summary}; ${audit.summary}` };
+    return { ok: true, skipped: false, summary: `${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}` };
   } finally {
     await browser.close();
   }
@@ -1401,16 +1408,26 @@ function auditTable() {
       ...evidence,
     };
   }
-  const token = document.querySelector("[data-control='token']");
+  const tokens = [...document.querySelectorAll("[data-control='token']")];
   const turnChip = document.querySelector(".seat-chip.turn");
-  if (turnChip && !token) {
-    return { ok: false, reason: "The control marker is missing.", ...evidence };
+  if (document.querySelector(".bot-mark")) {
+    return { ok: false, reason: "A seat still wears a second domino.", ...evidence };
   }
-  if (token) {
+  if (turnChip && tokens.length !== 1) {
+    return { ok: false, reason: "The table should show exactly one control token.", count: tokens.length, ...evidence };
+  }
+  if (tokens.length === 1 && turnChip) {
+    const token = tokens[0];
+    const holder = token.getAttribute("data-holder");
+    const turnId = turnChip.getAttribute("data-player-id");
+    if (holder !== turnId) {
+      return { ok: false, reason: "The control token is not on the player who has the play.", holder, turnId, ...evidence };
+    }
     const tokenBox = token.getBoundingClientRect();
     const covered = tiles.find((tile) => overlaps(tokenBox, tile.getBoundingClientRect()));
     const talkHit = [...document.querySelectorAll(".talk-line")].find((line) => overlaps(tokenBox, line.getBoundingClientRect()));
-    if (covered || talkHit) {
+    const sliverHit = [...document.querySelectorAll(".sliver")].find((sliver) => overlaps(tokenBox, sliver.getBoundingClientRect()));
+    if (covered || talkHit || sliverHit) {
       return {
         ok: false,
         reason: "The control marker covers a tile.",
@@ -1420,7 +1437,28 @@ function auditTable() {
       };
     }
   }
-  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain` };
+  for (const bar of document.querySelectorAll(".edge-badge, .you-float .seat-chip")) {
+    if (bar.querySelector(".talk-line")) continue;
+    const box = bar.getBoundingClientRect();
+    if (box.width < 2) continue;
+    if (box.left < -1 || box.right > window.innerWidth + 1) {
+      return { ok: false, reason: "A seat bar leaves the screen.", bar: plain(box), ...evidence };
+    }
+    const avatar = bar.querySelector(".avatar")?.getBoundingClientRect();
+    const col = bar.querySelector(".game-col, .chip-text")?.getBoundingClientRect();
+    if (!avatar || !col || avatar.width < 2 || col.width < 2) continue;
+    const content = Math.max(avatar.right, col.right) - Math.min(avatar.left, col.left);
+    if (box.width - content > 36) {
+      return {
+        ok: false,
+        reason: "A seat bar sticks out past the score.",
+        bar: plain(box),
+        content: Math.round(content),
+        ...evidence,
+      };
+    }
+  }
+  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain, one control token` };
 }
 
 function openSocket(url, cookie) {

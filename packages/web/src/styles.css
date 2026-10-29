@@ -228,11 +228,14 @@ input {
 .control-token {
   position: fixed;
   z-index: 30;
-  width: 16px;
-  height: 24px;
-  margin: -12px 0 0 -8px;
+  width: 20px;
+  height: 30px;
+  margin: -15px 0 0 -10px;
   pointer-events: none;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.55));
+  filter:
+    drop-shadow(0 0 1px #d5a336)
+    drop-shadow(0 0 4px rgba(213, 163, 54, 0.85))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
 }
 .control-token rect { fill: #e31e26; stroke: #d5a336; stroke-width: 1.5; }
 .control-token line { stroke: #d5a336; stroke-width: 1.2; }
@@ -345,12 +348,12 @@ input {
   max-width: 42%;
   justify-content: center;
 }
-.edge-left { left: 0; align-items: flex-start; }
-.edge-right { right: 0; align-items: flex-end; }
-.edge-top {
+.table-middle > .edge.edge-left { left: 0; align-items: flex-start; }
+.table-middle > .edge.edge-right { right: 0; align-items: flex-end; }
+.table-middle > .edge.edge-top {
   top: 0;
-  left: 16px;
-  right: 16px;
+  left: 8px;
+  right: 8px;
   align-items: center;
 }
 .edge-slivers { display: flex; }
@@ -435,13 +438,21 @@ input {
   font-size: 0.68rem;
 }
 .game-pips.pop { animation: win-score-pop calc(280ms * var(--motion)) cubic-bezier(0.2, 1.4, 0.4, 1); }
-/* The badge keeps a slot for a line of talk. The chain is fitted around that slot. */
-.edge-top .edge-badge { min-width: min(148px, 44vw); max-width: min(168px, 48vw); }
-.edge-left .edge-badge,
-.edge-right .edge-badge { max-width: min(140px, 40vw); }
-.edge-left .edge-badge:has(.talk-line),
-.edge-right .edge-badge:has(.talk-line),
-.you-float .seat-chip:has(.talk-line) { min-width: min(136px, 42vw); }
+/* The bar hugs the avatar and the score. It grows only while a line of talk is up. */
+.edge .edge-badge,
+.you-float .seat-chip {
+  width: max-content;
+  max-width: min(42vw, 148px);
+  flex: none;
+}
+.edge-left .edge-badge { align-self: flex-start; }
+.edge-right .edge-badge { align-self: flex-end; }
+.edge-top .edge-badge { align-self: center; }
+.edge .edge-badge:has(.talk-line),
+.you-float .seat-chip:has(.talk-line) {
+  min-width: min(40vw, 132px);
+  max-width: min(44vw, 160px);
+}
 .rail-top {
   min-height: 44px;
   max-height: 48px;
@@ -533,8 +544,7 @@ input {
   font-size: 1.15rem;
   letter-spacing: 0.04em;
 }
-/* Whose turn it is rides the traveling control token, not a second glow. */
-.avatar .bot-mark { width: 12px; height: 18px; }
+/* Whose turn it is rides the traveling control token. */
 .chip-text { min-width: 0; display: grid; line-height: 1.1; }
 .chip-name {
   overflow: hidden;
@@ -1320,10 +1330,6 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.bot-mark { width: 20px; height: 30px; flex: none; }
-.bot-mark rect { fill: var(--red); }
-.bot-mark line { stroke: white; stroke-width: 2; }
-.bot-mark circle { fill: white; }
 .bot-add { display: grid; gap: 8px; margin-top: 4px; }
 .empty-seat { color: var(--muted); }
 .mobile-only { display: inline; }
@@ -2115,7 +2121,6 @@ html[data-pip-marks="numbers"] .half i { opacity: 0.28; }
 .avatar-grid span { font-size: 0.78rem; }
 .portrait-grid { width: 100%; aspect-ratio: 1; object-fit: cover; object-position: center 18%; border-radius: 12px; }
 .portrait-chip { width: 100%; height: 100%; object-fit: cover; object-position: center 16%; border-radius: 50%; display: block; }
-.avatar .bot-mark { position: absolute; right: -4px; bottom: -2px; z-index: 2; }
 .profile-portrait { width: 112px; margin: 0 auto 8px; }
 .profile-portrait .portrait-grid { border-radius: 18px; }
 .recap-who { display: flex; align-items: center; gap: 8px; }
