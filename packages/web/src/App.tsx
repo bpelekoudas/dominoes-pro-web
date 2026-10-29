@@ -1634,7 +1634,7 @@ function useTalkBubble(chat: ChatLine[]): ChatLine | null {
     setBubble(last);
     const timer = window.setTimeout(() => {
       setBubble((current) => (current?.id === last.id ? null : current));
-    }, isReaction(last.text) ? 1_000 : 1_400);
+    }, 2_400);
     return () => window.clearTimeout(timer);
   }, [chat]);
   return bubble;

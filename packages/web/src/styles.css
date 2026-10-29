@@ -533,14 +533,14 @@ input {
   text-overflow: ellipsis;
   pointer-events: none;
   transform: translateY(-50%);
-  animation: talk-fade 1.3s ease forwards;
+  animation: talk-fade 2.4s ease forwards;
 }
 .you-float { position: relative; z-index: 4; flex: none; }
 .you-float .seat-chip { overflow: hidden; }
 @keyframes talk-fade {
   0% { opacity: 0; }
-  10% { opacity: 1; }
-  62% { opacity: 1; }
+  5% { opacity: 1; }
+  83% { opacity: 1; }
   100% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
