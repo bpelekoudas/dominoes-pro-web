@@ -1,9 +1,11 @@
 {
+  "id": "/",
   "name": "Uh Oh Dominoes",
   "short_name": "Uh Oh",
   "description": "Play Uh Oh Dominoes with friends, or against the computer.",
   "start_url": "/",
   "scope": "/",
+  "prefer_related_applications": false,
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#121212",

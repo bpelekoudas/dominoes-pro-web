@@ -42,6 +42,7 @@ html { -webkit-text-size-adjust: 100%; background: #121212; }
   color: var(--paper);
   font-size: 0.82rem;
 }
+.install-hint span { flex: 1; min-width: 0; line-height: 1.35; }
 .install-hint .text-button { min-height: 36px; }
 @media (orientation: landscape) and (max-height: 520px) {
   .install-hint { display: none; }
