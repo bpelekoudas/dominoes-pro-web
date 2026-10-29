@@ -64,6 +64,7 @@ export function AvatarFace({
       ) : null}
       {pose ? <img className="avatar-pose" src={pose} alt="" draggable={false} data-pose="win" /> : <Portrait id={id} size="chip" />}
       {frameId ? <img className="avatar-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
+      {bot ? <em className="cpu-tag">CPU</em> : null}
     </span>
   );
 }

@@ -1438,7 +1438,6 @@ function auditTable() {
     }
   }
   for (const bar of document.querySelectorAll(".edge-badge, .you-float .seat-chip")) {
-    if (bar.querySelector(".talk-line")) continue;
     const box = bar.getBoundingClientRect();
     if (box.width < 2) continue;
     if (box.left < -1 || box.right > window.innerWidth + 1) {

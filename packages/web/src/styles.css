@@ -446,13 +446,8 @@ input {
   flex: none;
 }
 .edge-left .edge-badge { align-self: flex-start; }
-.edge-right .edge-badge { align-self: flex-end; }
+.edge-right .edge-badge { align-self: flex-end; min-width: 0; }
 .edge-top .edge-badge { align-self: center; }
-.edge .edge-badge:has(.talk-line),
-.you-float .seat-chip:has(.talk-line) {
-  min-width: min(40vw, 132px);
-  max-width: min(44vw, 160px);
-}
 .rail-top {
   min-height: 44px;
   max-height: 48px;
@@ -532,6 +527,7 @@ input {
 .you-float .seat-chip { position: relative; left: auto; top: auto; right: auto; }
 .you-float .seat-chip:not(.turn) { opacity: 0.58; }
 .avatar {
+  position: relative;
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -543,6 +539,24 @@ input {
   font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
   font-size: 1.15rem;
   letter-spacing: 0.04em;
+}
+.cpu-tag {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(16, 16, 16, 0.55);
+  color: rgba(239, 239, 239, 0.92);
+  font-style: normal;
+  font-size: 0.45rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 /* Whose turn it is rides the traveling control token. */
 .chip-text { min-width: 0; display: grid; line-height: 1.1; }
