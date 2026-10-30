@@ -3,7 +3,9 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
   RULES_VERSION,
+  allTileIds,
   applyIntent,
+  arrangeDeck,
   beginHand,
   createMatch,
   currentPlayerId,
@@ -672,6 +674,112 @@ describe("rooms", () => {
       warn.mockRestore();
       store.db.close();
     }
+  });
+
+  it("keeps the last domino on reconnect after later turns", () => {
+    const store = new Store(":memory:");
+    const now = new Date().toISOString();
+    const rest = (used: string[]) => allTileIds().filter((id) => !used.includes(id));
+    const deckFor = (hands: Record<string, string[]>) =>
+      arrangeDeck(["a", "b"], hands, rest(["a", "b"].flatMap((id) => hands[id] ?? [])));
+    const first = {
+      a: ["5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-2"],
+      b: ["6-6", "5-5", "4-4", "3-3", "2-2", "1-1", "0-0"],
+    };
+    const second = {
+      a: ["5-6", "3-4", "0-1", "0-2", "0-3", "0-4", "1-2"],
+      b: ["6-6", "4-5", "2-4", "3-3", "2-2", "1-1", "0-0"],
+    };
+    const hand1: Array<[string, string, string]> = [
+      ["b", "6-6", "lead"],
+      ["a", "5-6", "east"],
+      ["b", "5-5", "east"],
+      ["a", "4-5", "east"],
+      ["b", "4-4", "east"],
+      ["a", "3-4", "east"],
+      ["b", "3-3", "east"],
+      ["a", "2-3", "east"],
+      ["b", "2-2", "east"],
+      ["a", "1-2", "east"],
+      ["b", "1-1", "east"],
+      ["a", "0-1", "east"],
+      ["b", "0-0", "east"],
+    ];
+    const hand2: Array<[string, string, string]> = [
+      ["b", "6-6", "lead"],
+      ["a", "5-6", "east"],
+      ["b", "4-5", "east"],
+    ];
+    store.insertRoom({
+      id: "r_domino",
+      code: "DOMINO",
+      host_id: "a",
+      series_id: "s_domino",
+      player_count: 2,
+      boneyard_mode: "draw_one",
+      series_length: 3,
+      status: "playing",
+      created_at: now,
+      rules_version: RULES_VERSION,
+    });
+    store.insertPlayer({
+      id: "a",
+      room_id: "r_domino",
+      name: "Bryan",
+      token: "a".repeat(32),
+      seat: 0,
+      created_at: now,
+      bot: 0,
+      difficulty: null,
+    });
+    store.insertPlayer({
+      id: "b",
+      room_id: "r_domino",
+      name: "Draw One",
+      token: "b".repeat(32),
+      seat: 1,
+      created_at: now,
+      bot: 1,
+      difficulty: "medium",
+    });
+    const save = (id: string, game: number, hand: number, deck: string[], plays: Array<[string, string, string]>) => {
+      store.insertHand({
+        id,
+        room_id: "r_domino",
+        series_id: "s_domino",
+        game_number: game,
+        hand_number: hand,
+        seed: "seed",
+        deck_json: JSON.stringify(deck),
+        result_json: null,
+        created_at: now,
+      });
+      plays.forEach(([playerId, tileId, endId], index) => {
+        store.insertAction({
+          hand_id: id,
+          seq: index + 1,
+          player_id: playerId,
+          payload_json: JSON.stringify({ type: "play", tileId, endId }),
+          created_at: now,
+        });
+      });
+    };
+    save("h1", 1, 1, deckFor(first), hand1);
+    save("h2", 1, 2, deckFor(second), hand2);
+    const hub = new Hub(store, 30, () => 0);
+    const messages: ServerMessage[] = [];
+    const back = hub.connect(
+      { type: "reconnect", token: "a".repeat(32) },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    expect(back.ok).toBe(true);
+    const view = latestView(messages);
+    expect(view?.lastDominoId).toBe("b");
+    expect(view?.lastDominoKey).toBe("1:1");
+    expect(view?.turnPlayerId).toBe("a");
+    expect(view?.turnPlayerId).not.toBe(view?.lastDominoId);
+    store.db.close();
   });
 
   it("restores a skipped turn after the server starts again", async () => {

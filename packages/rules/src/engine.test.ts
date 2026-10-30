@@ -5,6 +5,7 @@ import {
   beginHand,
   conservedTiles,
   createMatch,
+  currentPlayerId,
   deal,
   legalIntents,
   openingLead,
@@ -869,6 +870,104 @@ function namedSeed(series: number, hand: number): Buffer {
   seed.writeUInt32BE(hand + 1, 4);
   return seed;
 }
+
+describe("the red token stays with the last domino", () => {
+  it("does not follow the turn through the next hand or a reconnect replay", () => {
+    const config = { boneyardMode: "draw_one" as const, seriesLength: 3 as const, targetScore: 150 };
+    const firstHands = {
+      a: ["5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-2"],
+      b: ["6-6", "5-5", "4-4", "3-3", "2-2", "1-1", "0-0"],
+    };
+    const deck1 = deckFor(["a", "b"], firstHands);
+    let match = start([A, B], deck1, config);
+    const hand1: Array<{ playerId: string; intent: Intent }> = [];
+    const playLogged = (playerId: string, tileId: string, endId: string) => {
+      hand1.push({ playerId, intent: { type: "play", tileId, endId } });
+      match = play(match, playerId, tileId, endId);
+    };
+    playLogged("b", "6-6", "lead");
+    for (const [playerId, tileId] of [
+      ["a", "5-6"],
+      ["b", "5-5"],
+      ["a", "4-5"],
+      ["b", "4-4"],
+      ["a", "3-4"],
+      ["b", "3-3"],
+      ["a", "2-3"],
+      ["b", "2-2"],
+      ["a", "1-2"],
+      ["b", "1-1"],
+      ["a", "0-1"],
+      ["b", "0-0"],
+    ] as const) {
+      playLogged(playerId, tileId, "east");
+    }
+    expect(match.lastHand?.reason).toBe("domino");
+    expect(match.lastDominoId).toBe("b");
+    const dominoKey = match.lastDominoKey;
+    expect(dominoKey).toBe("1:1");
+
+    const secondHands = {
+      a: ["5-6", "3-4", "0-1", "0-2", "0-3", "0-4", "1-2"],
+      b: ["6-6", "4-5", "2-4", "3-3", "2-2", "1-1", "0-0"],
+    };
+    const deck2 = deckFor(["a", "b"], secondHands);
+    match = beginHand(match, deck2);
+    expect(match.lastDominoId).toBe("b");
+    expect(match.lastDominoKey).toBe(dominoKey);
+    const hand2: Array<{ playerId: string; intent: Intent }> = [];
+    let sawSomeoneElse = false;
+    const continueLogged = (playerId: string, tileId: string, endId: string) => {
+      hand2.push({ playerId, intent: { type: "play", tileId, endId } });
+      match = play(match, playerId, tileId, endId);
+      expect(match.hand?.phase).not.toBe("complete");
+      expect(match.lastDominoId).toBe("b");
+      expect(match.lastDominoKey).toBe(dominoKey);
+      const view = project(match, metaOf(match, "a"));
+      expect(view.lastDominoId).toBe("b");
+      expect(view.lastDominoKey).toBe(dominoKey);
+      if (view.turnPlayerId !== view.lastDominoId) sawSomeoneElse = true;
+    };
+    continueLogged("b", "6-6", "lead");
+    continueLogged("a", "5-6", "east");
+    continueLogged("b", "4-5", "east");
+    expect(sawSomeoneElse).toBe(true);
+    expect(currentPlayerId(match)).not.toBe("b");
+
+    const restored = replayMatch(
+      [A, B],
+      config,
+      [
+        { deck: deck1, actions: hand1 },
+        { deck: deck2, actions: hand2 },
+      ],
+    );
+    expect(restored.lastDominoId).toBe("b");
+    expect(restored.lastDominoKey).toBe(dominoKey);
+    expect(currentPlayerId(restored)).toBe(currentPlayerId(match));
+    const restoredView = project(restored, metaOf(restored, "a"));
+    expect(restoredView.lastDominoId).toBe("b");
+    expect(restoredView.turnPlayerId).not.toBe("b");
+
+    const again = play(
+      {
+        ...match,
+        hand: {
+          ...match.hand!,
+          hands: { a: ["3-4"], b: ["3-3", "2-2", "1-1", "0-0"] },
+          phase: "await_play",
+          turnIndex: 0,
+        },
+      },
+      "a",
+      "3-4",
+      "east",
+    );
+    expect(again.lastHand?.reason).toBe("domino");
+    expect(again.lastDominoId).toBe("a");
+    expect(again.lastDominoKey).not.toBe(dominoKey);
+  });
+});
 
 function metaOf(match: MatchState, youId: string): TableMeta {
   return {

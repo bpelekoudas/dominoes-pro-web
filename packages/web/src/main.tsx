@@ -13,8 +13,30 @@ applyA11y();
 document.documentElement.style.setProperty("--motion", String(MOTION));
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let refreshing = false;
+  const reloadForUpdate = () => {
+    if (refreshing || !navigator.onLine) return;
+    refreshing = true;
+    window.location.reload();
+  };
+  // The first install has no previous page to replace. A later deploy does.
+  if (hadController) {
+    navigator.serviceWorker.addEventListener("controllerchange", reloadForUpdate);
+  }
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch(() => undefined);
+    navigator.serviceWorker
+      .register("/sw.js", { scope: "/", updateViaCache: "none" })
+      .then((registration) => {
+        const look = () => {
+          void registration.update();
+        };
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") look();
+        });
+        if (registration.waiting) registration.waiting.postMessage({ type: "skip-waiting" });
+      })
+      .catch(() => undefined);
   });
 }
 

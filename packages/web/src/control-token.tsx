@@ -33,7 +33,8 @@ function obstacles(): Box[] {
 }
 
 function chipFor(playerId: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`.seat-chip[data-player-id="${CSS.escape(playerId)}"]`);
+  // Only the live table. A win pose or a demo chip must not pull the token onto another seat.
+  return document.querySelector<HTMLElement>(`.felt-app .seat-chip[data-player-id="${CSS.escape(playerId)}"]`);
 }
 
 /**
@@ -136,6 +137,7 @@ export function ControlToken({ playerId, stamp }: { playerId: string | null; sta
       key={bump}
       className={bump > 0 ? "control-token is-bump" : "control-token"}
       data-control="token"
+      data-token="last-domino"
       data-holder={playerId}
       data-bump={bump > 0 ? "true" : "false"}
       viewBox="0 0 16 24"

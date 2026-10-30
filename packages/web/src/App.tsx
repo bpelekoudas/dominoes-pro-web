@@ -706,6 +706,7 @@ export function Game({
                 tableArt={tableArt}
                 showScores={scoreNumbers}
               />
+              {/* Last player who went out. Never the seat whose turn it is. */}
               <ControlToken playerId={view.lastDominoId} stamp={view.lastDominoKey ?? ""} />
               <DrawFlight draw={view.lastDraw} handKey={`${view.gameNumber}:${view.handNumber}`} />
               {opponents.map((seat) => (
@@ -1266,9 +1267,10 @@ function fleetingNotice(view: PlayerView): { playerId: string; text: string } | 
   return { playerId: draw.playerId, text: `Drew ${draw.count}` };
 }
 
+/** Brand mark in the top bar. It is not the last-domino token and it does not move. */
 function PlayMark() {
   return (
-    <svg className="play-mark" viewBox="0 0 16 24" aria-hidden="true">
+    <svg className="play-mark" viewBox="0 0 16 24" data-mark="brand" aria-hidden="true">
       <rect x="0.75" y="0.75" width="14.5" height="22.5" rx="2" />
       <line x1="1" y1="12" x2="15" y2="12" />
       <circle cx="8" cy="6.2" r="1.5" />
