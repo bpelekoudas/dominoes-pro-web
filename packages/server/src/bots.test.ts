@@ -227,6 +227,27 @@ describe("bot economy", () => {
   });
 });
 
+describe("named computer skills", () => {
+  it("gives every named computer one fixed rating and puts it back if a game moved it", () => {
+    const { store, bots } = memory();
+    const roster = bots.ensure();
+    const ratings = { easy: 900, medium: 1200, hard: 1500, expert: 1800 };
+    const names = new Set<string>();
+    for (const bot of roster) {
+      expect(names.has(bot.name)).toBe(false);
+      names.add(bot.name);
+      expect(store.user(bot.userId)?.rating).toBe(ratings[bot.difficulty]);
+    }
+    expect(roster.filter((bot) => bot.difficulty === "easy")).toHaveLength(8);
+    expect(roster.filter((bot) => bot.difficulty === "medium")).toHaveLength(8);
+    expect(roster.filter((bot) => bot.difficulty === "hard")).toHaveLength(7);
+    expect(roster.filter((bot) => bot.difficulty === "expert")).toHaveLength(7);
+    store.db.prepare(`UPDATE users SET rating = 2000 WHERE id = ?`).run(roster[0]!.userId);
+    bots.ensure();
+    expect(store.user(roster[0]!.userId)?.rating).toBe(ratings[roster[0]!.difficulty]);
+  });
+});
+
 describe("bot play", () => {
   it("plays a real game to 150 and keeps the Bones ledger honest", () => {
     const { bots } = memory();

@@ -12,6 +12,65 @@ import { allTileIds, tileById, tilePips } from "./tiles.js";
 
 export type BotDifficulty = "easy" | "medium" | "hard" | "expert";
 
+/** One fixed rating per skill. It does not move after a game. */
+export const BOT_SKILL_RATING: Record<BotDifficulty, number> = {
+  easy: 900,
+  medium: 1200,
+  hard: 1500,
+  expert: 1800,
+};
+
+export function botSkillRating(difficulty: BotDifficulty): number {
+  return BOT_SKILL_RATING[difficulty];
+}
+
+export function botSkillLabel(difficulty: BotDifficulty): string {
+  if (difficulty === "easy") return "Easy";
+  if (difficulty === "hard") return "Hard";
+  if (difficulty === "expert") return "Expert";
+  return "Medium";
+}
+
+/**
+ * Closest fixed ratings first. A name already at the table is skipped while
+ * enough others are free. Ties break toward the lower rating, then the name.
+ */
+export function pickClosestByRating<T extends { id: string; name: string; rating: number }>(
+  bots: readonly T[],
+  target: number,
+  count: number,
+  busyIds: ReadonlySet<string> = new Set(),
+): T[] {
+  const want = Math.max(0, Math.floor(count));
+  if (want === 0 || !Number.isFinite(target)) return [];
+  const unique = new Map<string, T>();
+  for (const bot of bots) {
+    if (!unique.has(bot.id)) unique.set(bot.id, bot);
+  }
+  const list = [...unique.values()];
+  const free = list.filter((bot) => !busyIds.has(bot.id));
+  const pool = free.length >= want ? free : list;
+  const ranked = [...pool].sort((a, b) => {
+    const dist = Math.abs(a.rating - target) - Math.abs(b.rating - target);
+    if (dist !== 0) return dist;
+    if (a.rating !== b.rating) return a.rating - b.rating;
+    return a.name.localeCompare(b.name);
+  });
+  return ranked.slice(0, want);
+}
+
+/** Named computers of one skill. Same order as the closest-rating pick. */
+export function pickBotsAtLevel<
+  T extends { id: string; name: string; rating: number; difficulty: BotDifficulty },
+>(bots: readonly T[], difficulty: BotDifficulty, count: number, busyIds: ReadonlySet<string> = new Set()): T[] {
+  return pickClosestByRating(
+    bots.filter((bot) => bot.difficulty === difficulty),
+    BOT_SKILL_RATING[difficulty],
+    count,
+    busyIds,
+  );
+}
+
 /**
  * Pick a legal intent for a computer seat.
  *

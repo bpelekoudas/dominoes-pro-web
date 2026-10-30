@@ -98,6 +98,12 @@ export interface MatchState {
   /** Null before the first hand. After a hand, this player leads the next one in the same game. */
   nextLeaderId: string | null;
   lastHand: HandResult | null;
+  /**
+   * Who last went out, and which hand. A lock or a score stop leaves both
+   * as they were. Null until the first domino of the match.
+   */
+  lastDominoId: string | null;
+  lastDominoKey: string | null;
   seriesWinnerId: string | null;
   playSeq: number;
   lastPlay: LastPlay | null;
@@ -166,6 +172,8 @@ export function createMatch(players: MatchPlayer[], config: MatchConfig): MatchS
     hand: null,
     nextLeaderId: null,
     lastHand: null,
+    lastDominoId: null,
+    lastDominoKey: null,
     seriesWinnerId: null,
     playSeq: 0,
     lastPlay: null,
@@ -686,6 +694,9 @@ function finish(
     handNumber: match.handNumber,
   };
 
+  const dominoed = input.reason === "domino";
+  const dominoId = dominoed ? (input.winnerIds[0] ?? null) : (match.lastDominoId ?? null);
+  const dominoKey = dominoed ? `${match.gameNumber}:${match.handNumber}` : (match.lastDominoKey ?? null);
   return ok({
     ...match,
     scores: input.scores,
@@ -694,6 +705,8 @@ function finish(
     seriesWinnerId,
     nextLeaderId: input.nextLeaderId,
     lastHand: result,
+    lastDominoId: dominoId,
+    lastDominoKey: dominoId ? dominoKey : null,
     hand: { ...hand, phase: "complete", result },
   });
 }

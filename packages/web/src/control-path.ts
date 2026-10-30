@@ -106,6 +106,21 @@ export function controlRoute(
   return best ?? [to];
 }
 
+/**
+ * How the last-domino token should move.
+ * A lock keeps the same id and key, so the token holds.
+ */
+export function dominoTokenAction(
+  previous: { playerId: string; key: string } | null,
+  next: { playerId: string; key: string } | null,
+): "hide" | "place" | "fly" | "bump" | "hold" {
+  if (!next) return "hide";
+  if (!previous) return "place";
+  if (previous.playerId !== next.playerId) return "fly";
+  if (previous.key !== next.key) return "bump";
+  return "hold";
+}
+
 /** Slide time from the shared pace. A longer detour takes longer, up to a cap. */
 export function controlSlideMs(distance: number): number {
   const base = Math.min(900, Math.max(380, distance * 0.45));

@@ -18,7 +18,7 @@ import { ArcadeHome, MenuDemo, QuickWait, Splash, menuDemoRequested, reducedMoti
 import { shouldAskAge } from "./home-model";
 import { hintText, markHint, playHint } from "./play-hints";
 import { scoreHintChoice, setScoreHintChoice, showScoreNumbers, type ScoreHintChoice } from "./score-hints";
-import { AvatarFace, BotBadge } from "./avatars";
+import { AvatarFace, BotBadge, cpuSkill } from "./avatars";
 import { CheckoutBanner, useMatchCosmetics } from "./store";
 import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
@@ -706,7 +706,7 @@ export function Game({
                 tableArt={tableArt}
                 showScores={scoreNumbers}
               />
-              <ControlToken playerId={view.turnPlayerId} />
+              <ControlToken playerId={view.lastDominoId} stamp={view.lastDominoKey ?? ""} />
               <DrawFlight draw={view.lastDraw} handKey={`${view.gameNumber}:${view.handNumber}`} />
               {opponents.map((seat) => (
                 <EdgeSeat
@@ -737,8 +737,8 @@ export function Game({
                   />
                 ) : null}
               </div>
-              {view.phase === "play" && view.turnPlayerId ? (
-                <p className="your-turn" data-you={yourTurn ? "true" : "false"}>
+              {(view.phase === "play" || view.phase === "draw" || view.phase === "knock") && view.turnPlayerId ? (
+                <p className="your-turn" data-turn-pill="true" data-you={yourTurn ? "true" : "false"}>
                   {coach ? hintText(coach) : yourTurn ? "Your turn" : `${view.players.find((player) => player.id === view.turnPlayerId)?.name ?? "Their"}'s turn`}
                   {coach ? (
                     <button
@@ -895,12 +895,12 @@ function Lobby({
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
             <span className="who">
-              <AvatarFace id={player.avatarId} bot={player.bot && !player.accountBot} frameId={player.frameId} />
+              <AvatarFace id={player.avatarId} bot={player.bot} skill={cpuSkill(player.difficulty)} frameId={player.frameId} />
               <span>
                 {player.isYou ? `${player.name} (you)` : player.name}
                 {player.accountBot ? <BotBadge /> : null}
-                {player.bot && !player.accountBot ? (
-                  <small className="bot-label">Computer · {labelDifficulty(player.difficulty)}</small>
+                {player.bot ? (
+                  <small className="bot-label">CPU · {cpuMark(player.difficulty)}</small>
                 ) : player.rank ? (
                   <RankLine
                     tierId={player.rank.tierId}
@@ -1075,16 +1075,15 @@ function EdgeBadge({
 }) {
   const clock = useServerNow(view.serverNow);
   const live = useShownScore(player.id, player.score);
-  const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
-  const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   const over = live.score >= view.settings.targetScore;
   return (
     <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`} data-player-id={player.id}>
       <AvatarFace
         id={player.avatarId}
-        bot={player.bot && !player.accountBot}
+        bot={player.bot}
+        skill={cpuSkill(player.difficulty)}
         frameId={player.frameId}
-        timer={player.isTurn && view.turnDeadline ? ratio : null}
+        timer={turnRatio(player.isTurn, view, clock)}
       />
       <span className="game-col">
         <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
@@ -1123,21 +1122,20 @@ function SeatChip({
 }) {
   const clock = useServerNow(view.serverNow);
   const live = useShownScore(player.id, player.score);
-  const left = player.isTurn && view.turnDeadline ? shownLeft(view.turnDeadline, clock, view.turnBudgetMs) : 0;
-  const ratio = view.turnBudgetMs > 0 ? left / view.turnBudgetMs : 0;
   return (
     <div
       className={`seat-chip${player.isTurn ? " turn" : ""}${player.isYou ? " you" : ""}${player.bot ? " bot" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`}
       data-account-bot={player.accountBot ? "true" : "false"}
       data-player-id={player.id}
       data-turn={player.isTurn ? "true" : "false"}
-      data-turn-timer={player.isTurn && view.turnDeadline ? "true" : "false"}
+      data-turn-timer={player.isTurn && view.phase === "play" ? "true" : "false"}
     >
       <AvatarFace
         id={player.avatarId}
-        bot={player.bot && !player.accountBot}
+        bot={player.bot}
+        skill={cpuSkill(player.difficulty)}
         frameId={player.frameId}
-        timer={player.isTurn && view.turnDeadline ? ratio : null}
+        timer={turnRatio(player.isTurn, view, clock)}
       />
       <span className="chip-text">
         <span className="chip-name">
@@ -1155,7 +1153,7 @@ function SeatChip({
           </strong>
           <GamePips won={player.gamesWon} needed={view.winsNeeded} />
           {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
-          {player.rank ? (
+          {player.rank && !player.bot ? (
             <RankLine
               tierId={player.rank.tierId}
               tierName={player.rank.tierName}
@@ -1320,11 +1318,17 @@ function shownLeft(deadline: number, now: number, budget: number): number {
   return budget > 0 ? Math.min(left, budget) : left;
 }
 
-function labelDifficulty(level: string | null): string {
-  if (level === "easy") return "Easy";
-  if (level === "hard") return "Hard";
-  if (level === "expert") return "Expert";
-  return "Medium";
+function cpuMark(level: string | null): string {
+  const skill = cpuSkill(level);
+  return skill ? `${skill.label} ${skill.rating}` : "Medium 1200";
+}
+
+/** Portrait ring for the seat that is on the clock. A computer with no clock gets a full ring. */
+function turnRatio(isTurn: boolean, view: PlayerView, clock: number): number | null {
+  const live = view.phase === "play" || view.phase === "draw" || view.phase === "knock";
+  if (!isTurn || !live) return null;
+  if (!view.turnDeadline || view.turnBudgetMs <= 0) return 1;
+  return shownLeft(view.turnDeadline, clock, view.turnBudgetMs) / view.turnBudgetMs;
 }
 
 function useServerNow(serverNow: number): number {

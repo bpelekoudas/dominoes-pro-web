@@ -241,6 +241,8 @@ function makeView(input: HandInput): PlayerView {
     openEquation: scored.equation,
     boneyardCount: 8,
     turnPlayerId: input.turn,
+    lastDominoId: null,
+    lastDominoKey: null,
     phase: input.phase ?? "play",
     turnDeadline: input.between ? null : now + 24_000,
     turnBudgetMs: 30_000,

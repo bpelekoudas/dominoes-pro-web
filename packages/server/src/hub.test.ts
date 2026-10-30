@@ -249,6 +249,33 @@ describe("rooms", () => {
     },
   );
 
+  it("Play vs computer seats named computers of the chosen level", () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0);
+    hub.setRoster(() => [
+      { userId: "e1", name: "Pip Squeak", avatarId: "homescreen", difficulty: "easy", rating: 900 },
+      { userId: "h1", name: "Boneyard", avatarId: "homescreen", difficulty: "hard", rating: 1500 },
+      { userId: "h2", name: "Boxcar", avatarId: "homescreen", difficulty: "hard", rating: 1500 },
+      { userId: "h3", name: "Capstone", avatarId: "homescreen", difficulty: "hard", rating: 1500 },
+      { userId: "x1", name: "Spinner", avatarId: "homescreen", difficulty: "expert", rating: 1800 },
+    ]);
+    const messages: ServerMessage[] = [];
+    const alex = hub.connect(
+      { type: "solo", name: "Alex", playerCount: 4, boneyardMode: "draw_until", seriesLength: 3, difficulty: "hard" },
+      (message) => messages.push(message),
+      () => undefined,
+    );
+    if (!alex.ok) throw new Error(alex.error);
+    const view = latestView(messages);
+    const bots = view?.players.filter((player) => player.bot) ?? [];
+    expect(bots).toHaveLength(3);
+    expect(bots.map((player) => player.name).sort()).toEqual(["Boneyard", "Boxcar", "Capstone"]);
+    expect(bots.every((player) => player.difficulty === "hard" && !player.accountBot)).toBe(true);
+    expect(view?.settings.casual).toBe(false);
+    const room = store.roomByCode(view?.roomCode ?? "");
+    expect(store.players(room?.id ?? "").filter((player) => player.bot === 1).every((player) => !player.user_id)).toBe(true);
+  });
+
   it("starts a four-seat table against three computers", async () => {
     const store = new Store(":memory:");
     const hub = new Hub(store, 30, () => 0);
@@ -1793,6 +1820,46 @@ describe("quick play", () => {
     expect(latestView(single.messages)?.settings.seriesLength).toBe(1);
     const next = connect("Cy", 1);
     expect(latestView(next.messages)?.roomCode).toBe(latestView(single.messages)?.roomCode);
+  });
+
+  it("fills Quick Play with the named computers closest to the humans", () => {
+    const store = new Store(":memory:");
+    const hub = new Hub(store, 30, () => 0, 30_000, 60_000, 60_000, 15_000, () => 0, 0);
+    const now = new Date().toISOString();
+    store.insertUser({
+      id: "ada",
+      display_name: "Ada",
+      avatar_id: "homescreen",
+      created_at: now,
+      updated_at: now,
+      is_guest: 1,
+    });
+    store.db.prepare(`UPDATE users SET rating = 1700 WHERE id = ?`).run("ada");
+    hub.setRoster(() => [
+      { userId: "e1", name: "Pip Squeak", avatarId: "homescreen", difficulty: "easy", rating: 900 },
+      { userId: "m1", name: "Double Six", avatarId: "homescreen", difficulty: "medium", rating: 1200 },
+      { userId: "h1", name: "Boneyard", avatarId: "homescreen", difficulty: "hard", rating: 1500 },
+      { userId: "h2", name: "Boxcar", avatarId: "homescreen", difficulty: "hard", rating: 1500 },
+      { userId: "x1", name: "Spinner", avatarId: "homescreen", difficulty: "expert", rating: 1800 },
+      { userId: "x2", name: "Heavy Tile", avatarId: "homescreen", difficulty: "expert", rating: 1800 },
+    ]);
+    const messages: ServerMessage[] = [];
+    const seated = hub.connect(
+      { type: "quick-play", name: "Ada", seriesLength: 3 },
+      (message) => messages.push(message),
+      () => undefined,
+      "ada",
+    );
+    expect(seated.ok).toBe(true);
+    const view = latestView(messages);
+    const bots = view?.players.filter((player) => player.bot) ?? [];
+    expect(view?.status).toBe("playing");
+    expect(view?.settings.casual).toBe(true);
+    expect(bots.map((player) => player.name).sort()).toEqual(["Boneyard", "Heavy Tile", "Spinner"]);
+    expect(bots.every((player) => !player.accountBot)).toBe(true);
+    const room = store.roomByCode(view?.roomCode ?? "");
+    expect(room?.casual).toBe(1);
+    expect(store.players(room?.id ?? "").filter((player) => player.bot === 1).every((player) => !player.user_id)).toBe(true);
   });
 
   it("fills the open seats with computers when nobody else arrives, and keeps that game off the rating", () => {

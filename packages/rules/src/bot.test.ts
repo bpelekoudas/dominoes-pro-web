@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { tilesOnBoard } from "./board.js";
-import { chooseBotIntent, type BotDifficulty } from "./bot.js";
+import { BOT_SKILL_RATING, chooseBotIntent, pickBotsAtLevel, pickClosestByRating, type BotDifficulty } from "./bot.js";
 import {
   applyIntent,
   arrangeDeck,
@@ -233,4 +233,29 @@ describe("computer players", () => {
     },
     120_000,
   );
+});
+
+describe("fixed computer skills", () => {
+  const roster = [
+    { id: "Pip Squeak", name: "Pip Squeak", rating: 900, difficulty: "easy" as const },
+    { id: "Double Six", name: "Double Six", rating: 1200, difficulty: "medium" as const },
+    { id: "Boneyard", name: "Boneyard", rating: 1500, difficulty: "hard" as const },
+    { id: "Spinner", name: "Spinner", rating: 1800, difficulty: "expert" as const },
+    { id: "Snake Eyes", name: "Snake Eyes", rating: 1200, difficulty: "medium" as const },
+    { id: "Boxcar", name: "Boxcar", rating: 1500, difficulty: "hard" as const },
+  ];
+
+  it("keeps the four ratings", () => {
+    expect(BOT_SKILL_RATING).toEqual({ easy: 900, medium: 1200, hard: 1500, expert: 1800 });
+  });
+
+  it("picks only the chosen level", () => {
+    const picked = pickBotsAtLevel(roster, "hard", 2, new Set());
+    expect(picked.map((bot) => bot.name)).toEqual(["Boneyard", "Boxcar"]);
+  });
+
+  it("fills toward the closest fixed rating and skips a name already seated", () => {
+    const picked = pickClosestByRating(roster, 1700, 3, new Set(["Spinner"]));
+    expect(picked.map((bot) => bot.name)).toEqual(["Boneyard", "Boxcar", "Double Six"]);
+  });
 });

@@ -6,6 +6,7 @@ import {
   applyIntent,
   beginHand,
   canBuy,
+  botSkillRating,
   chooseBotIntent,
   createMatch,
   currentPlayerId,
@@ -73,8 +74,13 @@ const ROSTER: Array<{ name: string; personality: Personality }> = [
 
 const SKILLS: BotDifficulty[] = ["easy", "medium", "hard", "expert"];
 
+/** The same name always keeps this skill. Index order is the fixed assignment. */
+export function skillForRosterIndex(index: number): BotDifficulty {
+  return SKILLS[index % SKILLS.length]!;
+}
+
 const NOTE =
-  "Account bots, including the quick-match fill, play ranked games. Anonymous computer fill does not. Bots start at 0 Bones and only spend Bones earned from games.";
+  "Each named computer keeps one skill: Easy 900, Medium 1200, Hard 1500, Expert 1800. Play vs computer and Quick Play use that skill and stay off the rating. A quick-match fill can still be ranked. Bots start at 0 Bones and only spend Bones earned from games.";
 
 export function botsOn(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.BOTS_ENABLED;
@@ -161,11 +167,12 @@ export class BotLeague {
       }
       this.cosmetics.loadout(userId);
       const avatarId = this.store.user(userId)?.avatar_id || face.avatarId;
+      this.pinRating(userId, skillForRosterIndex(index));
       return {
         userId,
         name: spec.name,
         avatarId,
-        difficulty: SKILLS[index % SKILLS.length]!,
+        difficulty: skillForRosterIndex(index),
         personality: spec.personality,
       };
     });
@@ -179,7 +186,14 @@ export class BotLeague {
       name: bot.name,
       avatarId: this.store.user(bot.userId)?.avatar_id || bot.avatarId,
       difficulty: bot.difficulty,
+      rating: botSkillRating(bot.difficulty),
     }));
+  }
+
+  /** The stored rating stays on the skill. League games do not move it. */
+  private pinRating(userId: string, difficulty: BotDifficulty): void {
+    const rating = botSkillRating(difficulty);
+    this.store.db.prepare(`UPDATE users SET rating = ? WHERE id = ?`).run(rating, userId);
   }
 
   start(): void {
@@ -472,6 +486,7 @@ export class BotLeague {
       }
       this.shop(bot);
     }
+    for (const bot of group) this.pinRating(bot.userId, bot.difficulty);
     const score = match.scores[winnerId] ?? 0;
     this.store.insertBotEvent(
       "match",

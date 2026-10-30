@@ -240,6 +240,12 @@ input {
 .control-token rect { fill: #e31e26; stroke: #d5a336; stroke-width: 1.5; }
 .control-token line { stroke: #d5a336; stroke-width: 1.2; }
 .control-token circle { fill: #efefef; }
+.control-token.is-bump { animation: control-bump calc(240ms * var(--motion)) ease; }
+@keyframes control-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18) translateY(-3px); }
+  100% { transform: scale(1); }
+}
 .draw-flight {
   position: fixed;
   z-index: 21;
@@ -261,6 +267,13 @@ input {
   background: #e31e26;
 }
 .play-code { min-height: 44px; margin: 0; padding: 0 8px; font-size: 0.78rem; }
+@media (max-width: 360px) {
+  .playbar { gap: 2px; padding-left: 2px; padding-right: 0; }
+  .icon-button { width: 36px; height: 36px; min-height: 36px; }
+  .play-code { padding: 0 4px; font-size: 0.72rem; }
+  .series-line { font-size: 0.7rem; }
+  .score-hint-toggle { font-size: 0.68rem; padding: 4px 6px; }
+}
 .play-signin { flex: none; padding: 0 10px; }
 .series-line {
   flex: 1;
@@ -543,22 +556,27 @@ input {
 .cpu-tag {
   position: absolute;
   left: 50%;
-  bottom: 0;
-  z-index: 2;
+  bottom: -1px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   margin: 0;
-  padding: 0 2px;
+  padding: 0 3px;
   border-radius: 3px;
-  background: rgba(16, 16, 16, 0.55);
-  color: rgba(239, 239, 239, 0.92);
+  background: rgba(16, 16, 16, 0.88);
+  color: rgba(239, 239, 239, 0.95);
   font-style: normal;
-  font-size: 0.45rem;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   line-height: 1.2;
+  white-space: nowrap;
   transform: translateX(-50%);
   pointer-events: none;
 }
-/* Whose turn it is rides the traveling control token. */
+.cpu-level { color: #d5a336; }
+/* Whose turn it is is the portrait ring and the turn pill. The token is the last domino. */
 .chip-text { min-width: 0; display: grid; line-height: 1.1; }
 .chip-name {
   overflow: hidden;
@@ -674,12 +692,21 @@ input {
   color: var(--paper);
   font-weight: 700;
 }
-.score-hint-toggle { align-self: flex-start; min-height: 36px; }
+.score-hint-toggle { align-self: center; flex: none; min-height: 32px; padding: 4px 8px; white-space: nowrap; }
+@media (max-width: 400px) {
+  .tray-notices { gap: 4px; }
+  .tray-notices .seat-chip { max-width: min(124px, 34vw); }
+  .your-turn { padding: 4px 6px; }
+}
+@media (max-width: 360px) {
+  .tray-notices { gap: 2px; }
+  .score-hint-toggle { padding: 4px 6px; }
+}
 .status-line {
   position: relative;
   z-index: 4;
   display: flex;
-  flex: none;
+  flex: 1 1 auto;
   align-items: center;
   min-width: 0;
   height: auto;
@@ -697,7 +724,11 @@ input {
 }
 .status-line:empty { background: transparent; }
 .status-math {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 3px 7px;
   border-radius: 999px;
   background: rgba(16, 16, 16, 0.78);

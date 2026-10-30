@@ -28,6 +28,9 @@ import {
   bigMomentLevel,
   motionMs,
   avatarForSeed,
+  botSkillRating,
+  pickBotsAtLevel,
+  pickClosestByRating,
   pickDistinctAvatar,
   resolveAvatar,
   itemById,
@@ -134,6 +137,8 @@ export interface AccountBotCard {
   name: string;
   avatarId: string;
   difficulty: BotDifficulty;
+  /** Fixed skill rating. Omitted cards use the rating for their difficulty. */
+  rating?: number;
 }
 
 interface LiveRoom {
@@ -1170,7 +1175,10 @@ export class Hub {
     const seat = room?.seats.find((candidate) => candidate.id === opened.session.playerId);
     if (!room || !seat) return { ok: false, error: "The table didn't open." };
     const difficulty = asDifficulty(message.difficulty);
-    for (let count = 1; count < playerCount; count += 1) this.addBot(room, seat, difficulty);
+    const need = playerCount - room.seats.length;
+    const picked = pickBotsAtLevel(this.rosterEntries(), difficulty, need, this.namesAt(room));
+    for (const bot of picked) this.pushNamedComputer(room, bot.card);
+    while (room.seats.length < playerCount) this.pushBot(room, difficulty);
     if (unknownSoakFixture(message.fixture)) {
       this.tell(seat, { type: "error", message: "That setup isn't a soak deal." });
       return opened;
@@ -1778,7 +1786,10 @@ export class Hub {
     );
   }
 
-  /** Oldest public lobby with a real player and an open seat. First come, first served. */
+  /**
+   * Oldest public lobby with a real player and an open seat. First come, first served.
+   * TODO: Once more players are waiting, seat tables by closest Elo instead of first come, first served.
+   */
   private findQuickPlayLobby(viewerId: string | null, seriesLength: SeriesLength): LiveRoom | null {
     const open = [...this.rooms.values()].filter(
       (room) =>
@@ -1859,6 +1870,65 @@ export class Hub {
     this.quickPlayTimers.set(room.id, timer);
   }
 
+  private rosterEntries(): Array<{
+    id: string;
+    name: string;
+    rating: number;
+    difficulty: BotDifficulty;
+    card: AccountBotCard;
+  }> {
+    return this.roster().map((card) => ({
+      id: card.name,
+      name: card.name,
+      rating: card.rating ?? botSkillRating(card.difficulty),
+      difficulty: card.difficulty,
+      card,
+    }));
+  }
+
+  /** Names already at this table, so a fill does not seat the same computer twice. */
+  private namesAt(room: LiveRoom): Set<string> {
+    return new Set(room.seats.map((seat) => seat.name));
+  }
+
+  /** Average of the humans' ratings. A guest with no number yet counts as 1200. */
+  private humanTargetRating(room: LiveRoom): number {
+    const humans = room.seats.filter((seat) => !seat.bot);
+    if (humans.length === 0) return 1200;
+    const total = humans.reduce((sum, seat) => sum + (this.rankFor(seat.userId)?.rating ?? 1200), 0);
+    return Math.round(total / humans.length);
+  }
+
+  /** A named computer, seated as a CPU. No account on the seat, so the game stays unrated. */
+  private pushNamedComputer(room: LiveRoom, card: AccountBotCard): void {
+    if (room.seats.some((seat) => seat.name === card.name)) return;
+    const avatarId = resolveAvatar(card.avatarId);
+    const seat = this.makeSeat(
+      makeId("p"),
+      card.name,
+      randomBytes(32).toString("hex"),
+      true,
+      true,
+      card.difficulty,
+      null,
+      avatarId,
+      false,
+    );
+    room.seats.push(seat);
+    this.byPlayer.set(seat.id, room.id);
+    this.store.insertPlayer({
+      id: seat.id,
+      room_id: room.id,
+      name: seat.name,
+      token: seat.token,
+      seat: room.seats.length - 1,
+      created_at: nowIso(),
+      bot: 1,
+      difficulty: card.difficulty,
+      avatar_id: avatarId,
+    });
+  }
+
   private fillQuickPlay(roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room?.quickPlay || room.status !== "lobby") return;
@@ -1868,6 +1938,9 @@ export class Hub {
     }
     this.clearTimer(this.quickPlayTimers, room.id);
     room.quickPlayFillAt = null;
+    const need = room.settings.playerCount - room.seats.length;
+    const picked = pickClosestByRating(this.rosterEntries(), this.humanTargetRating(room), need, this.namesAt(room));
+    for (const bot of picked) this.pushNamedComputer(room, bot.card);
     while (room.seats.length < room.settings.playerCount) this.pushBot(room, "medium");
     room.casual = true;
     this.store.updateRoom(room.id, { casual: true });
@@ -1995,6 +2068,10 @@ export class Hub {
     return room.seats.some((seat) => Boolean(seat.userId) && this.store.isBlockedEither(userId, seat.userId as string));
   }
 
+  /**
+   * Fullest open table, then the oldest.
+   * TODO: Once more players are waiting, seat tables by closest Elo instead of first come, first served.
+   */
   private findQuick(size: 2 | 3 | 4 | "any", viewerId: string | null = null): LiveRoom | null {
     const open = [...this.rooms.values()].filter(
       (room) =>

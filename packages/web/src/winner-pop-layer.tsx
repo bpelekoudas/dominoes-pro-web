@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PlayerView } from "@uhoh/rules";
-import { AvatarFace } from "./avatars";
+import { AvatarFace, cpuSkill } from "./avatars";
 import { winPoseSrc } from "./lineup";
 import { prefersReducedMotion } from "./moment";
 import { characterWinLine, matchLineSeed } from "./win-lines";
@@ -176,7 +176,8 @@ function PopRun({
           >
             <AvatarFace
               id={player.avatarId}
-              bot={player.bot && !player.accountBot}
+              bot={player.bot}
+              skill={cpuSkill(player.difficulty)}
               frameId={player.frameId}
               pose={pose}
             />

@@ -159,6 +159,8 @@ describe("opening lead", () => {
     );
     expect(gone.lastHand?.reason).toBe("domino");
     expect(gone.lastHand?.winnerIds).toEqual(["b"]);
+    expect(gone.lastDominoId).toBe("b");
+    expect(gone.lastDominoKey).toBe("2:1");
     expect(gone.lastHand?.gameWinnerId).toBeNull();
     expect(gone.lastPlay?.tileId).toBe("5-6");
     expect(gone.lastPlay?.playerId).toBe("b");
@@ -172,6 +174,8 @@ describe("opening lead", () => {
     const follow = beginHand(gone, deckFor(["a", "b"], second));
     expect(follow.gameNumber).toBe(2);
     expect(follow.handNumber).toBe(2);
+    expect(follow.lastDominoId).toBe("b");
+    expect(follow.lastDominoKey).toBe("2:1");
     expect(follow.hand?.leaderId).toBe("b");
     expect(follow.hand?.openingTileId).toBeNull();
   });
@@ -280,6 +284,7 @@ describe("owner checklist", () => {
     const locked = applyIntent(match, "a", { type: "knock" });
     expect(locked.ok, locked.error).toBe(true);
     expect(locked.match.lastHand?.reason).toBe("locked");
+    expect(locked.match.lastDominoId).toBeNull();
     expect(handPips(["5-5", "4-5"])).toBe(19);
     expect(locked.match.lastHand?.leftoverAwards).toEqual({ a: 10, b: 10, c: 0 });
     expect(locked.match.lastHand?.summary).toBe("Locked and tied. Alex and Sam split the rest, 10 each. Sam leads next.");
@@ -288,6 +293,11 @@ describe("owner checklist", () => {
     expect(places.filter((row) => row.place === 1).map((row) => row.playerId).sort()).toEqual(["a", "b"]);
     expect(places.find((row) => row.playerId === "a")?.tied).toBe(true);
     expect(places.find((row) => row.playerId === "c")?.place).toBe(3);
+    const remembered = applyIntent({ ...match, lastDominoId: "c", lastDominoKey: "1:4" }, "a", { type: "knock" });
+    expect(remembered.ok).toBe(true);
+    expect(remembered.match.lastHand?.reason).toBe("locked");
+    expect(remembered.match.lastDominoId).toBe("c");
+    expect(remembered.match.lastDominoKey).toBe("1:4");
     const next = beginHand(locked.match, deckFor(["a", "b", "c"], hands));
     expect(next.hand?.leaderId).toBe("b");
     expect(next.hand?.openingTileId).toBeNull();

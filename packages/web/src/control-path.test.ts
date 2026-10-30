@@ -5,6 +5,7 @@ import {
   controlBox,
   controlRoute,
   controlSlideMs,
+  dominoTokenAction,
   parkOnBadge,
   pointAlong,
 } from "./control-path.js";
@@ -38,6 +39,14 @@ describe("control token route", () => {
     const wall = { left: 0, top: 0, right: 390, bottom: 844 };
     const route = controlRoute({ x: 20, y: 20 }, { x: 200, y: 200 }, [wall], { width: 390, height: 844 });
     expect(route).toEqual([{ x: 200, y: 200 }]);
+  });
+
+  it("flies to a new domino, bumps a repeat, and holds on a lock", () => {
+    expect(dominoTokenAction(null, null)).toBe("hide");
+    expect(dominoTokenAction(null, { playerId: "a", key: "1:1" })).toBe("place");
+    expect(dominoTokenAction({ playerId: "a", key: "1:1" }, { playerId: "b", key: "1:2" })).toBe("fly");
+    expect(dominoTokenAction({ playerId: "a", key: "1:1" }, { playerId: "a", key: "1:3" })).toBe("bump");
+    expect(dominoTokenAction({ playerId: "a", key: "1:3" }, { playerId: "a", key: "1:3" })).toBe("hold");
   });
 
   it("parks on the avatar side of the badge, clear of a talk line", () => {

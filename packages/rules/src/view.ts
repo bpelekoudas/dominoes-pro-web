@@ -135,6 +135,10 @@ export interface PlayerView {
   openEquation: string | null;
   boneyardCount: number;
   turnPlayerId: string | null;
+  /** Seat that last went out. Hidden until then, and a lock does not move it. */
+  lastDominoId: string | null;
+  /** Changes when that player, or someone else, dominoes again. */
+  lastDominoKey: string | null;
   phase: "lobby" | "play" | "draw" | "knock" | "between" | "over";
   turnDeadline: number | null;
   turnBudgetMs: number;
@@ -324,6 +328,8 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
     openEquation: scored?.equation ?? null,
     boneyardCount: match?.hand?.boneyard.length ?? 0,
     turnPlayerId,
+    lastDominoId: match?.lastDominoId ?? null,
+    lastDominoKey: match?.lastDominoKey ?? null,
     phase,
     prompt: promptFor(match, meta, phase, turnPlayerId),
     legalPlays,

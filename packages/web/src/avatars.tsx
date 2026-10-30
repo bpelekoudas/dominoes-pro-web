@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AVATARS, resolveAvatar } from "../../rules/src/avatars.js";
+import { botSkillLabel, botSkillRating, type BotDifficulty } from "../../rules/src/bot.js";
 import { playUiClick } from "./sound";
 
 /** Bump when portrait bytes change so phones drop a cached opaque WebP. */
@@ -31,22 +32,36 @@ export function Portrait({
   );
 }
 
+export function isBotDifficulty(value: string | null | undefined): value is BotDifficulty {
+  return value === "easy" || value === "medium" || value === "hard" || value === "expert";
+}
+
+/** Level name and fixed rating for a computer seat. Null for a person. */
+export function cpuSkill(difficulty: string | null | undefined): { label: string; rating: number } | null {
+  if (!isBotDifficulty(difficulty)) return null;
+  return { label: botSkillLabel(difficulty), rating: botSkillRating(difficulty) };
+}
+
 /** Round portrait. `timer` is the fraction of the turn still left, from 1 down to 0. */
 export function AvatarFace({
   id,
   bot = false,
+  skill = null,
   timer = null,
   frameId = null,
   pose = null,
 }: {
   id: string | null | undefined;
   bot?: boolean;
+  /** Fixed skill, drawn on the CPU badge. */
+  skill?: { label: string; rating: number } | null;
   timer?: number | null;
   frameId?: string | null;
   /** Win-pose cutout. The frame paints behind it so a sign on the pose stays visible. */
   pose?: string | null;
 }) {
   const ratio = timer == null ? null : Math.max(0, Math.min(1, timer));
+  const level = bot ? skill : null;
   return (
     <span className={`avatar${bot ? " bot" : ""}${pose ? " posing" : ""}`} data-avatar={resolveAvatar(id)} aria-hidden="true">
       {ratio != null && !pose ? (
@@ -64,7 +79,12 @@ export function AvatarFace({
       ) : null}
       {pose ? <img className="avatar-pose" src={pose} alt="" draggable={false} data-pose="win" /> : <Portrait id={id} size="chip" />}
       {frameId ? <img className="avatar-frame" src={`/store/${frameId}.webp`} alt="" draggable={false} /> : null}
-      {bot ? <em className="cpu-tag">CPU</em> : null}
+      {bot ? (
+        <em className="cpu-tag" data-skill={level?.label ?? undefined} data-skill-rating={level?.rating ?? undefined} title={level ? `${level.label} ${level.rating}` : "CPU"}>
+          CPU
+          {level ? <span className="cpu-level">{level.label} {level.rating}</span> : null}
+        </em>
+      ) : null}
     </span>
   );
 }

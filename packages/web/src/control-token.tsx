@@ -5,6 +5,7 @@ import { motionMs } from "../../rules/src/motion.js";
 import {
   controlRoute,
   controlSlideMs,
+  dominoTokenAction,
   parkOnBadge,
   pointAlong,
   type Box,
@@ -36,18 +37,32 @@ function chipFor(playerId: string): HTMLElement | null {
 }
 
 /**
- * One domino token for whoever holds the play. It slides seat to seat
- * and jumps when a slide would cross a tile, or when motion is reduced.
+ * One red domino for whoever last went out. It stays hidden until then,
+ * flies when someone else dominoes, and bumps when the same player does it again.
+ * A lock does not move it. A blocked slide jumps.
  */
-export function ControlToken({ playerId }: { playerId: string | null }) {
+export function ControlToken({ playerId, stamp }: { playerId: string | null; stamp: string }) {
   const [pos, setPos] = useState<Point | null>(null);
+  const [bump, setBump] = useState(0);
   const posRef = useRef<Point | null>(null);
+  const heldRef = useRef<{ playerId: string; key: string } | null>(null);
+  const bumpedRef = useRef<string | null>(null);
   posRef.current = pos;
 
   useLayoutEffect(() => {
-    if (!playerId) {
+    const nextHold = playerId ? { playerId, key: stamp } : null;
+    const previous = heldRef.current;
+    const action = dominoTokenAction(previous, nextHold);
+    let commit = true;
+    queueMicrotask(() => {
+      if (commit) heldRef.current = nextHold;
+    });
+    if (!playerId || action === "hide") {
+      posRef.current = null;
       setPos(null);
-      return;
+      return () => {
+        commit = false;
+      };
     }
     let frame = 0;
     let cancelled = false;
@@ -59,8 +74,18 @@ export function ControlToken({ playerId }: { playerId: string | null }) {
       if (rect.width < 2) return;
       const next = parkOnBadge({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
       const from = posRef.current;
-      const far = from ? Math.hypot(next.x - from.x, next.y - from.y) : 0;
-      if (!from || !animate || reducedMotion() || far < 4) {
+      const far = from ? Math.hypot(next.x - from.x, next.y - from.y) : Infinity;
+      const sameSeat = from != null && far < 24;
+      if (animate && action === "bump" && sameSeat && !reducedMotion()) {
+        posRef.current = next;
+        setPos(next);
+        if (bumpedRef.current !== stamp) {
+          bumpedRef.current = stamp;
+          setBump((value) => value + 1);
+        }
+        return;
+      }
+      if (!from || !animate || reducedMotion() || far < 4 || action !== "fly") {
         posRef.current = next;
         setPos(next);
         return;
@@ -89,27 +114,30 @@ export function ControlToken({ playerId }: { playerId: string | null }) {
       };
       frame = window.requestAnimationFrame(tick);
     };
-    place(true);
+    place(action === "fly" || action === "bump");
     const chip = chipFor(playerId);
     const follow = () => place(false);
     const observer = new ResizeObserver(follow);
     if (chip) observer.observe(chip);
     window.addEventListener("resize", follow);
     return () => {
+      commit = false;
       cancelled = true;
       flying = false;
       window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", follow);
     };
-  }, [playerId]);
+  }, [playerId, stamp]);
 
   if (!pos || !playerId) return null;
   return createPortal(
     <svg
-      className="control-token"
+      key={bump}
+      className={bump > 0 ? "control-token is-bump" : "control-token"}
       data-control="token"
       data-holder={playerId}
+      data-bump={bump > 0 ? "true" : "false"}
       viewBox="0 0 16 24"
       aria-hidden="true"
       style={{ left: pos.x, top: pos.y }}

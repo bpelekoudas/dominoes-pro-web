@@ -1414,15 +1414,21 @@ function auditTable() {
   if (document.querySelector(".bot-mark")) {
     return { ok: false, reason: "A seat still wears a second domino.", ...evidence };
   }
-  if (turnChip && tokens.length !== 1) {
-    return { ok: false, reason: "The table should show exactly one control token.", count: tokens.length, ...evidence };
+  if (tokens.length > 1) {
+    return { ok: false, reason: "The table should show at most one control token.", count: tokens.length, ...evidence };
   }
-  if (tokens.length === 1 && turnChip) {
+  if (turnChip && !document.querySelector("[data-turn-pill]")) {
+    return { ok: false, reason: "Whose turn it is should be the turn pill.", ...evidence };
+  }
+  if (turnChip && !turnChip.querySelector(".timer-ring")) {
+    return { ok: false, reason: "Whose turn it is should show the portrait countdown ring.", ...evidence };
+  }
+  if (tokens.length === 1) {
     const token = tokens[0];
     const holder = token.getAttribute("data-holder");
-    const turnId = turnChip.getAttribute("data-player-id");
-    if (holder !== turnId) {
-      return { ok: false, reason: "The control token is not on the player who has the play.", holder, turnId, ...evidence };
+    const home = holder ? document.querySelector(`.seat-chip[data-player-id="${CSS.escape(holder)}"]`) : null;
+    if (!home) {
+      return { ok: false, reason: "The control token is not on a seated player.", holder, ...evidence };
     }
     const tokenBox = token.getBoundingClientRect();
     const covered = tiles.find((tile) => overlaps(tokenBox, tile.getBoundingClientRect()));
@@ -1458,7 +1464,7 @@ function auditTable() {
       };
     }
   }
-  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain, one control token` };
+  return { ok: true, summary: `${tiles.length} tiles inside the safe rect, talk clear of the chain, turn on the ring and pill` };
 }
 
 function openSocket(url, cookie) {
