@@ -29,12 +29,20 @@ export function boxesOverlap(a: Box, b: Box, pad = 0.6): boolean {
   return a.left < b.right - pad && a.right > b.left + pad && a.top < b.bottom - pad && a.bottom > b.top + pad;
 }
 
-/** Rest the token on the avatar, clear of the talk line that starts 30px in. */
+/** A drawn tile still lands on the avatar side of the badge, clear of the talk line. */
 export function parkOnBadge(badge: Box): Point {
   const height = Math.max(1, badge.bottom - badge.top);
   return {
     x: Math.round(badge.left + 15),
     y: Math.round(badge.top + height / 2),
+  };
+}
+
+/** The last-domino token rests in the middle of its reserved slot. */
+export function parkInSlot(slot: Box): Point {
+  return {
+    x: Math.round((slot.left + slot.right) / 2),
+    y: Math.round((slot.top + slot.bottom) / 2),
   };
 }
 

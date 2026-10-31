@@ -6,6 +6,7 @@ import {
   controlRoute,
   controlSlideMs,
   dominoTokenAction,
+  parkInSlot,
   parkOnBadge,
   pointAlong,
   type Box,
@@ -33,8 +34,12 @@ function obstacles(): Box[] {
 }
 
 function chipFor(playerId: string): HTMLElement | null {
-  // Only the live table. A win pose or a demo chip must not pull the token onto another seat.
+  // Only the live table. A win pose or a demo chip must not pull a draw onto another seat.
   return document.querySelector<HTMLElement>(`.felt-app .seat-chip[data-player-id="${CSS.escape(playerId)}"]`);
+}
+
+function slotFor(playerId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`.felt-app [data-token-slot="${CSS.escape(playerId)}"]`);
 }
 
 /**
@@ -69,11 +74,11 @@ export function ControlToken({ playerId, stamp }: { playerId: string | null; sta
     let cancelled = false;
     let flying = false;
     const place = (animate: boolean) => {
-      const chip = chipFor(playerId);
-      if (!chip || flying) return;
-      const rect = chip.getBoundingClientRect();
-      if (rect.width < 2) return;
-      const next = parkOnBadge({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+      const slot = slotFor(playerId);
+      if (!slot || flying) return;
+      const rect = slot.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return;
+      const next = parkInSlot({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
       const from = posRef.current;
       const far = from ? Math.hypot(next.x - from.x, next.y - from.y) : Infinity;
       const sameSeat = from != null && far < 24;
@@ -111,15 +116,24 @@ export function ControlToken({ playerId, stamp }: { playerId: string | null; sta
         posRef.current = at;
         setPos(at);
         if (u < 1) frame = window.requestAnimationFrame(tick);
-        else flying = false;
+        else {
+          flying = false;
+          // The seat may have shifted while the token was in the air.
+          place(false);
+        }
       };
       frame = window.requestAnimationFrame(tick);
     };
     place(action === "fly" || action === "bump");
-    const chip = chipFor(playerId);
+    const slot = slotFor(playerId);
     const follow = () => place(false);
     const observer = new ResizeObserver(follow);
-    if (chip) observer.observe(chip);
+    if (slot) observer.observe(slot);
+    // A longer or shorter hand recenters the badge. The slot's own box does not change size, so watch the column.
+    const column = slot?.closest(".edge")?.querySelector(".edge-slivers");
+    if (column) observer.observe(column);
+    const tray = document.querySelector(".hand-tray");
+    if (tray) observer.observe(tray);
     window.addEventListener("resize", follow);
     return () => {
       commit = false;

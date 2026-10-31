@@ -413,7 +413,24 @@ input {
   padding: 1px 7px 1px 1px;
   pointer-events: none;
 }
-.edge-top .edge-badge { margin: 4px 0 0; }
+.edge-top .edge-head { margin: 4px 0 0; }
+.edge-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 100%;
+}
+/* Inset past the skill label, which hangs off the avatar, and clear of the tile column. */
+.edge-left .edge-head { align-self: flex-start; margin-left: 14px; margin-bottom: 6px; }
+.edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; margin-bottom: 6px; }
+.edge-top .edge-head { align-self: center; }
+.token-slot {
+  width: 20px;
+  height: 30px;
+  flex: none;
+  pointer-events: none;
+}
 .edge-badge .avatar { width: 26px; height: 26px; font-size: 0.85rem; }
 .edge-badge strong {
   color: var(--gold);
@@ -622,7 +639,7 @@ input {
   transform: translateY(-50%);
   animation: talk-fade 2.4s ease forwards;
 }
-.you-float { position: relative; z-index: 4; flex: none; }
+.you-float { position: relative; z-index: 4; flex: none; display: flex; align-items: center; gap: 4px; }
 .you-float .seat-chip { overflow: hidden; }
 @keyframes talk-fade {
   0% { opacity: 0; }

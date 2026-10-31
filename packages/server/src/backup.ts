@@ -17,7 +17,7 @@ export function listBackups(dataDir: string): string[] {
   return readdirSync(dir)
     .filter((name) => /^uhoh-.*\.sqlite$/.test(name))
     .map((name) => path.join(dir, name))
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs || path.basename(b).localeCompare(path.basename(a)));
 }
 
 /** Consistent copy of the open database. Safe to run while games are being saved. */

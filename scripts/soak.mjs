@@ -26,6 +26,14 @@ const MODES = [
   { seats: 3, boneyardMode: "draw_one", seriesLength: 7 },
 ];
 
+/** Galaxy Z Fold 7 inner screen in CSS pixels: 1968×2184 at the cover's 2.625 scale. */
+const FOLD_INNER = { width: 751, height: 832 };
+const TOKEN_VIEWPORTS = [
+  { name: "390x844", width: 390, height: 844 },
+  { name: "344x882", width: 344, height: 882 },
+  { name: "fold-inner", width: FOLD_INNER.width, height: FOLD_INNER.height },
+];
+
 const args = parseArgs(process.argv.slice(2));
 
 let rules;
@@ -1104,6 +1112,191 @@ async function takeUiTurn(page) {
   if (await page.locator("[data-action=continue]").count()) await page.locator("[data-action=continue]").first().click();
 }
 
+function auditTokenSlots() {
+  const pad = 0.6;
+  const hit = (a, b) => a.left < b.right - pad && a.right > b.left + pad && a.top < b.bottom - pad && a.bottom > b.top + pad;
+  const boxOf = (node) => {
+    const rect = node.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
+  };
+  const kindOf = (node) =>
+    typeof node.className === "string" && node.className ? node.className.split(" ")[0] : node.getAttribute("data-board-tile") || node.tagName;
+  const gapFor = (count, span, tile, gap = 3) => {
+    if (count <= 1 || span <= tile) return gap;
+    const natural = count * tile + (count - 1) * gap;
+    if (natural <= span) return gap;
+    return (span - tile) / (count - 1) - tile;
+  };
+  const blockersNow = () => [
+    ...document.querySelectorAll(".sliver, .hand-tile, [data-board-tile], .seat-chip, .cpu-tag, .seat-pips, .game-pips, [data-turn-pill], .talk-line"),
+  ];
+  const checkSlots = (label, placeToken) => {
+    const slots = [...document.querySelectorAll("[data-token-slot]")];
+    const edges = slots.map((slot) => slot.getAttribute("data-edge") || "bottom").sort();
+    if (slots.length < 2) return { ok: false, reason: "Every seat needs a token slot.", count: slots.length, edges, label };
+    const blockers = blockersNow();
+    for (const slot of slots) {
+      const box = boxOf(slot);
+      const edge = slot.getAttribute("data-edge") || "bottom";
+      if (box.width < 18 || box.height < 28) return { ok: false, reason: "A token slot lost its reserved size.", edge, box, label };
+      const slivers = slot.closest(".edge")?.querySelector(".edge-slivers");
+      if (slivers) {
+        const column = slivers.getBoundingClientRect();
+        const sharesX = box.left < column.right - pad && box.right > column.left + pad;
+        const sharesY = box.top < column.bottom - pad && box.bottom > column.top + pad;
+        if ((edge === "left" || edge === "right") && sharesX && box.bottom > column.top + pad) {
+          return { ok: false, reason: "The side slot hangs into the tile column.", edge, box, label };
+        }
+        if (edge === "top" && sharesY && box.top < column.bottom - pad) {
+          return { ok: false, reason: "The top slot hangs into the tile row.", edge, box, label };
+        }
+      }
+      if (edge === "bottom") {
+        const hand = document.querySelector(".hand");
+        if (hand && box.bottom > hand.getBoundingClientRect().top + pad) {
+          return { ok: false, reason: "The bottom slot hangs into your hand.", edge, box, label };
+        }
+      }
+      for (const node of blockers) {
+        const other = boxOf(node);
+        if (other.width < 2 || other.height < 2) continue;
+        if (!hit(box, other)) continue;
+        return { ok: false, reason: "The token slot covers a tile or a badge.", edge, kind: kindOf(node), box, other, label };
+      }
+    }
+    const token = placeToken ? document.querySelector("[data-token=last-domino]") : null;
+    if (token) {
+      const holder = token.getAttribute("data-holder");
+      const slot = holder ? document.querySelector(`[data-token-slot="${CSS.escape(holder)}"]`) : null;
+      if (!slot) return { ok: false, reason: "The token has no slot.", holder, label };
+      const tokenBox = boxOf(token);
+      const slotBox = boxOf(slot);
+      const dx = Math.abs((tokenBox.left + tokenBox.right) / 2 - (slotBox.left + slotBox.right) / 2);
+      const dy = Math.abs((tokenBox.top + tokenBox.bottom) / 2 - (slotBox.top + slotBox.bottom) / 2);
+      if (dx > 4 || dy > 4) return { ok: false, reason: "The token is not sitting in its slot.", holder, dx, dy, label };
+      for (const node of blockers) {
+        const other = boxOf(node);
+        if (other.width < 2 || other.height < 2) continue;
+        if (hit(tokenBox, other)) return { ok: false, reason: "The token covers a tile or a badge.", holder, kind: kindOf(node), box: tokenBox, other, label };
+      }
+    }
+    return { ok: true, edges };
+  };
+  const live = checkSlots("live", true);
+  if (!live.ok) return live;
+  // Extra tiles are clones. The real nodes stay, so the table can still be clicked after this check.
+  const restores = [];
+  for (const edge of document.querySelectorAll(".edge")) {
+    const slivers = edge.querySelector(".edge-slivers");
+    const sample = slivers?.querySelector(".sliver");
+    if (!slivers || !sample) continue;
+    const side = edge.getAttribute("data-edge") || "left";
+    const head = edge.querySelector(".edge-head");
+    const along = side === "top" ? sample.getBoundingClientRect().width : sample.getBoundingClientRect().height;
+    const reserve = side === "top" || !head ? 0 : head.getBoundingClientRect().height + 6;
+    const span = side === "top" ? edge.clientWidth : Math.max(0, edge.clientHeight - reserve);
+    const originals = [...slivers.querySelectorAll(".sliver")];
+    const saved = originals.map((node) => node.getAttribute("style"));
+    const count = Math.max(12, originals.length);
+    const gap = gapFor(count, span, Math.max(1, along), 3);
+    originals.forEach((node, index) => {
+      if (index === 0) return;
+      if (side === "top") node.style.marginLeft = `${gap}px`;
+      else node.style.marginTop = `${gap}px`;
+    });
+    const extras = [];
+    for (let index = originals.length; index < count; index += 1) {
+      const node = sample.cloneNode(true);
+      if (side === "top") node.style.marginLeft = `${gap}px`;
+      else node.style.marginTop = `${gap}px`;
+      slivers.appendChild(node);
+      extras.push(node);
+    }
+    restores.push(() => {
+      for (const node of extras) node.remove();
+      originals.forEach((node, index) => {
+        const style = saved[index];
+        if (style == null) node.removeAttribute("style");
+        else node.setAttribute("style", style);
+      });
+    });
+  }
+  const hand = document.querySelector(".hand");
+  const handTile = hand?.querySelector(".hand-tile");
+  if (hand && handTile) {
+    const have = hand.querySelectorAll(".hand-tile").length;
+    const extras = [];
+    for (let index = have; index < 12; index += 1) {
+      const node = handTile.cloneNode(true);
+      hand.appendChild(node);
+      extras.push(node);
+    }
+    const lifted = hand.querySelector(".hand-tile");
+    const liftedStyle = lifted?.getAttribute("style");
+    if (lifted) lifted.style.transform = "translateY(-8px)";
+    restores.push(() => {
+      for (const node of extras) node.remove();
+      if (!lifted) return;
+      if (liftedStyle == null) lifted.removeAttribute("style");
+      else lifted.setAttribute("style", liftedStyle);
+    });
+  }
+  const grown = checkSlots("grown-12", false);
+  for (const restore of restores.reverse()) restore();
+  if (!grown.ok) return grown;
+  const counts = [...document.querySelectorAll("[data-tiles]")].map((node) => Number(node.getAttribute("data-tiles")));
+  const yours = document.querySelectorAll(".hand-tile").length;
+  return {
+    ok: true,
+    edges: live.edges,
+    counts,
+    yours,
+    summary: `slots ${live.edges.join("+")} opponent ${counts.join("/") || "-"} you ${yours} grown-12`,
+  };
+}
+
+async function openComputerTable(page, origin, count) {
+  await page.context().clearCookies();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.locator("[data-screen=splash], .arcade-home .arcade-name input").first().waitFor({ timeout: 15_000 });
+  const splash = page.locator("[data-screen=splash]");
+  if (await splash.count()) {
+    await splash.click({ timeout: 10_000 });
+    await splash.waitFor({ state: "hidden", timeout: 10_000 });
+  }
+  const name = page.locator(".arcade-name input");
+  try {
+    await name.fill("soak-ui", { timeout: 10_000 });
+  } catch (error) {
+    const text = await page.locator("body").innerText().catch(() => "");
+    throw new Error(`${error instanceof Error ? error.message.split("\n")[0] : error} BODY ${text.slice(0, 240).replace(/\s+/g, " ")}`);
+  }
+  const age = page.locator("[data-action=age-13]");
+  if (await age.count()) await age.click();
+  await page.locator("[data-action=solo]").click();
+  await page.locator("[data-screen=mode] button", { hasText: new RegExp(`^${count}$`) }).click();
+  await page.locator("[data-action=start-solo]").click();
+  await page.waitForSelector(".token-slot", { timeout: 25_000 });
+  await page.waitForSelector(".hand-tile", { timeout: 25_000 });
+}
+
+async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
+  const notes = [];
+  for (const size of TOKEN_VIEWPORTS) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.waitForTimeout(250);
+    const audit = await page.evaluate(auditTokenSlots);
+    if (!audit.ok) {
+      const saved = await saveUiFailure(page, outDir, audit);
+      throw new Error(`${label} ${size.name}: ${audit.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
+    notes.push(`${size.name} ${audit.summary}${full ? " full-deal" : ""}`);
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  return notes.join("; ");
+}
+
 async function uiSmoke(origin, outDir = "soak-reports") {
   let chromium;
   try {
@@ -1125,20 +1318,21 @@ async function uiSmoke(origin, outDir = "soak-reports") {
   const errors = [];
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.addInitScript(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
     page.on("pageerror", (error) => errors.push(String(error)));
     page.on("console", (message) => {
       if (message.type() === "error") errors.push(message.text());
     });
-    await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    const splash = page.locator("[data-screen=splash]");
-    if (await splash.count()) await splash.click();
-    await page.locator(".arcade-name input").fill("soak-ui");
-    const age = page.locator("[data-action=age-13]");
-    // Ticking the box removes it. check() waits for it to stay checked.
-    if (await age.count()) await age.click();
-    await page.locator("[data-action=solo]").click();
-    await page.locator("[data-screen=mode] button", { hasText: /^4$/ }).click();
-    await page.locator("[data-action=start-solo]").click();
+    const slotNotes = [];
+    for (const count of [2, 3]) {
+      await openComputerTable(page, origin, count);
+      slotNotes.push(await checkTokenSlots(page, outDir, `${count} players`, { full: true }));
+    }
+    await openComputerTable(page, origin, 4);
+    slotNotes.push(await checkTokenSlots(page, outDir, "4 players", { full: true }));
     // The human holds the opening tile about a third of the time. The felt stays empty until that tile is played.
     const ready = page.locator(
       ".table-scroll [data-board-tile], .hand-tile[data-playable=true], [data-action=draw], [data-action=knock]",
@@ -1176,9 +1370,17 @@ async function uiSmoke(origin, outDir = "soak-reports") {
       const saved = await saveUiFailure(page, outDir, cover);
       throw new Error(`Fold cover: ${cover.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
+    await page.setViewportSize({ width: FOLD_INNER.width, height: FOLD_INNER.height });
+    await settleCamera(page);
+    const inner = await page.evaluate(auditTable);
+    if (!inner.ok) {
+      const saved = await saveUiFailure(page, outDir, inner);
+      throw new Error(`Fold inner: ${inner.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+    }
+    const playedSlots = await checkTokenSlots(page, outDir, "4 players after play");
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: `${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}` };
+    return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}` };
   } finally {
     await browser.close();
   }

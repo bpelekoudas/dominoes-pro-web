@@ -728,6 +728,8 @@ export function Game({
             <div className="tray-notices">
               <div className="you-float">
                 {you ? (
+                  <>
+                  <span className="token-slot" data-token-slot={you.player.id} data-edge="bottom" aria-hidden="true" />
                   <SeatChip
                     player={you.player}
                     view={view}
@@ -736,6 +738,7 @@ export function Game({
                     forward={gameFocus === you.player.id}
                     talk={bubbleText(bubble, you.player.id)}
                   />
+                  </>
                 ) : null}
               </div>
               {(view.phase === "play" || view.phase === "draw" || view.phase === "knock") && view.turnPlayerId ? (
@@ -1017,8 +1020,8 @@ function EdgeSeat({
           ? sample.getBoundingClientRect().width
           : sample.getBoundingClientRect().height
         : along;
-      const badge = rail.querySelector<HTMLElement>(".edge-badge");
-      const reserve = edge === "top" || !badge ? 0 : badge.getBoundingClientRect().height + 6;
+      const head = rail.querySelector<HTMLElement>(".edge-head");
+      const reserve = edge === "top" || !head ? 0 : head.getBoundingClientRect().height + 6;
       const span = edge === "top" ? rail.clientWidth : Math.max(0, rail.clientHeight - reserve);
       const next = sliverGap(count, span, Math.max(1, alongSize), 3);
       setGap((current) => (Math.abs(current - next) < 0.2 ? current : next));
@@ -1038,7 +1041,15 @@ function EdgeSeat({
       data-skin={player.tileSkin || "ivory"}
     >
       {edge === "top" ? null : (
-        <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+        <div className={`edge-head edge-head-${edge}`}>
+          {edge === "left" ? (
+            <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+          ) : null}
+          <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />
+          {edge === "right" ? (
+            <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+          ) : null}
+        </div>
       )}
       <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">
         {Array.from({ length: count }, (_, index) => (
@@ -1050,7 +1061,10 @@ function EdgeSeat({
         ))}
       </div>
       {edge === "top" ? (
-        <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+        <div className="edge-head edge-head-top">
+          <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
+          <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />
+        </div>
       ) : null}
       <span className="sr-only">
         {player.name}, {count} tiles
