@@ -594,6 +594,7 @@ async function playMatch(mode, index, options) {
       view: null,
       socket: null,
       pausing: false,
+      resumes: 0,
       acted: new Set(),
       ...createSeatSync(),
     });
@@ -938,9 +939,21 @@ async function playMatch(mode, index, options) {
 
   const wire = (seat, socket) => {
     socket.on("message", (raw) => onMessage(seat, socket, raw));
-    socket.on("close", () => {
+    socket.on("error", () => {
       if (seat.socket !== socket || seat.pausing || done || failure) return;
-      fail("The socket closed before the match finished.");
+    });
+    socket.on("close", (event) => {
+      if (seat.socket !== socket || seat.pausing || done || failure) return;
+      const code = event && typeof event === "object" && "code" in event ? event.code : event;
+      const reason = event && typeof event === "object" && "reason" in event ? event.reason : "";
+      const detail = `${code || "no code"}${reason ? ` ${reason}` : ""}`;
+      if ((seat.resumes ?? 0) < 2 && seat.token) {
+        seat.resumes = (seat.resumes ?? 0) + 1;
+        console.log(`  a seat socket closed (${detail}). Sitting back down.`);
+        void resumeDropped(seat).catch((error) => fail(error instanceof Error ? error.message : String(error)));
+        return;
+      }
+      fail(`The socket closed before the match finished (${detail}).`);
     });
   };
 
@@ -1014,6 +1027,40 @@ async function playMatch(mode, index, options) {
   }
   if (failureError) throw failureError;
   return stats;
+
+  async function resumeDropped(seat) {
+    hold = true;
+    try {
+      await reconnect(seat);
+      const deadline = Date.now() + 5_000;
+      let aligned = false;
+      while (Date.now() < deadline) {
+        const sigs = seats.map((player) => (player.latest ? publicSignature(player.latest) : ""));
+        aligned = sigs.every((sig) => sig && sig === sigs[0]);
+        if (aligned) break;
+        await sleep(40);
+      }
+      if (!aligned) throw new Error("The seats did not meet again after the socket dropped.");
+      const view = seats.map((player) => player.latest).find(Boolean);
+      if (view) {
+        for (const player of view.players) prevScores[player.id] = player.score;
+        prevPlaySeq = view.lastPlay?.seq ?? prevPlaySeq;
+        prevGame = view.gameNumber;
+        if (view.lastHand) seenEnds.add(`${view.lastHand.gameNumber}-${view.lastHand.handNumber}`);
+        checkedSig = "";
+      }
+      for (const player of seats) {
+        player.queue = [];
+        if (!player.latest) continue;
+        player.view = player.latest;
+        player.tailSig = publicSignature(player.latest);
+        player.queue = [player.latest];
+      }
+    } finally {
+      hold = false;
+    }
+    step();
+  }
 
   async function reconnect(seat) {
     const expected = seat.playerId;
@@ -1703,7 +1750,11 @@ function adaptGlobal(sock) {
     on(type, fn) {
       if (type === "message") {
         sock.addEventListener("message", (event) => fn(typeof event.data === "string" ? event.data : String(event.data)));
-      } else if (type === "close") sock.addEventListener("close", () => fn());
+      } else if (type === "close") {
+        sock.addEventListener("close", (event) => fn({ code: event.code, reason: event.reason }));
+      } else if (type === "error") {
+        sock.addEventListener("error", () => fn({ code: "error" }));
+      }
     },
   };
 }
@@ -1717,7 +1768,11 @@ function adaptWs(sock) {
       sock.close();
     },
     on(type, fn) {
-      sock.on(type, (data) => fn(type === "message" ? data.toString() : undefined));
+      sock.on(type, (data, reason) => {
+        if (type === "message") fn(data.toString());
+        else if (type === "close") fn({ code: data, reason: reason ? reason.toString() : "" });
+        else fn(data);
+      });
     },
   };
 }

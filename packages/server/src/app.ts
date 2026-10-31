@@ -34,6 +34,7 @@ import {
 } from "./admin.js";
 import { adminDashboardHtml, adminSignInHtml } from "./admin-page.js";
 import { claimLogin, dailyStatus, previewDaily } from "./daily.js";
+import { attachSocketHeartbeat } from "./socket-life.js";
 
 export interface AppOptions {
   store?: Store;
@@ -451,21 +452,7 @@ export async function createApp(options: AppOptions = {}) {
     let session: { playerId: string; generation: number } | null = null;
     const accountUserId = accounts.userFromCookieHeader(request.headers.cookie)?.id ?? null;
     if (accountUserId) notePresence(store, accountUserId);
-    let sawPong = true;
-    const beat = setInterval(() => {
-      if (socket.readyState !== 1) return;
-      if (!sawPong) {
-        socket.terminate();
-        return;
-      }
-      sawPong = false;
-      socket.ping();
-    }, 20_000);
-    beat.unref?.();
-    socket.on("pong", () => {
-      sawPong = true;
-    });
-    socket.on("close", () => clearInterval(beat));
+    attachSocketHeartbeat(socket);
     socket.on("error", () => undefined);
 
     const send = (message: ServerMessage): void => {

@@ -42,6 +42,34 @@ function setup() {
 }
 
 describe("rooms", () => {
+  it("keeps a 4-player table going when one socket drops", () => {
+    const { hub, connect } = setup();
+    const names = ["Alex", "Sam", "Bo", "Cy"];
+    const host = connect({
+      type: "create",
+      name: names[0]!,
+      playerCount: 4,
+      boneyardMode: "draw_until",
+      seriesLength: 5,
+    });
+    const code = latestView(host.messages)?.roomCode ?? "";
+    const seats = [host, ...names.slice(1).map((name) => connect({ type: "join", code, name }))];
+    hub.command(host.playerId, { type: "start" });
+    const dropped = seats[1]!;
+    hub.disconnect(dropped.playerId, dropped.generation);
+    for (const seat of seats) {
+      if (seat.playerId === dropped.playerId) continue;
+      const view = latestView(seat.messages);
+      expect(view?.status).toBe("playing");
+      expect(view?.players.find((player) => player.id === dropped.playerId)?.connected).toBe(false);
+    }
+    const welcome = dropped.messages.find((message) => message.type === "welcome");
+    const again = connect({ type: "reconnect", token: welcome?.type === "welcome" ? welcome.token : "" });
+    expect(again.playerId).toBe(dropped.playerId);
+    expect(latestView(again.messages)?.status).toBe("playing");
+    expect(latestView(host.messages)?.players.find((player) => player.id === dropped.playerId)?.connected).toBe(true);
+  });
+
   it("deals a private hand, hides the seed, and replays after a restart", () => {
     const { store, hub, connect } = setup();
     const alex = connect({
