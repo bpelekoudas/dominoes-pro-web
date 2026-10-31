@@ -1,0 +1,33 @@
+{
+  "name": "uhoh-dominoes",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Uh Oh Dominoes — server-authoritative multiplayer straight dominoes.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:rules": "tsc -p packages/rules",
+    "dev": "npm run build:rules && concurrently -n rules,server,web -c yellow,blue,green \"tsc -p packages/rules --watch --preserveWatchOutput\" \"npm run dev -w @uhoh/server\" \"npm run dev -w @uhoh/web\"",
+    "build": "npm run build:rules && tsc -p packages/server && npm run build -w @uhoh/web",
+    "start": "node --disable-warning=ExperimentalWarning packages/server/dist/index.js",
+    "bots:purge": "node --disable-warning=ExperimentalWarning packages/server/dist/purge-bots.js",
+    "test": "vitest run && npm run test:legacy && node --test scripts/soak-sync.test.mjs",
+    "test:legacy": "node test_logic.js && node test_ai.js",
+    "typecheck": "tsc -p packages/rules --noEmit && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
+    "soak": "node scripts/soak.mjs",
+    "stress": "node scripts/stress.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.6",
+    "@types/ws": "^8.18.2",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
