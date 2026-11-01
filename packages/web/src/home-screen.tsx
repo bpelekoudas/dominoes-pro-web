@@ -72,6 +72,7 @@ export function PlayerHome({
   onMulti,
   onVersus,
   onQuickPlay,
+  onBones,
 }: {
   userId: string;
   displayName: string;
@@ -87,6 +88,7 @@ export function PlayerHome({
   onMulti: () => void;
   onVersus: () => void;
   onQuickPlay: (series: 1 | 5) => void;
+  onBones?: (bones: number) => void;
 }) {
   const [format, setFormat] = useState<QuickFormat>(readQuickFormat);
   const [soon, setSoon] = useState<string | null>(null);
@@ -147,7 +149,7 @@ export function PlayerHome({
       </div>
 
       <div className="ph-stage">
-        <DailyHome userId={userId} variant="icons" />
+        <DailyHome userId={userId} variant="icons" onBones={onBones} />
         <div className="ph-center">
           <Logo />
           <div className="ph-hero">

@@ -270,6 +270,7 @@ export function ArcadeHome({
             gate(() => onSolo(readyName || user.displayName || "Guest", 2, "draw_until", 3, "easy", true))
           }
           onQuickPlay={(series) => gate(() => onQuickPlay(readyName || user.displayName || "Guest", series))}
+          onBones={setBones}
         />
         {error ? <p className="banner error">{error}</p> : notice ? <p className="banner">{notice}</p> : null}
         {connecting ? <p className="banner">Connecting…</p> : null}

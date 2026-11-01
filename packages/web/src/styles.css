@@ -1581,6 +1581,39 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .daily-list li[data-done="true"] strong { color: var(--gold); }
 .daily-progress { height: 8px; border-radius: 99px; background: #2a2a2a; overflow: hidden; }
 .daily-progress span { display: block; height: 100%; background: var(--gold); }
+.daily-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(12, 8, 8, 0.78);
+}
+.daily-card {
+  width: min(480px, 100%);
+  max-height: min(92dvh, 100%);
+  overflow: auto;
+  padding: 12px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 20px 20px 0 0;
+  background: #161616;
+  border-top: 2px solid #d5a336;
+  color: #efefef;
+}
+.daily-card-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.daily-card h2 { margin: 0; font-size: 2rem; color: #efefef; }
+.daily-x {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid #d5a336;
+  background: transparent;
+  color: #efefef;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+.daily-card .capsule { margin-top: 8px; }
 .last-tile-line {
   display: flex;
   align-items: center;
