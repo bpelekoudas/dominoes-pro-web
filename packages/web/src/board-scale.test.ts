@@ -271,7 +271,7 @@ describe("board scale", () => {
     }
   });
 
-  it("shrinks below the readable floor instead of clipping a chain that cannot fit", () => {
+  it("holds a readable tile and keeps a playable end on screen when the chain cannot fit", () => {
     const ends = [
       { id: "north", x: -18, y: -900, w: 36, h: 72 },
       { id: "south", x: -18, y: 860, w: 36, h: 72 },
@@ -290,16 +290,29 @@ describe("board scale", () => {
       screenWidth: 390,
       reserve,
     });
-    expect(phone.mode).toBe("fit");
-    expect(phone.scale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
-    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
-    expect(tilesClear(ends, frame, felt, phone.scale, phone.shiftX, phone.shiftY, [], 1)).toBe(true);
+    expect(phone.mode).toBe("floor");
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    expect(phone.fitScale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
+    const north = ends[0]!;
+    const seen = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, north);
     const insets = fitInsets(felt, [], reserve);
-    const box = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, frame);
-    const safeCx = insets.left + (felt.w - insets.left - insets.right) / 2;
-    const safeCy = insets.top + (felt.h - insets.top - insets.bottom) / 2;
-    expect(Math.abs((box.left + box.right) / 2 - safeCx)).toBeLessThan(2);
-    expect(Math.abs((box.top + box.bottom) / 2 - safeCy)).toBeLessThan(2);
+    expect(seen.left).toBeGreaterThanOrEqual(insets.left - 1);
+    expect(seen.top).toBeGreaterThanOrEqual(insets.top - 1);
+    expect(seen.right).toBeLessThanOrEqual(felt.w - insets.right + 1);
+    expect(seen.bottom).toBeLessThanOrEqual(felt.h - insets.bottom + 1);
+    const fitted = followCamera({
+      frame,
+      ends,
+      tiles: ends,
+      playableIds: ["north"],
+      felt,
+      screenWidth: 390,
+      reserve,
+      fitAll: true,
+    });
+    expect(fitted.mode).toBe("fit");
+    expect(fitted.scale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
+    expect(tilesClear(ends, frame, felt, fitted.scale, fitted.shiftX, fitted.shiftY, [], 1)).toBe(true);
   });
 
   it("keeps every tile of a crowded chain clear of the seat badges", () => {
@@ -315,8 +328,23 @@ describe("board scale", () => {
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
     });
-    expect(tilesClear(phoneLayout.tiles, phoneFrame, phoneFelt, phone.scale, phone.shiftX, phone.shiftY, PHONE_ZONES, 1)).toBe(true);
-    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    if (phone.mode === "floor") {
+      expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+      const fitted = followCamera({
+        frame: phoneFrame,
+        ends: phoneLayout.ends,
+        tiles: phoneLayout.tiles,
+        felt: phoneFelt,
+        screenWidth: 390,
+        reserve: PHONE_RESERVE,
+        zones: PHONE_ZONES,
+        fitAll: true,
+      });
+      expect(tilesClear(phoneLayout.tiles, phoneFrame, phoneFelt, fitted.scale, fitted.shiftX, fitted.shiftY, PHONE_ZONES, 1)).toBe(true);
+    } else {
+      expect(tilesClear(phoneLayout.tiles, phoneFrame, phoneFelt, phone.scale, phone.shiftX, phone.shiftY, PHONE_ZONES, 1)).toBe(true);
+      expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    }
     const foldFelt = { w: 920, h: 776 };
     const foldLayout = layoutFor(CROWD, foldFelt, 920, FOLD_ZONES, PHONE_RESERVE);
     const foldFrame = chainBounds(foldLayout.tiles, 0);
@@ -347,9 +375,22 @@ describe("board scale", () => {
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
     });
-    expect(phone.mode).toBe("fit");
-    expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
-    expect(tilesClear(layout.tiles, frame, felt, phone.scale, phone.shiftX, phone.shiftY, PHONE_ZONES, 1)).toBe(true);
+    const shown = phone.mode === "floor"
+      ? followCamera({
+          frame,
+          ends: layout.ends,
+          tiles: layout.tiles,
+          playableIds: ["north"],
+          felt,
+          screenWidth: 390,
+          reserve: PHONE_RESERVE,
+          zones: PHONE_ZONES,
+          fitAll: true,
+        })
+      : phone;
+    if (phone.mode === "floor") expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    else expect(phone.off).toEqual({ top: false, right: false, bottom: false, left: false });
+    expect(tilesClear(layout.tiles, frame, felt, shown.scale, shown.shiftX, shown.shiftY, PHONE_ZONES, 1)).toBe(true);
     const loose = laid(LONG);
     const looseFrame = chainBounds(loose.tiles, 0);
     const shrunk = followCamera({
@@ -360,9 +401,10 @@ describe("board scale", () => {
       screenWidth: 390,
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
+      fitAll: true,
     });
     expect(tilesClear(loose.tiles, looseFrame, felt, shrunk.scale, shrunk.shiftX, shrunk.shiftY, PHONE_ZONES, 1)).toBe(true);
-    expect(phone.scale).toBeGreaterThanOrEqual(shrunk.scale - 0.001);
+    expect(shown.scale).toBeGreaterThanOrEqual(shrunk.scale - 0.001);
   });
 
   it("keeps every tile inside the safe rect for real bot hands", () => {
@@ -390,22 +432,40 @@ describe("board scale", () => {
               screenWidth: table.screen,
               zones,
             });
-            expect(
-              tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
-              `${table.name} seed ${seed} ${seats}p ${count} tiles`,
-            ).toBe(true);
-            expect(shot.off, table.name).toEqual({ top: false, right: false, bottom: false, left: false });
+            const readable = table.screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+            if (shot.mode === "floor") {
+              expect(shot.scale * TILE_SHORT, `${table.name} floor`).toBeGreaterThanOrEqual(readable - 0.5);
+              const fitted = followCamera({
+                frame,
+                ends: layout.ends,
+                tiles: layout.tiles,
+                felt: table.felt,
+                screenWidth: table.screen,
+                zones,
+                fitAll: true,
+              });
+              expect(
+                tilesClear(layout.tiles, frame, table.felt, fitted.scale, fitted.shiftX, fitted.shiftY, zones, 1),
+                `${table.name} seed ${seed} ${seats}p ${count} tiles`,
+              ).toBe(true);
+            } else {
+              expect(
+                tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
+                `${table.name} seed ${seed} ${seats}p ${count} tiles`,
+              ).toBe(true);
+              expect(shot.off, table.name).toEqual({ top: false, right: false, bottom: false, left: false });
+              const insets = fitInsets(table.felt, zones);
+              const box = screenBox(table.felt, frame, shot.scale, shot.shiftX, shot.shiftY, frame);
+              const safeCx = insets.left + (table.felt.w - insets.left - insets.right) / 2;
+              const safeCy = insets.top + (table.felt.h - insets.top - insets.bottom) / 2;
+              expect(Math.abs((box.left + box.right) / 2 - safeCx)).toBeLessThan(3);
+              expect(Math.abs((box.top + box.bottom) / 2 - safeCy)).toBeLessThan(3);
+            }
             for (let i = 0; i < layout.tiles.length; i += 1) {
               for (let j = i + 1; j < layout.tiles.length; j += 1) {
                 expect(boxesOverlap(layout.tiles[i]!, layout.tiles[j]!), `${table.name} overlap`).toBe(false);
               }
             }
-            const insets = fitInsets(table.felt, zones);
-            const box = screenBox(table.felt, frame, shot.scale, shot.shiftX, shot.shiftY, frame);
-            const safeCx = insets.left + (table.felt.w - insets.left - insets.right) / 2;
-            const safeCy = insets.top + (table.felt.h - insets.top - insets.bottom) / 2;
-            expect(Math.abs((box.left + box.right) / 2 - safeCx)).toBeLessThan(3);
-            expect(Math.abs((box.top + box.bottom) / 2 - safeCy)).toBeLessThan(3);
             checked += 1;
           }
         }
@@ -441,10 +501,15 @@ describe("board scale", () => {
             screenWidth: table.screen,
             zones,
           });
-          expect(
-            tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
-            `${table.name} seed ${seed} ${count} tiles`,
-          ).toBe(true);
+          const readable = table.screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+          if (shot.mode === "floor") {
+            expect(shot.scale * TILE_SHORT).toBeGreaterThanOrEqual(readable - 0.5);
+          } else {
+            expect(
+              tilesClear(layout.tiles, frame, table.felt, shot.scale, shot.shiftX, shot.shiftY, zones, 1),
+              `${table.name} seed ${seed} ${count} tiles`,
+            ).toBe(true);
+          }
           settled += 1;
           if (previous && Math.abs(previous.scale - shot.scale) > 0.05) {
             const easing = !tilesClear(layout.tiles, frame, table.felt, previous.scale, previous.shiftX, previous.shiftY, zones, 0);

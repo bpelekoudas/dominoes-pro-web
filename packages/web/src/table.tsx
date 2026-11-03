@@ -135,11 +135,12 @@ export function Table({
   const [clip, setClip] = useState<AxisInsets>({ top: 30, right: 30, bottom: 30, left: 30 });
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [offscreen, setOffscreen] = useState({ top: false, right: false, bottom: false, left: false });
-  const [camMode, setCamMode] = useState<"fit" | "follow">("fit");
+  const [camMode, setCamMode] = useState<"fit" | "follow" | "floor">("fit");
   const [overview, setOverview] = useState(false);
   const [punch, setPunch] = useState(1);
   const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
+  const [fitAll, setFitAll] = useState(false);
   const [cameraArmed, setCameraArmed] = useState(false);
   const shift = { x: pan.x + nudge.x, y: pan.y + nudge.y };
   const shownScale = scale * nudge.zoom;
@@ -150,7 +151,11 @@ export function Table({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const fitScaleRef = useRef(1);
+  const camModeRef = useRef<"fit" | "follow" | "floor">("fit");
+  const lastTap = useRef(0);
   const handKey = `${view.gameNumber}:${view.handNumber}`;
+  const tileKey = layout?.tiles.map((tile) => tile.tileId).join(",") ?? "";
   const handOver = view.phase === "between" || view.phase === "over";
   const lastTileId = view.lastPlay?.tileId ?? null;
   const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
@@ -200,7 +205,10 @@ export function Table({
         zones,
         overview: handOver || overview,
         punch,
+        fitAll,
       });
+      fitScaleRef.current = shot.fitScale;
+      camModeRef.current = shot.mode;
       setClip((current) => (sameInsets(current, shot.clip) ? current : shot.clip));
       held.current = { hand: handKey, scale: shot.scale };
       frozen.current = handOver;
@@ -225,7 +233,7 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, handOver, handKey, lastTileId, playableKey, overview, punch]);
+  }, [layout, handOver, handKey, lastTileId, playableKey, overview, punch, fitAll]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -312,6 +320,15 @@ export function Table({
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
   useEffect(() => {
+    setFitAll(false);
+  }, [handKey]);
+
+  useEffect(() => {
+    setNudge({ x: 0, y: 0, zoom: 1 });
+    setUserCam("follow");
+  }, [handKey, tileKey]);
+
+  useEffect(() => {
     const awarded = view.lastPlay?.awarded ?? 0;
     if (awarded < 10) return;
     setPunch(awarded >= 25 ? 1.12 : 1.06);
@@ -343,7 +360,8 @@ export function Table({
     if (pointers.current.size >= 2 && pinch.current) {
       const pts = [...pointers.current.values()];
       const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
-      const zoom = Math.min(1.85, Math.max(0.55, pinch.current.zoom * (dist / pinch.current.dist)));
+      const minZoom = camModeRef.current === "floor" ? Math.min(1, fitScaleRef.current / Math.max(0.05, scale)) : 0.55;
+      const zoom = Math.min(1.85, Math.max(minZoom, pinch.current.zoom * (dist / pinch.current.dist)));
       setUserCam("drag");
       setNudge((current) => ({ ...current, zoom }));
       return;
@@ -365,12 +383,24 @@ export function Table({
     if (pointers.current.size > 0) return;
     drag.current = null;
     if (start && !start.moved) {
-      setNudge({ x: 0, y: 0, zoom: 1 });
-      setUserCam("follow");
-      setOverview((value) => !value);
+      const now = Date.now();
+      const doubled = now - lastTap.current < 320;
+      lastTap.current = doubled ? 0 : now;
+      if (doubled) {
+        setFitAll((value) => !value);
+        setNudge({ x: 0, y: 0, zoom: 1 });
+        setUserCam("follow");
+        return;
+      }
+      if (camModeRef.current !== "floor") {
+        setNudge({ x: 0, y: 0, zoom: 1 });
+        setUserCam("follow");
+        setOverview((value) => !value);
+      }
       return;
     }
     if (!start?.moved) return;
+    if (camModeRef.current === "floor") return;
     window.setTimeout(() => {
       setNudge({ x: 0, y: 0, zoom: 1 });
       setUserCam("follow");
@@ -388,6 +418,7 @@ export function Table({
       data-table-id={view.tableId}
       data-board-scale={shownScale.toFixed(2)}
       data-tile-px={(TILE_SHORT * shownScale).toFixed(0)}
+      data-fit-px={(TILE_SHORT * fitScaleRef.current).toFixed(0)}
       data-cam-mode={handOver || overview ? "overview" : camMode}
       data-cam-user={userCam}
       onPointerDown={onCamDown}
