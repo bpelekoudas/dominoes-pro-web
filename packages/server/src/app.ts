@@ -18,7 +18,7 @@ import { motionMs } from "@uhoh/rules";
 import { BOT_TURN_MS, Hub, QUICK_BOT_FILL_MS, cleanSoakRun, type ClientMessage, type ServerMessage } from "./hub.js";
 import { Cosmetics } from "./cosmetics.js";
 import { Store } from "./db.js";
-import { denverDay, leaderboard } from "./ranking.js";
+import { denverDay, leaderboard, publicCard } from "./ranking.js";
 import { legalHtml } from "./legal.js";
 import { aliasRedirect, canonicalPage, publicBase, PUBLISHED_ORIGINS, withCanonical } from "./public-url.js";
 import { cleanPulseNote, pulseName } from "./pulse.js";
@@ -140,6 +140,18 @@ export async function createApp(options: AppOptions = {}) {
     if (!user) return reply.code(401).send({ error: "Sign in to see this profile." });
     notePresence(store, user.id);
     return { user };
+  });
+
+  app.get("/api/card/:userId", async (request, reply) => {
+    if (!cardLookupAllowed(request.ip)) return reply.code(429).send({ error: "Slow down." });
+    const userId = (request.params as { userId?: string }).userId ?? "";
+    // A blocked player's card is the same public card. The reply never says who blocked whom.
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+      return reply.code(404).send({ error: "That player was not found." });
+    }
+    const card = publicCard(store, userId, new Date());
+    if (!card) return reply.code(404).send({ error: "That player was not found." });
+    return { card };
   });
 
   app.post("/api/account/age", async (request, reply) => {
@@ -565,6 +577,20 @@ function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInRe
   }
   if (result.token) reply.header("set-cookie", sessionCookie(result.token, request.protocol === "https", 30 * 24 * 60 * 60));
   return { user: result.user, outcome: "ok" as const };
+}
+
+const cardHits = new Map<string, { at: number; n: number }>();
+
+function cardLookupAllowed(ip: string): boolean {
+  const now = Date.now();
+  const row = cardHits.get(ip);
+  if (!row || now - row.at > 60_000) {
+    if (cardHits.size > 500) cardHits.clear();
+    cardHits.set(ip, { at: now, n: 1 });
+    return true;
+  }
+  row.n += 1;
+  return row.n <= 60;
 }
 
 const pulseHits = new Map<string, { at: number; n: number }>();

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Logo } from "./logo";
 import { AccountChip, type AccountUser } from "./account";
 import { AvatarFace, AvatarPicker, BotBadge, Portrait } from "./avatars";
+import { requestSeatCard } from "./player-card";
 import { StoreScreen } from "./store";
 import { RankLine } from "./rank";
 import { MUSIC_TRACKS, musicChoice, musicVolume, setMusicChoice, setMusicVolume, type MusicChoice } from "./music";
@@ -806,6 +807,8 @@ export function QuickWait({
     bot: boolean;
     accountBot?: boolean;
     avatarId: string;
+    accountId?: string | null;
+    difficulty?: string | null;
     rank: { tierId: string; tierName?: string; step: "III" | "II" | "I" | null; rating: number; provisional: boolean } | null;
   }>;
   playerCount: number;
@@ -860,6 +863,22 @@ export function QuickWait({
       <ul className="quick-seats">
         {players.map((player) => (
           <li key={player.id}>
+            <button
+              type="button"
+              className="seat-row"
+              data-action="player-card"
+              onClick={press(() =>
+                requestSeatCard({
+                  isYou: player.isYou,
+                  bot: player.bot,
+                  name: player.name,
+                  avatarId: player.avatarId,
+                  accountId: player.accountId,
+                  difficulty: player.difficulty,
+                  rank: player.rank,
+                }),
+              )}
+            >
             <AvatarFace id={player.avatarId} bot={player.bot && !player.accountBot} />
             <span className="quick-who">
               <strong>
@@ -878,6 +897,7 @@ export function QuickWait({
                 <small className="hint">1200</small>
               )}
             </span>
+            </button>
           </li>
         ))}
         {Array.from({ length: open }, (_, index) => (

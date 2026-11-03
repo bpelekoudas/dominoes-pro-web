@@ -1614,6 +1614,68 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   line-height: 1;
 }
 .daily-card .capsule { margin-top: 8px; }
+.seat-tap, .seat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.seat-tap { gap: 4px; width: 100%; }
+.seat-row { width: 100%; min-height: 44px; }
+.seat-list .seat-row { flex: 1; }
+.edge .seat-tap { pointer-events: auto; }
+.edge-badge .talk-line,
+.you-float .talk-line { pointer-events: auto; }
+.player-card-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px 40px calc(168px + env(safe-area-inset-bottom));
+  background: rgba(12, 8, 8, 0.45);
+}
+.player-card {
+  width: min(440px, 100%);
+  max-height: min(360px, 46dvh);
+  overflow: auto;
+  padding: 12px 14px 14px;
+  border-radius: 18px;
+  background: #161616;
+  border: 2px solid #d5a336;
+  color: #efefef;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+.player-card-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.player-card h2 {
+  margin: 0;
+  font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+  color: #efefef;
+}
+.player-card-face { display: flex; align-items: flex-start; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.player-card .portrait-chip { width: 72px; height: 72px; flex: none; border-radius: 16px; object-fit: cover; }
+.player-card-skill { margin: 0; font-weight: 700; }
+.player-card-skill strong { color: #d5a336; margin-left: 6px; }
+.player-card-tier { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 700; }
+.player-card-tier strong { margin-left: auto; color: #d5a336; font-variant-numeric: tabular-nums; }
+.player-card-tier small { color: #efefef; font-weight: 600; margin-left: 4px; }
+.player-card-stats { width: 100%; }
+.player-card-stats dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.player-card-stats dt { color: rgba(239, 239, 239, 0.72); font-size: 0.75rem; }
+.player-card-stats dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.player-card-stats small { font-weight: 600; color: rgba(239, 239, 239, 0.72); }
+.player-card .capsule { margin-top: 8px; }
 .last-tile-line {
   display: flex;
   align-items: center;

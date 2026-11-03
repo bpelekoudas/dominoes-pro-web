@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Portrait } from "./avatars";
 import type { RankRecap } from "@uhoh/rules";
+import { requestSeatCard } from "./player-card";
 
 export interface RankFacts {
   rating: number;
@@ -237,6 +238,7 @@ export function RankRecapView({
 }
 
 interface BoardRow {
+  id: string;
   name: string;
   avatarId?: string;
   guest: boolean;
@@ -294,6 +296,22 @@ export function Leaderboard({
         {rows.length === 0 ? <li className="hint">No one is on the board yet.</li> : null}
         {rows.map((row, index) => (
           <li key={`${row.name}-${index}`}>
+            <button
+              type="button"
+              className="seat-row"
+              data-action="player-card"
+              onClick={() =>
+                requestSeatCard({
+                  isYou: false,
+                  bot: Boolean(row.bot),
+                  name: row.name,
+                  avatarId: row.avatarId ?? "2hot4tv",
+                  accountId: row.bot ? null : row.id,
+                  difficulty: null,
+                  rank: { rating: row.rating },
+                })
+              }
+            >
             <span className="board-place">{index + 1}</span>
             {row.avatarId ? <Portrait id={row.avatarId} size="chip" /> : null}
             <RankBadge tier={row.tierId} />
@@ -303,6 +321,7 @@ export function Leaderboard({
               {row.guest ? <small> guest</small> : null}
             </span>
             <strong>{board === "rating" ? row.rating : row.seasonPoints.toLocaleString()}</strong>
+            </button>
           </li>
         ))}
       </ol>

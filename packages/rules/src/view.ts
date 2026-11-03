@@ -127,6 +127,8 @@ export interface PlayerView {
     tileId: string | null;
     tileSkin: string;
     tableId: string | null;
+    /** Account id for a person. Empty for a guest seat and for every computer. */
+    accountId?: string | null;
   }>;
   you: { hand: TileFace[] };
   board: BoardState | null;
@@ -219,6 +221,8 @@ export interface TableSeat {
   tileId?: string | null;
   tileSkin?: string | null;
   tableId?: string | null;
+  /** Account id for a person. Empty for a guest seat and for every computer. */
+  accountId?: string | null;
 }
 
 export interface TableMeta {
@@ -320,6 +324,7 @@ export function project(match: MatchState | null, meta: TableMeta): PlayerView {
       tileId: seat.tileId ?? null,
       tileSkin: seat.tileSkin || "ivory",
       tableId: seat.tableId ?? null,
+      accountId: seat.accountId ?? null,
     })),
     you: { hand: youHand },
     board,

@@ -19,6 +19,7 @@ import { shouldAskAge } from "./home-model";
 import { hintText, markHint, playHint } from "./play-hints";
 import { scoreHintChoice, setScoreHintChoice, showScoreNumbers, type ScoreHintChoice } from "./score-hints";
 import { AvatarFace, BotBadge, cpuSkill } from "./avatars";
+import { PlayerCardLayer, requestSeatCard } from "./player-card";
 import { CheckoutBanner, useMatchCosmetics } from "./store";
 import { MatchLineup } from "./lineup";
 import { matchLineSeed, winLineFor } from "./win-lines";
@@ -64,6 +65,13 @@ export function App() {
   const [leaveArmed, setLeaveArmed] = useState(false);
   const [preview, setPreview] = useState(demoRequested);
   const account = useAccount();
+  const openProfile = useRef(account.openSheet);
+  openProfile.current = account.openSheet;
+  useEffect(() => {
+    const onOwn = () => openProfile.current("profile");
+    window.addEventListener("uhoh-own-profile", onOwn);
+    return () => window.removeEventListener("uhoh-own-profile", onOwn);
+  }, []);
   const [splash, setSplash] = useState(() => {
     if (typeof sessionStorage === "undefined") return false;
     if (sessionStorage.getItem("uhoh.splash") === "1") return false;
@@ -256,6 +264,7 @@ export function App() {
     return (
       <>
         <UhOhPreview award={demoAward()} onClose={() => setPreview(false)} />
+        <PlayerCardLayer />
         <AccountLayer account={account} />
       </>
     );
@@ -312,6 +321,7 @@ export function App() {
           onDelete={account.deleteAccount}
         />
         {splash ? <Splash onDone={finishSplash} /> : null}
+        <PlayerCardLayer />
         <AccountLayer account={account} />
       </>
     );
@@ -344,6 +354,7 @@ export function App() {
         accountUser={account.user}
         onAccount={account.openSheet}
       />
+      <PlayerCardLayer />
       <AccountLayer account={account} />
     </>
   );
@@ -898,7 +909,7 @@ function Lobby({
       <ul className="seat-list">
         {view.players.map((player) => (
           <li key={player.id} className={player.bot ? "bot-seat" : ""}>
-            <span className="who">
+            <button type="button" className="seat-row" data-action="player-card" onClick={() => requestSeatCard(player)}>
               <AvatarFace id={player.avatarId} bot={player.bot} skill={cpuSkill(player.difficulty)} frameId={player.frameId} />
               <span>
                 {player.isYou ? `${player.name} (you)` : player.name}
@@ -916,7 +927,7 @@ function Lobby({
                   />
                 ) : null}
               </span>
-            </span>
+            </button>
             {player.bot && !player.accountBot && host ? (
               <button
                 type="button"
@@ -1093,20 +1104,22 @@ function EdgeBadge({
   const over = live.score >= view.settings.targetScore;
   return (
     <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`} data-player-id={player.id}>
-      <AvatarFace
-        id={player.avatarId}
-        bot={player.bot}
-        skill={cpuSkill(player.difficulty)}
-        frameId={player.frameId}
-        timer={turnRatio(player.isTurn, view, clock)}
-      />
-      <span className="game-col">
-        <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
-          {live.score}
-        </strong>
-        <GamePips won={player.gamesWon} needed={view.winsNeeded} />
-      </span>
-      {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
+      <button type="button" className="seat-tap" data-action="player-card" onClick={() => requestSeatCard(player)}>
+        <AvatarFace
+          id={player.avatarId}
+          bot={player.bot}
+          skill={cpuSkill(player.difficulty)}
+          frameId={player.frameId}
+          timer={turnRatio(player.isTurn, view, clock)}
+        />
+        <span className="game-col">
+          <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
+            {live.score}
+          </strong>
+          <GamePips won={player.gamesWon} needed={view.winsNeeded} />
+        </span>
+        {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
+      </button>
       {talk ? <TalkLine text={talk} /> : null}
     </div>
   );
@@ -1145,6 +1158,7 @@ function SeatChip({
       data-turn={player.isTurn ? "true" : "false"}
       data-turn-timer={player.isTurn && view.phase === "play" ? "true" : "false"}
     >
+      <button type="button" className="seat-tap" data-action="player-card" onClick={() => requestSeatCard(player)}>
       <AvatarFace
         id={player.avatarId}
         bot={player.bot}
@@ -1181,6 +1195,7 @@ function SeatChip({
           {player.isYou ? null : <span className="sr-only">{player.tileCount} tiles</span>}
         </span>
       </span>
+      </button>
       {talk ? <TalkLine text={talk} /> : null}
     </div>
   );

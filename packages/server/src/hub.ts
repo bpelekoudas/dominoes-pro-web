@@ -2396,6 +2396,7 @@ export class Hub {
           tileId: wear.tileId,
           tileSkin: wear.tileSkin,
           tableId: wear.tableId,
+          accountId: seat.bot ? null : seat.userId,
         };
       }),
       settings: { ...room.settings, casual: room.casual },

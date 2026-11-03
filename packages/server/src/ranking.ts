@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   accuracyPercent,
+  botSkillLabel,
+  botSkillRating,
   parseAccuracyRecent,
   recentAccuracyPercent,
   resolveAvatar,
+  type BotDifficulty,
   type PointBreakdown,
   type RankRecap,
   type RankedPlayerRecap,
@@ -365,6 +368,80 @@ export function seatRankOf(standing: PublicStanding): SeatRank {
   };
 }
 
+const BOT_SKILLS: BotDifficulty[] = ["easy", "medium", "hard", "expert"];
+
+function computerSkill(rating: number): { skill: string; rating: number } {
+  const match = BOT_SKILLS.find((skill) => botSkillRating(skill) === rating);
+  if (!match) return { skill: "CPU", rating };
+  return { skill: botSkillLabel(match), rating };
+}
+
+/** What another player may see. No email, sign-in, age, or block list. */
+export type PublicCard =
+  | {
+      kind: "computer";
+      name: string;
+      avatarId: string;
+      skill: string;
+      rating: number;
+    }
+  | {
+      kind: "account";
+      name: string;
+      avatarId: string;
+      guest: boolean;
+      rating: number;
+      provisional: boolean;
+      tierId: string;
+      tierName: string;
+      tierStep: TierStep | null;
+      rankedWins: number;
+      rankedLosses: number;
+      gamesPlayed: number;
+      vsComputerWins: number;
+      vsComputerLosses: number;
+      vsComputerGames: number;
+      playAccuracy: number | null;
+      seasonPoints: number;
+      peakTierName: string;
+      peakStep: TierStep | null;
+      winStreak: number;
+    };
+
+export function publicCard(store: Store, userId: string, now: Date): PublicCard | null {
+  const user = store.user(userId);
+  if (!user || user.is_soak === 1) return null;
+  const avatarId = resolveAvatar(user.avatar_id);
+  if (user.is_bot === 1) {
+    const skill = computerSkill(user.rating ?? START_RATING);
+    return { kind: "computer", name: user.display_name, avatarId, skill: skill.skill, rating: skill.rating };
+  }
+  const standing = describePlayer(store, userId, now);
+  if (!standing) return null;
+  return {
+    kind: "account",
+    name: user.display_name,
+    avatarId,
+    guest: user.is_guest === 1,
+    rating: standing.rating,
+    provisional: standing.provisional,
+    tierId: standing.tierId,
+    tierName: standing.tierName,
+    tierStep: standing.tierStep,
+    rankedWins: standing.rankedWins,
+    rankedLosses: standing.rankedLosses,
+    gamesPlayed: standing.gamesPlayed,
+    vsComputerWins: standing.vsComputerWins,
+    vsComputerLosses: standing.vsComputerLosses,
+    vsComputerGames: standing.vsComputerGames,
+    playAccuracy: standing.playAccuracy,
+    seasonPoints: standing.seasonPoints,
+    peakTierName: standing.peakTierName,
+    peakStep: standing.peakStep,
+    winStreak: standing.winStreak,
+  };
+}
+
 export function leaderboard(store: Store, board: "rating" | "season", now: Date, limit = 50, includeBots = false) {
   const season = currentSeason(store, now);
   for (const user of store.allUsers()) {
@@ -379,6 +456,7 @@ export function leaderboard(store: Store, board: "rating" | "season", now: Date,
     rows: rows.map((user) => {
       const tier = tierAt(user.season_points ?? 0);
       return {
+        id: user.id,
         name: user.display_name,
         avatarId: resolveAvatar(user.avatar_id),
         guest: user.is_guest === 1,
