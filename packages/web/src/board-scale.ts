@@ -250,10 +250,9 @@ export interface OpenEndBox extends LayoutBox {
 
 /**
  * The whole chain, centered in the felt that badges, racks, the header,
- * and the bottom bar leave open. The picture stays at least a readable
- * tile. When the chain cannot fit at that size, the open ends stay on
- * screen and the rest can be dragged. A double-tap fits every tile.
- * Punch grows the picture only while it still fits.
+ * and the bottom bar leave open. Every tile stays whole. A pinch can look
+ * closer, and a double-tap returns to this fit. Punch grows the picture
+ * only while it still fits.
  */
 export function followCamera(input: {
   frame: LayoutBox;
@@ -278,38 +277,18 @@ export function followCamera(input: {
   const zones = input.zones ?? [];
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
-  const floorPx = screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
-  const floor = floorPx / TILE_SHORT;
   const insets = fitInsets(input.felt, zones, input.reserve);
   const room = scaleForAxis(input.frame, input.felt, insets);
   // A pixel of air so a rounded clip or the felt edge never shaves a pip.
   const slack = scaleForAxis(input.frame, input.felt, inflate(insets, 1));
-  let fitScale = Math.min(open, room, slack);
-  if (!Number.isFinite(fitScale) || fitScale <= 0) fitScale = Math.min(open, room);
-  const punched = applyPunch(fitScale, open, input.punch, input.overview === true);
-  if (punched <= room + 1e-6) fitScale = punched;
+  let fitted = Math.min(open, room, slack);
+  if (!Number.isFinite(fitted) || fitted <= 0) fitted = Math.min(open, room);
+  const punched = applyPunch(fitted, open, input.punch, input.overview === true);
+  if (punched <= room + 1e-6) fitted = punched;
 
-  // Show every tile while a pip is still readable (about 24px on a phone).
-  // Only a chain that would shrink past that holds the larger floor, with an
-  // open end kept on screen. A drag or a double-tap reaches the rest.
-  const showAllPx = screen >= 720 ? 36 : 24;
-  const holdFloor = !input.fitAll && !input.overview && fitScale * TILE_SHORT < showAllPx && floor <= open + 1e-6;
-  if (!holdFloor) {
-    const placed = placeTarget(input.frame, input.frame, input.felt, insets, fitScale);
-    return { ...finish(input.frame, input.felt, fitScale, placed.ox, placed.oy, NO_INSET, "fit"), fitScale };
-  }
-
-  // Hold the floor and frame the open ends. The middle can sit off the felt;
-  // a drag or a pinch reaches it, and a double-tap fits the whole chain.
-  const scale = Math.min(open, floor);
-  const safeW = input.felt.w - insets.left - insets.right;
-  const safeH = input.felt.h - insets.top - insets.bottom;
-  const frameFits = input.frame.w * scale <= safeW + 0.5 && input.frame.h * scale <= safeH + 0.5;
-  const focus = frameFits
-    ? input.frame
-    : focusEnds(input.ends, input.playableIds, input.frame);
-  const placed = placeTarget(focus, input.frame, input.felt, insets, scale);
-  return { ...finish(input.frame, input.felt, scale, placed.ox, placed.oy, insets, "floor"), fitScale };
+  // Show every tile whole. Clipping the picture sliced a turned arm into slivers.
+  const placed = placeTarget(input.frame, input.frame, input.felt, insets, fitted);
+  return { ...finish(input.frame, input.felt, fitted, placed.ox, placed.oy, NO_INSET, "fit"), fitScale: fitted };
 }
 
 /**
@@ -444,19 +423,6 @@ function placeTarget(
     if (boxBottom > felt.h - insets.bottom) oy -= boxBottom - (felt.h - insets.bottom);
   }
   return { ox, oy };
-}
-
-/** One open end, preferring an end the player can play on. It is small enough to sit fully on the felt. */
-function focusEnds(
-  ends: readonly OpenEndBox[],
-  playableIds: readonly string[] | undefined,
-  frame: LayoutBox,
-): LayoutBox {
-  const wanted = playableIds && playableIds.length > 0 ? ends.filter((end) => end.id && playableIds.includes(end.id)) : ends;
-  const list = wanted.length > 0 ? wanted : ends;
-  const one = list[0];
-  if (!one) return frame;
-  return { x: one.x, y: one.y, w: one.w, h: one.h };
 }
 
 function finish(

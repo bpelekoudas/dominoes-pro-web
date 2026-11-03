@@ -747,6 +747,28 @@ describe("board layout", () => {
     expect(taller).toBeGreaterThanOrEqual(3);
   });
 
+  it("keeps a turned tile joined to its parent on a tall phone", () => {
+    const limits = { width: 280, height: 700 };
+    let turned = 0;
+    for (const players of [2, 3, 4] as const) {
+      for (let seed = 0; seed < 8; seed += 1) {
+        for (const board of playHand(players, "draw_until", seed)) {
+          const count = 1 + ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, 0);
+          if (count < 8) continue;
+          const layout = layoutBoard(board, limits);
+          expect(layoutOverlaps(layout), `${players} seed ${seed} ${count}`).toBe(false);
+          assertJoined(board, layout, `${players} seed ${seed} ${count}`);
+          for (const tile of layout.tiles) {
+            expect(Math.min(tile.w, tile.h), tile.tileId).toBe(TILE_SHORT);
+            expect(Math.max(tile.w, tile.h), tile.tileId).toBe(TILE_LONG);
+            if (tile.arm && tile.direction !== tile.arm) turned += 1;
+          }
+        }
+      }
+    }
+    expect(turned).toBeGreaterThan(0);
+  });
+
   it("never covers a tile, including on a narrow fold", () => {
     const limits = [undefined, { width: 220, height: 640 }, { width: 280, height: 500 }, { width: 344, height: 720 }] as const;
     let checked = 0;

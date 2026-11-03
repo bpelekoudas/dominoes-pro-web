@@ -262,8 +262,12 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       centre,
       earlier[earlier.length - 1]!,
     );
-    tile.x = parked.x;
-    tile.y = parked.y;
+    // A small slide can clear a 2px overlap. A long jump separates the tile
+    // from the one it has to touch, which reads as a floating domino.
+    if (Math.abs(parked.x - tile.x) <= 24 && Math.abs(parked.y - tile.y) <= 24) {
+      tile.x = parked.x;
+      tile.y = parked.y;
+    }
   }
 
   const ends: PlacedEnd[] = [];
@@ -513,14 +517,15 @@ function nudgeClear(
   prev: LayoutBox,
 ): LayoutBox {
   if (isClear(box, occupants, centre, prev)) return box;
-  const step = TILE_SHORT + TILE_GAP;
+  // Pixel steps first, so a tile that barely crosses another stays on its parent.
   const ways: LayoutDir[] = [dir, ...sideTurns(dir), opposite(dir)];
-  for (let distance = 1; distance <= 60; distance += 1) {
+  for (let distance = 1; distance <= 12; distance += 1) {
     for (const way of ways) {
-      const moved = shiftBox(box, way, distance * step);
+      const moved = shiftBox(box, way, distance * 2);
       if (isClear(moved, occupants, centre, prev)) return moved;
     }
   }
+  // Stay on the parent. A jump of a whole tile reads as a domino floating on its own.
   return box;
 }
 
