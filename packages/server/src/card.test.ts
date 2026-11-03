@@ -39,6 +39,7 @@ describe("public player card", () => {
     expect(body.card.gamesPlayed).toBe(0);
     expect(body.card.rankedWins).toBe(0);
     expect(body.card.rankedLosses).toBe(0);
+    expect(body.card.winStreak).toBe(0);
     expect(JSON.stringify(body)).not.toMatch(/ada@example.com|email|provider|blocked|ageOk/);
     expect(cookie.startsWith(SESSION_COOKIE)).toBe(true);
 

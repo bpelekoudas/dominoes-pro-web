@@ -105,6 +105,8 @@ export interface PublicStanding {
   playAccuracyRecent: number | null;
   /** Games that had at least one real choice. */
   playAccuracyGames: number;
+  /** Current run of wins. Zero after a loss. Public, like the peak tier. */
+  winStreak: number;
 }
 
 interface SeasonWindow {
@@ -114,7 +116,6 @@ interface SeasonWindow {
 }
 
 interface Standing extends PublicStanding {
-  winStreak: number;
   lastWinDay: string | null;
 }
 
