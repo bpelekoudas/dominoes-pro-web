@@ -190,7 +190,7 @@ export function layoutOverlaps(layout: BoardLayout): boolean {
   return false;
 }
 
-function layoutBoardNow(board: BoardState): BoardLayout {
+function layoutBoardNow(board: BoardState, pass: "route" | "clear" = "route"): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
   }
@@ -204,7 +204,12 @@ function layoutBoardNow(board: BoardState): BoardLayout {
   for (const arm of ARM_IDS) {
     const first = board.arms[arm][0];
     if (!first) continue;
-    const box = straightBox(center, arm, first.low === first.high);
+    const doubled = first.low === first.high;
+    let box = straightBox(center, arm, doubled);
+    if (coversPlaced(box, occupants, center)) {
+      const fixed = attachClear(center, doubled, arm, occupants);
+      if (fixed) box = fixed.box;
+    }
     const placed = toTile(first, box, arm, arm);
     tiles.push(placed);
     occupants.push({ box: placed, arm });
@@ -231,7 +236,12 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       releaseHold(arm, occupants);
       const upcoming = chain.slice(index);
       const tile = upcoming[0]!;
-      const choice = chooseStep(tile, upcoming, cursor, arm, occupants, centre);
+      const routed = pass === "clear"
+        ? null
+        : chooseStep(tile, upcoming, cursor, arm, occupants, centre);
+      const choice = routed && !coversPlaced(routed.box, occupants, cursor.box)
+        ? routed
+        : clearStep(tile, cursor, occupants);
       const placed = toTile(tile, choice.box, choice.dir, arm);
       tiles.push(placed);
       occupants.push({ box: placed, arm });
@@ -246,27 +256,6 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       nextIndex.set(arm, index + 1);
       holdAhead(arm, nextCursor, occupants, centre);
       grew = true;
-    }
-  }
-
-  // A step that still landed on another face is walked into open felt.
-  // The hand keeps going, and no tile is covered.
-  for (let i = 1; i < tiles.length; i += 1) {
-    const tile = tiles[i]!;
-    const earlier = tiles.slice(0, i);
-    if (!earlier.some((other) => boxesOverlap(tile, other))) continue;
-    const parked = nudgeClear(
-      tile,
-      tile.direction,
-      earlier.map((other) => ({ box: other, arm: other.arm })),
-      centre,
-      earlier[earlier.length - 1]!,
-    );
-    // A small slide can clear a 2px overlap. A long jump separates the tile
-    // from the one it has to touch, which reads as a floating domino.
-    if (Math.abs(parked.x - tile.x) <= 24 && Math.abs(parked.y - tile.y) <= 24) {
-      tile.x = parked.x;
-      tile.y = parked.y;
     }
   }
 
@@ -286,7 +275,80 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       : straightBox(center, end.id, false);
   }
 
-  return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews };
+  const built = { tiles, ends, fit: fitAround([...tiles, ...ends]), previews };
+  if (pass === "route" && layoutOverlaps(built)) return layoutBoardNow(board, "clear");
+  return built;
+}
+
+/** True when `box` covers a tile that is already on the table. The parent it grows from is ignored. */
+function coversPlaced(box: LayoutBox, occupants: readonly Occupant[], ignore?: LayoutBox): boolean {
+  return placedBoxes(occupants).some((other) => (!ignore || !sameBox(other, ignore)) && boxesOverlap(box, other));
+}
+
+/**
+ * Every square that still touches `parent` on `dir`, closest to centre first.
+ * The new tile meets the parent with the usual gap, so the chain stays joined.
+ */
+function sideAttachments(parent: LayoutBox, dir: LayoutDir, isDouble: boolean): LayoutBox[] {
+  const { along, across } = extents(isDouble);
+  const horizontal = dir === "east" || dir === "west";
+  const w = horizontal ? along : across;
+  const h = horizontal ? across : along;
+  const minShare = Math.min(TILE_SHORT * 0.5, parent.w, parent.h, w, h);
+  const boxes: LayoutBox[] = [];
+  if (dir === "east" || dir === "west") {
+    const x = dir === "east" ? parent.x + parent.w + TILE_GAP : parent.x - TILE_GAP - w;
+    const start = parent.y - h + minShare;
+    const end = parent.y + parent.h - minShare;
+    const centerY = parent.y + parent.h / 2 - h / 2;
+    const ys: number[] = [];
+    for (let y = start; y <= end + 0.1; y += 2) ys.push(y);
+    ys.sort((a, b) => Math.abs(a - centerY) - Math.abs(b - centerY));
+    for (const y of ys) boxes.push({ x, y, w, h });
+  } else {
+    const y = dir === "south" ? parent.y + parent.h + TILE_GAP : parent.y - TILE_GAP - h;
+    const start = parent.x - w + minShare;
+    const end = parent.x + parent.w - minShare;
+    const centerX = parent.x + parent.w / 2 - w / 2;
+    const xs: number[] = [];
+    for (let x = start; x <= end + 0.1; x += 2) xs.push(x);
+    xs.sort((a, b) => Math.abs(a - centerX) - Math.abs(b - centerX));
+    for (const x of xs) boxes.push({ x, y, w, h });
+  }
+  return boxes;
+}
+
+/** Straight ahead, then either turn, then back. Never a square that covers a tile. */
+function attachClear(
+  parent: LayoutBox,
+  isDouble: boolean,
+  prefer: LayoutDir,
+  occupants: readonly Occupant[],
+): { box: LayoutBox; dir: LayoutDir } | null {
+  const blocks = placedBoxes(occupants).filter((box) => !sameBox(box, parent));
+  const order: LayoutDir[] = [prefer, ...sideTurns(prefer), opposite(prefer)];
+  for (const doubled of [isDouble, !isDouble]) {
+    for (const dir of order) {
+      for (const box of sideAttachments(parent, dir, doubled)) {
+        if (!insideHard(box)) continue;
+        if (overlapsAny(box, blocks)) continue;
+        return { box, dir };
+      }
+    }
+  }
+  return null;
+}
+
+function clearStep(tile: OrientedTile, cursor: Cursor, occupants: Occupant[]): { box: LayoutBox; dir: LayoutDir; bends: number } {
+  const placed = attachClear(cursor.box, tile.low === tile.high, cursor.dir, occupants);
+  if (!placed) {
+    return { box: straightBox(cursor.box, cursor.dir, tile.low === tile.high), dir: cursor.dir, bends: cursor.bends };
+  }
+  return {
+    box: placed.box,
+    dir: placed.dir,
+    bends: placed.dir === cursor.dir ? cursor.bends : cursor.bends + 1,
+  };
 }
 
 /**

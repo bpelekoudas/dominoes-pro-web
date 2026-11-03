@@ -1132,9 +1132,19 @@ function replayFile(file) {
         return 1;
       }
       match = result.match;
+      if (!match.hand?.board?.center) continue;
+      const pictures = [
+        layoutBoard(match.hand.board),
+        layoutBoard(match.hand.board, { width: 220, height: 640 }),
+        layoutBoard(match.hand.board, { width: 344, height: 720 }),
+      ];
+      if (pictures.some((layout) => layoutOverlaps(layout))) {
+        console.error(`A tile covers another tile. Game ${hand.gameNumber}, hand ${hand.handNumber}.`);
+        return 1;
+      }
     }
   }
-  console.log(`Replayed ${log.hands.length} hands. Phase ${match.phase}.`);
+  console.log(`Replayed ${log.hands.length} hands. Phase ${match.phase}. No tiles overlap.`);
   return 0;
 }
 
