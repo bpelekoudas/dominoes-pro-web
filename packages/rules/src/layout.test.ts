@@ -163,6 +163,64 @@ function oppositeOf(arm: string): string {
  * out, one turn, back toward the spinner, one turn, out again.
  * Every turn is 90 degrees. The arm never turns toward the other three.
  */
+/** West left, north up, east right, south down. Corners are a single tile. */
+function assertRegionSnake(board: BoardState, layout: BoardLayout, label: string): void {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  const spine = TILE_LONG / 2;
+  for (const arm of ARM_IDS) {
+    const shift = shiftOf(arm);
+    let cornerRun = 0;
+    const chain = board.arms[arm];
+    for (let index = 0; index < chain.length; index += 1) {
+      const tile = chain[index]!;
+      const placed = byId.get(tile.tileId);
+      expect(placed, `${label} ${tile.tileId}`).toBeTruthy();
+      if (!placed) continue;
+      const cx = placed.x + placed.w / 2;
+      const cy = placed.y + placed.h / 2;
+      if (arm === "west") {
+        expect(placed.x + placed.w, `${label} west ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
+        if (placed.direction === "east") expect(cy, `${label} west return`).toBeLessThan(-spine + TILE_SHORT);
+        expect(placed.direction, `${label} west turn`).not.toBe("south");
+      } else if (arm === "east") {
+        expect(placed.x, `${label} east ${tile.tileId}`).toBeGreaterThanOrEqual(-TILE_GAP);
+        if (placed.direction === "west") expect(cy, `${label} east return`).toBeGreaterThan(spine - TILE_SHORT);
+        expect(placed.direction, `${label} east turn`).not.toBe("north");
+      } else if (arm === "north") {
+        expect(placed.y + placed.h, `${label} north ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
+        if (placed.direction === "south") expect(cx, `${label} north return`).toBeGreaterThan(spine - TILE_SHORT);
+        expect(placed.direction, `${label} north turn`).not.toBe("west");
+      } else {
+        expect(placed.y, `${label} south ${tile.tileId}`).toBeGreaterThanOrEqual(-TILE_GAP);
+        if (placed.direction === "north") expect(cx, `${label} south return`).toBeLessThan(-spine + TILE_SHORT);
+        expect(placed.direction, `${label} south turn`).not.toBe("east");
+      }
+      if (tile.low === tile.high) {
+        const crosswise = placed.direction === "east" || placed.direction === "west" ? placed.h > placed.w : placed.w > placed.h;
+        expect(crosswise, `${label} ${tile.tileId} crosswise`).toBe(true);
+        const prev = index > 0 ? byId.get(chain[index - 1]!.tileId) : undefined;
+        if (prev && prev.direction === placed.direction) {
+          const horizontal = placed.direction === "east" || placed.direction === "west";
+          const center = horizontal ? placed.y + placed.h / 2 : placed.x + placed.w / 2;
+          const prevCenter = horizontal ? prev.y + prev.h / 2 : prev.x + prev.w / 2;
+          expect(center, `${label} ${tile.tileId} centred`).toBeCloseTo(prevCenter, 5);
+        }
+      }
+      if (placed.direction === shift) {
+        cornerRun += 1;
+        expect(cornerRun, `${label} ${arm} stacked corners`).toBe(1);
+      } else {
+        cornerRun = 0;
+      }
+      if (index === 0) continue;
+      const parent = byId.get(chain[index - 1]!.tileId)!;
+      const edge = sharedEdge(parent, placed);
+      expect(Math.abs(edge.gap - TILE_GAP), `${label} ${parent.tileId}>${tile.tileId}`).toBeLessThan(0.5);
+      expect(edge.along, `${label} join ${tile.tileId}`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+    }
+  }
+}
+
 function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): void {
   for (const arm of ARM_IDS) {
     const dirs: string[] = [];
@@ -608,6 +666,22 @@ describe("board layout", () => {
     expect(boxesOverlap(five, twoFive)).toBe(false);
     expect(boxesOverlap(spinner, layout.tiles.find((tile) => tile.tileId === "5-6")!)).toBe(false);
     assertLaidOut(board, "crosswise double", false);
+  });
+
+  it("keeps each arm in its own region and doubles crosswise", () => {
+    let checked = 0;
+    for (const players of [2, 4] as const) {
+      for (let seed = 0; seed < 8; seed += 1) {
+        for (const board of playHand(players, "draw_until", seed + 300)) {
+          const count = ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, board.center ? 1 : 0);
+          if (count < 16) continue;
+          const layout = layoutBoard(board);
+          assertRegionSnake(board, layout, `region ${players} ${seed}`);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(4);
   });
 
   it("keeps long games joined, with every arm clear of the others", () => {
