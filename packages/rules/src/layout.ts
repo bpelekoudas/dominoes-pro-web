@@ -748,7 +748,19 @@ function snakeStep(
     // Stay on this line, on the same axis. Leaving the felt zooms out.
     // Turning toward the centre, or relabeling this step, is what overlapped.
     const stuck = straightBox(cursor.box, dir, false);
-    return { box: stuck, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    if (!overlapsPlaced(stuck, placed) && !boxesOverlap(stuck, cursor.box)) {
+      return { box: stuck, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    }
+    const rescue: LayoutDir[] = [arm, opposite(arm), shiftDir(arm), opposite(shiftDir(arm))];
+    for (const way of rescue) {
+      const alt = straightBox(cursor.box, way, false);
+      if (overlapsPlaced(alt, placed) || boxesOverlap(alt, cursor.box)) continue;
+      if (arm === "north" && alt.y + alt.h > center.y - TILE_GAP) continue;
+      if (arm === "south" && alt.y < center.y + center.h + TILE_GAP) continue;
+      if (arm === "west" && alt.x + alt.w > -laneInner()) continue;
+      if (arm === "east" && alt.x < laneInner()) continue;
+      return { box: alt, dir: way, row: cursor.row, line: acrossCenter(alt, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    }
   }
   const box = chosen ?? centered;
   const nextRow = cursor.row + 1;
@@ -785,6 +797,12 @@ function snakeStep(
         fromDouble: false,
         column: false,
       };
+    }
+  }
+  if (isPortrait() && (overlapsPlaced(box, placed) || boxesOverlap(box, cursor.box))) {
+    const straight = straightBox(cursor.box, dir, false);
+    if (!overlapsPlaced(straight, placed) && !boxesOverlap(straight, cursor.box)) {
+      return { box: straight, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
   }
   return {
