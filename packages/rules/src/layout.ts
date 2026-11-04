@@ -405,16 +405,13 @@ function chooseStep(
   const keep = { box: straight, dir: cursor.dir, bends: cursor.bends };
 
   if (lock) {
-    // A double stays crosswise. The tile after it may turn when going
-    // straight would cover another tile or leave a short phone table.
-    // That turn sits on the end of the double.
+    // A double stays crosswise. The tile after it may turn when the straight
+    // step would leave a short phone table: that turn sits on the end of the
+    // double, and it keeps the chain from running off the side.
     const follower = cursor.prevDouble && !isDouble;
-    const covered = overlapsAny(straight, placedBoxes(occupants)) || intersectsBox(straight, centre);
-    if (follower && (covered || (isTightLimit() && !insideActive(straight)))) {
-      const turned = bestInsideTurn(tile, upcoming, cursor, home, occupants, centre)
-        ?? openTurn(tile, upcoming, cursor, home, occupants, centre);
-      if (turned) return turned;
-    }
+    if (!(follower && isTightLimit() && !insideActive(straight))) return keep;
+    const turned = bestInsideTurn(tile, upcoming, cursor, home, occupants, centre);
+    if (turned) return turned;
     return keep;
   }
 
@@ -425,7 +422,7 @@ function chooseStep(
     // Stay on a short run that still fits. A following double may stick out
     // a little; turning away from that would run the arm back across the table.
     const straightInside = insideActive(straight) && fits(straight, home, occupants, centre, true, cursor.box);
-    if (straightInside && cursor.run < cap && lockedRunClear(upcoming, cursor.dir, straight, occupants, centre)) return keep;
+    if (straightInside && cursor.run < cap) return keep;
     const turned = bestInsideTurn(tile, upcoming, cursor, home, occupants, centre);
     if (turned) return turned;
   }
@@ -484,67 +481,8 @@ function chooseStep(
   // Dropping it on another face is what made a crowded hand look broken.
   const loose = looseStep(tile, cursor, home, occupants, centre);
   if (loose) return loose;
-  const opened = openTurn(tile, upcoming, cursor, home, occupants, centre);
-  if (opened) return opened;
   const parked = nudgeClear(straight, cursor.dir, occupants, centre, cursor.box);
-  if (!overlapsAny(parked, placedBoxes(occupants))) return { box: parked, dir: cursor.dir, bends: cursor.bends };
-  return keep;
-}
-
-/**
- * A corner that does not cover another tile. The gap to a neighbour may be
- * tight. Covering a face is not allowed, and the new tile still meets its parent.
- */
-function openTurn(
-  tile: OrientedTile,
-  upcoming: readonly OrientedTile[],
-  cursor: Cursor,
-  home: ArmId,
-  occupants: readonly Occupant[],
-  centre: LayoutBox,
-): { box: LayoutBox; dir: LayoutDir; bends: number } | null {
-  if (tile.low === tile.high) return null;
-  const order = [...sideTurns(cursor.dir), opposite(cursor.dir)];
-  let best: { box: LayoutBox; dir: LayoutDir; score: number } | null = null;
-  for (const turn of order) {
-    for (const box of bendCandidates(cursor.box, cursor.dir, turn, false)) {
-      if (!insideHard(box) || intersectsBox(box, centre)) continue;
-      if (overlapsAny(box, placedBoxes(occupants))) continue;
-      if (!lockedRunClear(upcoming, turn, box, occupants, centre)) continue;
-      const score = (insideActive(box) ? 0 : 500)
-        + (turn === sideTurns(cursor.dir)[0] ? 0 : 20)
-        + projectedImbalance(box, turn, upcoming, occupants, centre) / 1000;
-      if (!best || score < best.score) best = { box, dir: turn, score };
-      break;
-    }
-  }
-  if (!best) return null;
-  return { box: best.box, dir: best.dir, bends: cursor.bends + 1 };
-}
-
-/** The double, and the tile that has to follow it, must not cover a face. */
-function lockedRunClear(
-  upcoming: readonly OrientedTile[],
-  dir: LayoutDir,
-  box: LayoutBox,
-  occupants: readonly Occupant[],
-  centre: LayoutBox,
-): boolean {
-  const owned = placedBoxes(occupants);
-  owned.push(box);
-  let prev = box;
-  let prevDouble = upcoming[0]!.low === upcoming[0]!.high;
-  for (let index = 1; index < upcoming.length; index += 1) {
-    const next = upcoming[index]!;
-    const nextDouble = next.low === next.high;
-    if (!prevDouble && !nextDouble) return true;
-    const nextBox = straightBox(prev, dir, nextDouble);
-    if (overlapsAny(nextBox, owned) || intersectsBox(nextBox, centre) || !insideHard(nextBox)) return false;
-    owned.push(nextBox);
-    prev = nextBox;
-    prevDouble = nextDouble;
-  }
-  return true;
+  return { box: parked, dir: cursor.dir, bends: cursor.bends };
 }
 
 /**

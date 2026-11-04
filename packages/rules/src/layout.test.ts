@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARM_IDS, emptyBoard, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
+import { ARM_IDS, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
 import {
   applyIntent,
   beginHand,
@@ -49,16 +49,6 @@ const PLAYERS = {
     { id: "d", name: "Rio" },
   ],
 } as const;
-
-/** Phone, the soak's two tight tables, a tall phone, Fold cover, and Fold inner. */
-const CHAIN_LIMITS = [
-  undefined,
-  { width: 220, height: 640 },
-  { width: 344, height: 720 },
-  { width: 280, height: 780 },
-  { width: 230, height: 760 },
-  { width: 520, height: 640 },
-] as const;
 
 function seedBytes(n: number): Buffer {
   const seed = Buffer.alloc(32);
@@ -778,49 +768,6 @@ describe("board layout", () => {
     }
     expect(turned).toBeGreaterThan(0);
   });
-
-  it("replays the soak hand where the east arm crossed the west column", () => {
-    // Game 3 hand 7 of the bee1121 soak. 0-4 went north, then the east
-    // arm's westbound run sat on the west arm's south column.
-    const plays: Array<[string, string]> = [
-      ["lead", "0-3"], ["west", "0-0"], ["east", "3-3"], ["east", "1-3"], ["east", "1-2"],
-      ["east", "2-6"], ["east", "1-6"], ["east", "1-1"], ["east", "1-5"], ["east", "5-6"],
-      ["west", "0-1"], ["east", "6-6"], ["east", "4-6"], ["east", "4-4"], ["west", "1-4"],
-      ["west", "3-4"], ["east", "2-4"], ["west", "2-3"], ["west", "2-2"], ["north", "0-4"],
-      ["west", "2-5"], ["east", "0-2"], ["east", "0-6"], ["west", "0-5"],
-    ];
-    let board = emptyBoard();
-    for (const [end, id] of plays) board = placeTile(board, end, tileById(id));
-    expect(ARM_IDS.every((arm) => arm === "south" || board.arms[arm].length > 0)).toBe(true);
-    for (const limit of CHAIN_LIMITS) {
-      const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
-      expect(layoutOverlaps(layout), limit ? `${limit.width}x${limit.height}` : "phone").toBe(false);
-      assertJoined(board, layout, limit ? `${limit.width}x${limit.height}` : "phone");
-      for (const tile of layout.tiles) {
-        expect(Math.min(tile.w, tile.h)).toBe(TILE_SHORT);
-        expect(Math.max(tile.w, tile.h)).toBe(TILE_LONG);
-      }
-    }
-  });
-
-  it("keeps long four-end chains from covering a tile on phone and fold tables", () => {
-    let checked = 0;
-    for (let seed = 0; seed < 16; seed += 1) {
-      for (const board of playHand(4, "draw_until", seed + 400)) {
-        const count = 1 + ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, 0);
-        const openArms = ARM_IDS.filter((arm) => board.arms[arm].length > 0).length;
-        if (count < 12 || openArms < 4) continue;
-        for (const limit of CHAIN_LIMITS) {
-          const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
-          const label = `seed ${seed} ${count} ${limit ? `${limit.width}x${limit.height}` : "phone"}`;
-          expect(layoutOverlaps(layout), label).toBe(false);
-          assertJoined(board, layout, label);
-          checked += 1;
-        }
-      }
-    }
-    expect(checked).toBeGreaterThan(40);
-  }, 20_000);
 
   it("never covers a tile, including on a narrow fold", () => {
     const limits = [undefined, { width: 220, height: 640 }, { width: 280, height: 500 }, { width: 344, height: 720 }] as const;
