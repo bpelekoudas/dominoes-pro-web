@@ -103,44 +103,20 @@ export function feltScale(input: {
   const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
   const roomW = Math.max(TILE_LONG * 2, input.felt.w - insets.left - insets.right);
   const roomH = Math.max(TILE_LONG * 2, input.felt.h - insets.top - insets.bottom);
-  const limitsAt = (scale: number) => ({
-    width: Math.max(TILE_LONG * 2, roomW / scale),
-    height: Math.max(TILE_LONG * 2, roomH / scale),
-  });
-  const fitAt = (scale: number) => {
-    const layout = layoutBoard(input.board, limitsAt(scale));
-    const span = centeredChain(layout.tiles);
-    return Math.min(roomW / Math.max(1, span.w), roomH / Math.max(1, span.h));
+  // Lay the snake out once, into the felt at a readable tile. Zooming out
+  // must not hand the arms a taller felt, or a straight column grows to fill
+  // it and the picture chases itself smaller.
+  const limits = {
+    width: Math.max(TILE_LONG * 2, roomW / readable),
+    height: Math.max(TILE_LONG * 2, roomH / readable),
   };
-  const table = layoutBoard(input.board, { width: roomW / readable, height: roomH / readable });
-  const tableFit = Math.min(roomW / Math.max(1, centeredChain(table.tiles).w), roomH / Math.max(1, centeredChain(table.tiles).h));
-  // The opening picture still holds this chain. Do not zoom out yet.
-  if (tableFit >= open * 0.985) {
-    return { scale: open, limits: { width: roomW / readable, height: roomH / readable } };
-  }
-  const natural = centeredChain(layoutBoard(input.board).tiles);
-  const naturalFit = Math.min(roomW / Math.max(1, natural.w), roomH / Math.max(1, natural.h));
-  if (naturalFit >= open * 0.985) {
-    return { scale: open, limits: limitsAt(Math.min(open, readable)) };
-  }
-  let scale = open;
-  for (let step = 0; step < 8; step += 1) {
-    const fit = fitAt(scale);
-    // Still fits at this size. A short chain stays at the opening zoom.
-    if (fit >= scale * 0.985) break;
-    const next = Math.max(fit, scale * 0.86);
-    if (next >= scale - 1e-4) break;
-    scale = next;
-  }
-  // Stay at a readable size when the chain still reaches the felt there.
-  if (scale < readable) {
-    const fit = fitAt(readable);
-    if (fit >= readable * 0.985) scale = readable;
-  }
+  const span = centeredChain(layoutBoard(input.board, limits).tiles);
+  const fit = Math.min(roomW / Math.max(1, span.w), roomH / Math.max(1, span.h));
+  let scale = Math.min(open, Number.isFinite(fit) && fit > 0 ? fit : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
     scale = Math.min(input.previous, scale);
   }
-  return { scale, limits: limitsAt(scale) };
+  return { scale, limits };
 }
 
 /**

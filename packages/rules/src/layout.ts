@@ -10,9 +10,13 @@ import { ARM_IDS, openEnds } from "./board.js";
  * outward as the chain grows. It does not pan, and it does not zoom back in.
  *
  * Each arm owns one region and snakes inside it, the way a domino table
- * does. West takes the left side and the top-left corner, north the top
- * and the top-right, east the right and the bottom-right, south the bottom
- * and the bottom-left. Those corners are split once and never shared.
+ * does. On a wide felt, west takes the left side and the top-left corner,
+ * north the top and the top-right, east the right and the bottom-right,
+ * south the bottom and the bottom-left. On a tall phone the same turn
+ * direction is used, but the regions change: north keeps the centre column
+ * above the spinner, south the centre column below it, and west and east
+ * turn after one or two tiles and run the full height of the left and right
+ * thirds. West runs up, east runs down, so they do not meet in one corner.
  *
  * An arm runs straight out from the spinner. When the next tile would
  * leave its region it makes one corner, always turning the same way
@@ -166,12 +170,32 @@ interface SnakeCursor {
   row: number;
   /** Across-axis centre of this row (y for west/east, x for north/south). */
   line: number;
+  /** Tiles already placed in this row, including the latest. */
+  run: number;
   /** The tile just placed is the corner. The next tile opens the next row. */
   opening: boolean;
   /** A double was just centred on the corner's end. The next tile runs back from its middle. */
   fromDouble: boolean;
   /** The run is continuing off that double, perpendicular to the arm's rows. */
   column: boolean;
+}
+
+/** A tall felt splits into a center column and two side lanes. A wide felt keeps the cross. */
+function isPortrait(): boolean {
+  return activeLimit.height >= activeLimit.width * 1.35;
+}
+
+function portraitSide(arm: ArmId): boolean {
+  return isPortrait() && (arm === "west" || arm === "east");
+}
+
+/**
+ * Inner edge of a side lane. The center column holds a crosswise double
+ * plus a gap, so the lanes never touch the north or south arm.
+ */
+function laneInner(): number {
+  // Clear of a crosswise double on the center column, plus a little felt.
+  return TILE_LONG / 2 + TILE_SHORT / 2;
 }
 
 function shiftDir(arm: ArmId): LayoutDir {
@@ -182,6 +206,11 @@ function shiftDir(arm: ArmId): LayoutDir {
 }
 
 function travelDir(arm: ArmId, row: number): LayoutDir {
+  if (portraitSide(arm)) {
+    if (row <= 0) return arm;
+    const vertical = shiftDir(arm);
+    return row % 2 === 1 ? vertical : opposite(vertical);
+  }
   return row % 2 === 0 ? arm : opposite(arm);
 }
 
@@ -208,9 +237,32 @@ function overlapsPlaced(box: LayoutBox, placed: readonly LayoutBox[]): boolean {
  * right, returns in the bottom-right. South stays below, returns in the
  * bottom-left. The outward row may lie on the spinner's axis.
  */
+function inCenterColumn(box: LayoutBox): boolean {
+  const half = laneInner();
+  return box.x >= -half - 0.5 && box.x + box.w <= half + 0.5;
+}
+
 function inArmRegion(box: LayoutBox, arm: ArmId, row: number, center: LayoutBox): boolean {
   const midX = center.x + center.w / 2;
   const midY = center.y + center.h / 2;
+  if (isPortrait()) {
+    // West keeps the left third, east the right third. North and south keep
+    // the centre column on the way out, then may fold back beside it.
+    if (arm === "west") {
+      if (row <= 0) return box.x + box.w <= center.x - TILE_GAP + 0.5;
+      return box.x + box.w / 2 <= -TILE_LONG / 2 + 0.5;
+    }
+    if (arm === "east") {
+      if (row <= 0) return box.x >= center.x + center.w + TILE_GAP - 0.5;
+      return box.x + box.w / 2 >= TILE_LONG / 2 - 0.5;
+    }
+    if (arm === "north") {
+      if (box.y + box.h > center.y - TILE_GAP + 0.5) return false;
+      return row <= 0 ? inCenterColumn(box) : true;
+    }
+    if (box.y < center.y + center.h + TILE_GAP - 0.5) return false;
+    return row <= 0 ? inCenterColumn(box) : true;
+  }
   if (arm === "west") {
     if (box.x + box.w > center.x - TILE_GAP + 0.5) return false;
     if (row > 0 && box.y + box.h > midY - TILE_SHORT / 2 + 0.5) return false;
@@ -244,6 +296,9 @@ function cornerSpan(line0: number, line1: number): number {
 
 /** One ordinary tile, turned into the arm's corner and clear of the row it leaves. */
 function placeCorner(prev: LayoutBox, arm: ArmId, row: number, line: number): LayoutBox {
+  if (portraitSide(arm) && row >= 1) {
+    return bendBox(prev, travelDir(arm, row), arm, false);
+  }
   const from = travelDir(arm, row);
   const line1 = line + rowSign(arm) * ROW_PITCH;
   const horizontal = from === "east" || from === "west";
@@ -281,6 +336,12 @@ function placeOnRow(corner: LayoutBox, arm: ArmId, row: number, isDouble: boolea
  */
 function staysOnSide(box: LayoutBox, arm: ArmId, center: LayoutBox, tight: boolean): boolean {
   const spine = TILE_LONG / 2 + TILE_GAP;
+  if (isPortrait() && tight) {
+    if (arm === "west") return box.x + box.w / 2 <= -TILE_LONG / 2 + 0.5;
+    if (arm === "east") return box.x + box.w / 2 >= TILE_LONG / 2 - 0.5;
+    if (arm === "north") return box.y + box.h <= -spine + 0.5;
+    return box.y >= spine - 0.5;
+  }
   if (arm === "west") {
     const edge = tight ? -spine : center.x - TILE_GAP;
     return box.x + box.w <= edge + 0.5;
@@ -309,19 +370,67 @@ function straightFits(
   arm: ArmId,
   row: number,
   line: number,
+  run: number,
   center: LayoutBox,
   placed: readonly LayoutBox[],
 ): boolean {
   const box = straightBox(prev, dir, isDouble);
   const tight = row > 0;
-  if (!staysOnSide(box, arm, center, tight) || overlapsPlaced(box, placed) || !runInside(box, dir)) return false;
+  // On a tall phone the side stem is one or two tiles. Turn before the vertical
+  // lane would sit so close to the felt edge that a crosswise double falls off.
+  if (portraitSide(arm) && row === 0 && !isDouble) {
+    const ahead = straightBox(prev, dir, false);
+    // The vertical lane's crosswise double has to stay on the felt, so the
+    // stem stops once another horizontal tile would push that double off.
+    const outer = TILE_GAP + TILE_SHORT + TILE_LONG / 2;
+    const doubleOuter = arm === "east" ? ahead.x + ahead.w + outer : ahead.x - outer;
+    const half = activeLimit.width / 2;
+    if (run >= 1 && Math.abs(doubleOuter) > half + 0.5) return false;
+    const leavingDouble = (dir === "east" || dir === "west") ? prev.h > prev.w : prev.w > prev.h;
+    if (run >= 2 && !leavingDouble) return false;
+  }
+  const centreIn = () => {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    return Math.abs(cx) <= activeLimit.width / 2 && Math.abs(cy) <= activeLimit.height / 2;
+  };
+  // The second stem tile may reach the side lane with its outer half past the edge.
+  const inside = portraitSide(arm) && row === 0 ? centreIn() : runInside(box, dir);
+  if (!staysOnSide(box, arm, center, tight) || overlapsPlaced(box, placed) || !inside) return false;
   if (!isDouble && !inArmRegion(box, arm, row, center)) return false;
   const next = upcoming[1];
   if (!isDouble && next && isDoubleTile(next)) {
     const doubled = straightBox(box, dir, true);
-    if (!staysOnSide(doubled, arm, center, tight) || overlapsPlaced(doubled, placed) || boxesOverlap(doubled, box) || !runInside(doubled, dir)) {
+    const cx = doubled.x + doubled.w / 2;
+    const cy = doubled.y + doubled.h / 2;
+    const centreIn = Math.abs(cx) <= activeLimit.width / 2 && Math.abs(cy) <= activeLimit.height / 2;
+    const doubleInside = portraitSide(arm) && row > 0 ? centreIn : runInside(doubled, dir);
+    if (!staysOnSide(doubled, arm, center, tight) || overlapsPlaced(doubled, placed) || boxesOverlap(doubled, box) || !doubleInside) {
       return false;
     }
+  }
+  // A vertical lane runs to the felt edge. A snake along the edge is only a
+  // tile or two, then it turns down the next column. The sideways corner is
+  // not required to fit before the straight tile does. The stem checks above
+  // already turn a side arm after one or two tiles.
+  if (isPortrait() && !portraitSide(arm)) {
+    const horizontal = dir === "east" || dir === "west";
+    if (horizontal && !isDouble && run >= 1) return false;
+    return true;
+  }
+  if (portraitSide(arm) && row === 0) return true;
+  if (portraitSide(arm) && row > 0) {
+    const horizontal = dir === "east" || dir === "west";
+    const leavingDouble = horizontal ? prev.h > prev.w : prev.w > prev.h;
+    if (horizontal && !isDouble && run >= 1 && !leavingDouble) return false;
+    // Leave a tile of felt at the end of a vertical lane so the snake can
+    // turn along the edge instead of running off it.
+    if (!horizontal && !isDouble && !leavingDouble) {
+      const limit = activeLimit.height / 2;
+      const leading = dir === "south" ? box.y + box.h : -box.y;
+      if (leading > limit - TILE_LONG) return false;
+    }
+    return true;
   }
   if (!isDouble) {
     const corner = placeCorner(box, arm, row, line);
@@ -335,9 +444,71 @@ interface StepResult {
   dir: LayoutDir;
   row: number;
   line: number;
+  run: number;
   opening: boolean;
   fromDouble: boolean;
   column: boolean;
+}
+
+/**
+ * The straight run has met the felt. Turn along the edge and, a tile or two
+ * later, back down the open column. West and north never turn west-ward into
+ * each other; east and south never turn east-ward into each other.
+ */
+function portraitFold(
+  cursor: SnakeCursor,
+  arm: ArmId,
+  center: LayoutBox,
+  placed: readonly LayoutBox[],
+): StepResult | null {
+  if (portraitSide(arm) && cursor.row === 0) return null;
+  const from = cursor.dir;
+  const order: LayoutDir[] = from === "north"
+    ? ["east", "west"]
+    : from === "south"
+      ? ["west", "east"]
+      : from === "east"
+        ? ["south", "north"]
+        : ["north", "south"];
+  const gap = TILE_SHORT / 2 + TILE_GAP;
+  const holds = (box: LayoutBox) => {
+    if (overlapsPlaced(box, placed) || boxesOverlap(box, cursor.box) || !insideActive(box)) return false;
+    // Stay on this arm's side of the spinner. The inner column may sit in the
+    // gap beside the centre tiles; it may not cross onto them.
+    if (arm === "west") return box.x + box.w <= -gap + 0.5;
+    if (arm === "east") return box.x >= gap - 0.5;
+    if (arm === "north") return box.y + box.h <= center.y - TILE_GAP + 0.5;
+    return box.y >= center.y + center.h + TILE_GAP - 0.5;
+  };
+  const turnBoxes = (to: LayoutDir): LayoutBox[] => {
+    const boxes = [bendBox(cursor.box, from, to, false)];
+    const horizontal = to === "east" || to === "west";
+    if ((from === "north" || from === "south") && horizontal) {
+      const y = from === "north" ? cursor.box.y - TILE_GAP - TILE_SHORT : cursor.box.y + cursor.box.h + TILE_GAP;
+      const x = to === "west" ? cursor.box.x + cursor.box.w - TILE_LONG : cursor.box.x;
+      boxes.push({ x, y, w: TILE_LONG, h: TILE_SHORT });
+    }
+    return boxes;
+  };
+  for (const to of order) {
+    if (arm === "north" && to === "west") continue;
+    if (arm === "south" && to === "east") continue;
+    if (to === from || to === opposite(from)) continue;
+    const box = turnBoxes(to).find(holds);
+    if (!box) continue;
+    const horizontal = to === "east" || to === "west";
+    return {
+      box,
+      dir: to,
+      row: cursor.row + 1,
+      line: horizontal ? box.y + box.h / 2 : box.x + box.w / 2,
+      run: 1,
+      opening: false,
+      fromDouble: false,
+      column: false,
+    };
+  }
+  return null;
 }
 
 function snakeStep(
@@ -358,12 +529,12 @@ function snakeStep(
     && (double || inArmRegion(box, arm, cursor.row, center));
   if (fromCenter) {
     const box = straightBox(cursor.box, arm, double);
-    return { box, dir: arm, row: 0, line: acrossCenter(box, arm), opening: false, fromDouble: false, column: false };
+    return { box, dir: arm, row: 0, line: acrossCenter(box, arm), run: 1, opening: false, fromDouble: false, column: false };
   }
   if (cursor.column) {
     const ahead = straightBox(cursor.box, cursor.dir, double);
     if (clear(ahead, cursor.dir, true)) {
-      return { box: ahead, dir: cursor.dir, row: cursor.row, line: acrossCenter(ahead, arm), opening: false, fromDouble: false, column: false };
+      return { box: ahead, dir: cursor.dir, row: cursor.row, line: acrossCenter(ahead, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
     const back = travelDir(arm, cursor.row);
     const home = bendBox(cursor.box, cursor.dir, back, false);
@@ -377,6 +548,7 @@ function snakeStep(
         dir: turned.dir,
         row,
         line: acrossCenter(turned.box, arm),
+        run: 1,
         opening: false,
         fromDouble: false,
         column: false,
@@ -385,9 +557,9 @@ function snakeStep(
     // The column has met the felt. Step back onto the row when that stays in this arm.
     const along = straightBox(cursor.box, back, double);
     if (staysOnSide(along, arm, center, true) && !overlapsPlaced(along, placed) && !boxesOverlap(along, cursor.box)) {
-      return { box: along, dir: back, row: cursor.row, line: acrossCenter(along, arm), opening: false, fromDouble: false, column: false };
+      return { box: along, dir: back, row: cursor.row, line: acrossCenter(along, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
-    return { box: ahead, dir: cursor.dir, row: cursor.row, line: acrossCenter(ahead, arm), opening: false, fromDouble: false, column: false };
+    return { box: ahead, dir: cursor.dir, row: cursor.row, line: acrossCenter(ahead, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
   if (cursor.fromDouble) {
     const back = travelDir(arm, cursor.row);
@@ -395,7 +567,7 @@ function snakeStep(
     // Run back on the new row when that stays in this arm. Otherwise keep
     // going off the double's far end so the tile does not cross the spine.
     if (clear(along, back, true)) {
-      return { box: along, dir: back, row: cursor.row, line: cursor.line, opening: false, fromDouble: false, column: false };
+      return { box: along, dir: back, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
     const onward = straightBox(cursor.box, cursor.dir, double);
     if (clear(onward, cursor.dir, true)) {
@@ -404,6 +576,7 @@ function snakeStep(
         dir: cursor.dir,
         row: cursor.row,
         line: acrossCenter(onward, arm),
+        run: cursor.run + 1,
         opening: false,
         fromDouble: false,
         column: true,
@@ -416,21 +589,27 @@ function snakeStep(
         dir: cursor.dir,
         row: cursor.row,
         line: acrossCenter(onward, arm),
+        run: cursor.run + 1,
         opening: false,
         fromDouble: false,
         column: false,
       };
     }
-    return { box: along, dir: back, row: cursor.row, line: cursor.line, opening: false, fromDouble: false, column: false };
+    return { box: along, dir: back, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
   if (cursor.opening && double) {
     // Crosswise, centred on the corner's end. The column meets the middle of the double.
-    const box = straightBox(cursor.box, cursor.dir, true);
+    let anchor = cursor.box;
+    if (portraitSide(arm) && cursor.row > 0) {
+      anchor = { x: cursor.line - TILE_SHORT / 2, y: cursor.box.y, w: TILE_SHORT, h: cursor.box.h };
+    }
+    const box = straightBox(anchor, cursor.dir, true);
     return {
       box,
       dir: cursor.dir,
       row: cursor.row,
-      line: acrossCenter(box, arm),
+      line: portraitSide(arm) && cursor.row > 0 ? cursor.line : acrossCenter(box, arm),
+      run: cursor.run + 1,
       opening: false,
       fromDouble: true,
       column: false,
@@ -439,8 +618,8 @@ function snakeStep(
   if (cursor.opening) {
     const dir = travelDir(arm, cursor.row);
     const box = placeOnRow(cursor.box, arm, cursor.row, false, cursor.line);
-    if (staysOnSide(box, arm, center, true) && !overlapsPlaced(box, placed)) {
-      return { box, dir, row: cursor.row, line: cursor.line, opening: false, fromDouble: false, column: false };
+    if (staysOnSide(box, arm, center, true) && !overlapsPlaced(box, placed) && inArmRegion(box, arm, cursor.row, center)) {
+      return { box, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
     const onward = straightBox(cursor.box, cursor.dir, false);
     return {
@@ -448,6 +627,7 @@ function snakeStep(
       dir: cursor.dir,
       row: cursor.row,
       line: acrossCenter(onward, arm),
+      run: cursor.run + 1,
       opening: false,
       fromDouble: false,
       column: false,
@@ -455,52 +635,244 @@ function snakeStep(
   }
   const dir = cursor.dir;
   // A double never makes the corner. It stays crosswise on this row.
-  if (straightFits(cursor.box, dir, double, upcoming, arm, cursor.row, cursor.line, center, placed)) {
+  if (straightFits(cursor.box, dir, double, upcoming, arm, cursor.row, cursor.line, cursor.run, center, placed)) {
     const box = straightBox(cursor.box, dir, double);
     // A run in the turn direction moves the row. Keep the line on the tile just placed.
-    const line = dir === shiftDir(arm) ? acrossCenter(box, arm) : cursor.line;
-    return { box, dir, row: cursor.row, line, opening: false, fromDouble: false, column: false };
+    const line = dir === shiftDir(arm) && !portraitSide(arm) ? acrossCenter(box, arm) : cursor.line;
+    return { box, dir, row: cursor.row, line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
   if (double) {
     // Still on this line, centred on the tile it follows. Never parked on its side.
     const box = straightBox(cursor.box, dir, true);
     const onSide = (candidate: LayoutBox, tight: boolean) =>
       staysOnSide(candidate, arm, center, tight) && !overlapsPlaced(candidate, placed) && !boxesOverlap(candidate, cursor.box);
-    if (onSide(box, cursor.row > 0)) {
-      const line = dir === shiftDir(arm) ? acrossCenter(box, arm) : cursor.line;
-      return { box, dir, row: cursor.row, line, opening: false, fromDouble: false, column: false };
+    const free = (candidate: LayoutBox) =>
+      !overlapsPlaced(candidate, placed) && !boxesOverlap(candidate, cursor.box);
+    if (onSide(box, cursor.row > 0) && free(box) && (!isPortrait() || runInside(box, dir))) {
+      const line = dir === shiftDir(arm) && !portraitSide(arm) ? acrossCenter(box, arm) : cursor.line;
+      return { box, dir, row: cursor.row, line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
     const cap = straightBox(cursor.box, shiftDir(arm), true);
-    if (onSide(cap, true) || staysOnSide(cap, arm, center, true)) {
+    if (!isPortrait() && free(cap) && (onSide(cap, true) || staysOnSide(cap, arm, center, true))) {
       return {
         box: cap,
         dir: shiftDir(arm),
         row: cursor.row,
         line: acrossCenter(cap, arm),
+        run: cursor.run + 1,
         opening: false,
         fromDouble: true,
         column: false,
       };
     }
-    return { box, dir, row: cursor.row, line: cursor.line, opening: false, fromDouble: false, column: false };
+    // A double stays on the tile's axis. Hanging off the felt is better than
+    // parking it against the long side. It still may not cross into another arm.
+    if (isPortrait() && !staysOnSide(box, arm, center, cursor.row > 0)) {
+      const lane = shiftDir(arm);
+      for (const way of [lane, opposite(lane)] as LayoutDir[]) {
+        const turned = straightBox(cursor.box, way, true);
+        if (staysOnSide(turned, arm, center, true) && free(turned)) {
+          return {
+            box: turned,
+            dir: way,
+            row: cursor.row,
+            line: acrossCenter(turned, arm),
+            run: cursor.run + 1,
+            opening: false,
+            fromDouble: true,
+            column: false,
+          };
+        }
+      }
+    }
+    if (isPortrait() && !runInside(box, dir)) {
+      const lane = shiftDir(arm);
+      for (const way of [lane, opposite(lane), dir] as LayoutDir[]) {
+        const turned = straightBox(cursor.box, way, true);
+        if (free(turned) && runInside(turned, way) && staysOnSide(turned, arm, center, cursor.row > 0)) {
+          return {
+            box: turned,
+            dir: way,
+            row: cursor.row,
+            line: acrossCenter(turned, arm),
+            run: cursor.run + 1,
+            opening: false,
+            fromDouble: way !== dir,
+            column: false,
+          };
+        }
+      }
+    }
+    return { box, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
-  if (dir !== travelDir(arm, cursor.row)) {
+  if (dir !== travelDir(arm, cursor.row) && !isPortrait()) {
     // Already on the turn. Another corner here would sit against the long side.
     const stuck = straightBox(cursor.box, dir, false);
-    return { box: stuck, dir, row: cursor.row, line: acrossCenter(stuck, arm), opening: false, fromDouble: false, column: false };
+    return { box: stuck, dir, row: cursor.row, line: acrossCenter(stuck, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
   const onDouble = (dir === "east" || dir === "west") ? cursor.box.h > cursor.box.w : cursor.box.w > cursor.box.h;
+  const centreInside = (box: LayoutBox) => {
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    return Math.abs(cx) <= activeLimit.width / 2 + 0.5 && Math.abs(cy) <= activeLimit.height / 2 + 0.5;
+  };
+  // A double at the edge of a tall felt. Leave across its middle, back down
+  // the open side, instead of carrying the line off the table.
+  if (onDouble && isPortrait() && !runInside(straightBox(cursor.box, dir, false), dir)) {
+    const back: LayoutDir = cursor.box.y + cursor.box.h / 2 < 0 ? "south" : "north";
+    const turned = straightBox(cursor.box, back, false);
+    const clearTurn = !overlapsPlaced(turned, placed) && !boxesOverlap(turned, cursor.box) && centreInside(turned);
+    if (clearTurn) {
+      return {
+        box: turned,
+        dir: back,
+        row: cursor.row,
+        line: acrossCenter(turned, arm),
+        run: cursor.run + 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+  }
   const centered = straightBox(cursor.box, shiftDir(arm), false);
+  // In a vertical lane the turn direction is the lane itself, so leaving a double stays on that line.
+  if (onDouble && shiftDir(arm) === dir) {
+    const onSide = staysOnSide(centered, arm, center, cursor.row > 0)
+      && !overlapsPlaced(centered, placed)
+      && !boxesOverlap(centered, cursor.box);
+    if (onSide && (runInside(centered, dir) || centreInside(centered))) {
+      return {
+        box: centered,
+        dir,
+        row: cursor.row,
+        line: cursor.line,
+        run: cursor.run + 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+  }
   const ended = placeCorner(cursor.box, arm, cursor.row, cursor.line);
-  const legal = (box: LayoutBox) => staysOnSide(box, arm, center, true) && !overlapsPlaced(box, placed);
+  // On a narrow felt the far end of the stem is past the edge. The lane then
+  // starts at the near end, one double clear of the centre column.
+  const near = portraitSide(arm) && cursor.row === 0 ? bendBox(cursor.box, dir, shiftDir(arm), false) : null;
+  const inBand = (candidate: LayoutBox) => {
+    if (!isPortrait()) return true;
+    if (arm === "north" || arm === "south") return inCenterColumn(candidate);
+    return inArmRegion(candidate, arm, cursor.row + 1, center);
+  };
+  const legal = (candidate: LayoutBox) =>
+    staysOnSide(candidate, arm, center, true)
+    && !overlapsPlaced(candidate, placed)
+    && inBand(candidate)
+    && runInside(candidate, arm);
   // Off a double, leave from its middle when that stays in the arm's side.
-  const box = onDouble && legal(centered) ? centered : legal(ended) ? ended : centered;
+  // On a tall phone the center arms stay in their column instead of stepping into a side lane.
+  const onAxisBox = isPortrait()
+    && onDouble
+    && !overlapsPlaced(centered, placed)
+    && !boxesOverlap(centered, cursor.box)
+    && centreInside(centered);
+  const chosen = onAxisBox ? centered : legal(ended) ? ended : near && legal(near) ? near : null;
+  if (onAxisBox) {
+    return {
+      box: centered,
+      dir: shiftDir(arm),
+      row: cursor.row,
+      line: acrossCenter(centered, arm),
+      run: cursor.run + 1,
+      opening: false,
+      fromDouble: false,
+      column: false,
+    };
+  }
+  if (!chosen && isPortrait() && !onDouble) {
+    const folded = portraitFold(cursor, arm, center, placed);
+    if (folded) return folded;
+    // No open column. One more step on this line, then the next tile tries again.
+    const stuck = straightBox(cursor.box, dir, false);
+    const cx = stuck.x + stuck.w / 2;
+    const cy = stuck.y + stuck.h / 2;
+    const centreIn = Math.abs(cx) <= activeLimit.width / 2 && Math.abs(cy) <= activeLimit.height / 2;
+    if (
+      centreIn
+      && !overlapsPlaced(stuck, placed)
+      && !boxesOverlap(stuck, cursor.box)
+      && staysOnSide(stuck, arm, center, true)
+    ) {
+      return { box: stuck, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    }
+  }
+  let box = chosen ?? centered;
+  if (overlapsPlaced(box, placed) || boxesOverlap(box, cursor.box)) {
+    const straight = straightBox(cursor.box, dir, false);
+    if (!overlapsPlaced(straight, placed) && !boxesOverlap(straight, cursor.box)) box = straight;
+  }
+  if (isPortrait() && (chosen == null || overlapsPlaced(box, placed) || !runInside(box, dir))) {
+    const dirs: LayoutDir[] = dir === "north" || dir === "south"
+      ? [dir === "north" ? "east" : "west", dir === "north" ? "west" : "east"]
+      : [cursor.box.y < 0 ? "south" : "north", cursor.box.y < 0 ? "north" : "south"];
+    const parked = dirs
+      .map((way) => ({ way, box: straightBox(cursor.box, way, false) }))
+      .find((candidate) =>
+        !overlapsPlaced(candidate.box, placed)
+        && !boxesOverlap(candidate.box, cursor.box)
+        && runInside(candidate.box, candidate.way)
+        && staysOnSide(candidate.box, arm, center, true)
+        && inArmRegion(candidate.box, arm, cursor.row, center));
+    if (parked) {
+      return {
+        box: parked.box,
+        dir: parked.way,
+        row: cursor.row,
+        line: acrossCenter(parked.box, arm),
+        run: cursor.run + 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+  }
+  const nextRow = cursor.row + 1;
+  let nextDir = shiftDir(arm);
+  let nextLine = cursor.line + rowSign(arm) * ROW_PITCH;
+  let opening = true;
+  if (portraitSide(arm)) {
+    if (cursor.row === 0) {
+      // The corner is the first tile of the vertical lane. The run continues straight up or down it.
+      nextDir = shiftDir(arm);
+      nextLine = box.x + box.w / 2;
+      opening = false;
+    } else {
+      nextDir = arm;
+      nextLine = arm === "west" ? box.x + TILE_SHORT / 2 : box.x + box.w - TILE_SHORT / 2;
+      opening = true;
+    }
+  }
+  if (isPortrait() && !runInside(box, nextDir)) {
+    const straight = straightBox(cursor.box, dir, false);
+    if (!overlapsPlaced(straight, placed) && !boxesOverlap(straight, cursor.box) && runInside(straight, dir)) {
+      return {
+        box: straight,
+        dir,
+        row: cursor.row,
+        line: cursor.line,
+        run: cursor.run + 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+  }
   return {
     box,
-    dir: shiftDir(arm),
-    row: cursor.row + 1,
-    line: cursor.line + rowSign(arm) * ROW_PITCH,
-    opening: true,
+    dir: nextDir,
+    row: nextRow,
+    line: nextLine,
+    run: 1,
+    opening,
     fromDouble: false,
     column: false,
   };
@@ -522,7 +894,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
     if (!first) continue;
     const opening = snakeStep(
       first,
-      { box: center, dir: arm, row: 0, line: 0, opening: false, fromDouble: false, column: false },
+      { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false },
       arm,
       center,
       chain,
@@ -537,6 +909,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       dir: opening.dir,
       row: opening.row,
       line: opening.line,
+      run: opening.run,
       opening: opening.opening,
       fromDouble: opening.fromDouble,
       column: opening.column,
@@ -552,6 +925,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
         dir: choice.dir,
         row: choice.row,
         line: choice.line,
+        run: choice.run,
         opening: choice.opening,
         fromDouble: choice.fromDouble,
         column: choice.column,

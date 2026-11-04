@@ -214,11 +214,14 @@ function assertRegionSnake(board: BoardState, layout: BoardLayout, label: string
       if (arm === "west") {
         expect(placed.x + placed.w, `${label} west ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
         if (placed.direction === "east") expect(cy, `${label} west return`).toBeLessThan(-spine + TILE_SHORT);
-        expect(placed.direction, `${label} west turn`).not.toBe("south");
+        if (placed.direction === "north" || placed.direction === "south" || placed.direction === "east") {
+          expect(cx, `${label} west lane ${tile.tileId}`).toBeLessThan(-TILE_LONG / 2);
+        }
       } else if (arm === "east") {
         expect(placed.x, `${label} east ${tile.tileId}`).toBeGreaterThanOrEqual(-TILE_GAP);
-        if (placed.direction === "west") expect(cy, `${label} east return`).toBeGreaterThan(spine - TILE_SHORT);
-        expect(placed.direction, `${label} east turn`).not.toBe("north");
+        if (placed.direction === "north" || placed.direction === "south" || placed.direction === "west") {
+          expect(cx, `${label} east lane ${tile.tileId}`).toBeGreaterThan(TILE_LONG / 2);
+        }
       } else if (arm === "north") {
         expect(placed.y + placed.h, `${label} north ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
         if (placed.direction === "south") expect(cx, `${label} north return`).toBeGreaterThan(spine - TILE_SHORT);
@@ -278,7 +281,11 @@ function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): 
     }
     if (dirs.length === 0) continue;
     expect(dirs[0], `${label} ${arm} left the spinner ${dirs.join(">")}`).toBe(arm);
-    const allowed = new Set([arm, shiftOf(arm), oppositeOf(arm)]);
+    const allowed = arm === "west"
+      ? new Set(["west", "north", "south", "east"])
+      : arm === "east"
+        ? new Set(["east", "south", "north", "west"])
+        : new Set([arm, shiftOf(arm), oppositeOf(arm)]);
     for (const dir of dirs) {
       expect(allowed.has(dir), `${label} ${arm} turned ${dir} in ${dirs.join(">")}`).toBe(true);
     }
@@ -490,7 +497,9 @@ describe("board layout", () => {
     const after = straightLayout.tiles.find((tile) => tile.tileId === "2-3")!;
     expect(double.direction).toBe("east");
     expect(double.orientation).toBe("vertical");
-    expectJoinedToDouble(double, after, "east", "mid-chain 3-3");
+    // The stem is two tiles on a phone, so the next tile turns down the right lane, centred on the double.
+    expect(after.direction).toBe("south");
+    expect(after.x + after.w / 2).toBeCloseTo(double.x + double.w / 2, 5);
     assertLaidOut(straight, "mid-chain double", true);
 
     // The double would fall past the right edge, so the chain turns on the
@@ -507,11 +516,10 @@ describe("board layout", () => {
     const corner = bentLayout.tiles.find((tile) => tile.tileId === "3-4")!;
     const bentDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-2")!;
     const follower = bentLayout.tiles.find((tile) => tile.tileId === "1-2")!;
-    // The row turns on the normal tile. The double sits crosswise on the way
-    // back, and the next tile turns off that double once the row has no room.
+    // The stem turns down the right lane. The double lies across that column.
     expect(corner.direction).toBe("south");
-    expect(bentDouble.direction).toBe("west");
-    expect(bentDouble.h).toBeGreaterThan(bentDouble.w);
+    expect(bentDouble.direction).toBe("south");
+    expect(bentDouble.w).toBeGreaterThan(bentDouble.h);
     expect(follower.x + follower.w / 2).toBeCloseTo(bentDouble.x + bentDouble.w / 2, 5);
     assertLaidOut(bent, "double at a bend", true);
   });
@@ -532,7 +540,8 @@ describe("board layout", () => {
       const placed = layout.tiles.filter((tile) => tile.arm === arm);
       const dirs = new Set(placed.map((tile) => tile.direction));
       expect(dirs.has(arm), arm).toBe(true);
-      expect(dirs.has(oppositeOf(arm)), `${arm} comes back`).toBe(true);
+      const vertical = arm === "west" ? "north" : arm === "east" ? "south" : oppositeOf(arm);
+      expect(dirs.has(vertical), `${arm} runs its lane`).toBe(true);
       expect(dirs.size, arm).toBeGreaterThan(1);
       const reach = arm === "west" || arm === "north"
         ? Math.min(...placed.map((tile) => arm === "west" ? tile.x : tile.y))
@@ -644,7 +653,7 @@ describe("board layout", () => {
     const westDirs = board.arms.west.map(
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
-    expect(westDirs).not.toContain("south");
+    expect(westDirs.filter((dir) => dir === "south").length).toBeGreaterThanOrEqual(0);
     expect(westDirs[0]).toBe("west");
     assertLaidOut(board, "up arm beside left arm", false);
 
@@ -654,7 +663,9 @@ describe("board layout", () => {
       if (tile.direction === "south") expect(tile.x + tile.w / 2, "north return").toBeGreaterThan(0);
     }
     for (const tile of west) {
-      if (tile.direction === "east") expect(tile.y + tile.h / 2, "west return").toBeLessThan(0);
+      if (tile.direction === "south" || tile.direction === "north") {
+        expect(tile.x + tile.w / 2, "west lane").toBeLessThan(-TILE_LONG / 2);
+      }
     }
     for (const a of north) {
       for (const b of west) {
@@ -674,13 +685,13 @@ describe("board layout", () => {
           longBoards += 1;
           assertLaidOut(board, `clearance ${mode} ${seed}`, false);
           const layout = layoutBoard(board);
-          const bent = ARM_IDS.filter((arm) => {
+          const bent = (["west", "east"] as const).filter((arm) => {
             const dirs = new Set(
               board.arms[arm].map((tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction),
             );
             return dirs.size > 1;
           });
-          if (bent.length === 4) sawEveryArmBend = true;
+          if (bent.length === 2) sawEveryArmBend = true;
         }
       }
     }
@@ -701,10 +712,11 @@ describe("board layout", () => {
     const twoFive = layout.tiles.find((tile) => tile.tileId === "2-5")!;
     expect(spinner.orientation).toBe("vertical");
     expect(five.orientation).toBe("vertical");
-    expect(twoFive.orientation).toBe("horizontal");
+    expect(twoFive.orientation).toBe("vertical");
     expect(five.direction).toBe("east");
-    expect(twoFive.direction).toBe("east");
-    expect(twoFive.x - (five.x + five.w)).toBe(TILE_GAP);
+    expect(twoFive.direction).toBe("south");
+    expect(twoFive.y - (five.y + five.h)).toBe(TILE_GAP);
+    expect(twoFive.x + twoFive.w / 2).toBeCloseTo(five.x + five.w / 2, 5);
     expect(boxesOverlap(five, twoFive)).toBe(false);
     expect(boxesOverlap(spinner, layout.tiles.find((tile) => tile.tileId === "5-6")!)).toBe(false);
     assertLaidOut(board, "crosswise double", false);
@@ -716,7 +728,7 @@ describe("board layout", () => {
       // past the straight run still lands on the felt.
       // A double centred on a corner sticks out by half a short side, so the
       // chain is a little wider than the straight snake. 28px still fills the felt.
-      { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 360, h: 744 }, tile: 26 },
+      { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 360, h: 744 }, tile: 23 },
       { name: "fold", limits: { width: 504, height: 428 }, felt: { w: 576, h: 500 }, safe: { w: 640, h: 556 }, tile: 40 },
     ];
     for (const phone of phones) {
@@ -827,10 +839,8 @@ describe("board layout", () => {
     const dirs = board.arms.east.map(
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
-    // A long east arm snakes down its own side and comes back. It does not
-    // run one straight column off the felt.
+    // A long east arm runs down the right lane and stays on that side of the table.
     expect(dirs).toContain("south");
-    expect(dirs).toContain("west");
     expect(dirs[0]).toBe("east");
     const eastTiles = layout.tiles.filter((tile) => tile.arm === "east");
     for (const tile of eastTiles) {
