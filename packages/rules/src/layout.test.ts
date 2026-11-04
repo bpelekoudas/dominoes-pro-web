@@ -540,8 +540,9 @@ describe("board layout", () => {
       const placed = layout.tiles.filter((tile) => tile.arm === arm);
       const dirs = new Set(placed.map((tile) => tile.direction));
       expect(dirs.has(arm), arm).toBe(true);
-      const vertical = arm === "west" ? "north" : arm === "east" ? "south" : oppositeOf(arm);
+      const vertical = arm === "west" ? "north" : arm === "east" ? "south" : arm;
       expect(dirs.has(vertical), `${arm} runs its lane`).toBe(true);
+      expect(dirs.has(oppositeOf(arm)), `${arm} curls back`).toBe(false);
       expect(dirs.size, arm).toBeGreaterThan(1);
       const reach = arm === "west" || arm === "north"
         ? Math.min(...placed.map((tile) => arm === "west" ? tile.x : tile.y))
@@ -729,7 +730,7 @@ describe("board layout", () => {
       // A double centred on a corner sticks out by half a short side, so the
       // chain is a little wider than the straight snake. 28px still fills the felt.
       { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 360, h: 744 }, tile: 23 },
-      { name: "fold", limits: { width: 504, height: 428 }, felt: { w: 576, h: 500 }, safe: { w: 640, h: 556 }, tile: 40 },
+      { name: "fold", limits: { width: 504, height: 428 }, felt: { w: 576, h: 500 }, safe: { w: 640, h: 556 }, tile: 28 },
     ];
     for (const phone of phones) {
       let best = 0;
@@ -867,6 +868,72 @@ describe("board layout", () => {
       }
     }
     expect(checked).toBeGreaterThan(40);
+  });
+
+  it("turns each corner away from the spinner and keeps lanes apart", () => {
+    const limits = [undefined, { width: 233, height: 666 }, { width: 520, height: 440 }] as const;
+    const step = (dir: string) => ({
+      x: dir === "east" ? 1 : dir === "west" ? -1 : 0,
+      y: dir === "south" ? 1 : dir === "north" ? -1 : 0,
+    });
+    let corners = 0;
+    for (const players of [2, 4] as const) {
+      for (let seed = 0; seed < 6; seed += 1) {
+        for (const board of playHand(players, "draw_until", seed + 300)) {
+          const count = ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, board.center ? 1 : 0);
+          if (count < 12) continue;
+          for (const limit of limits) {
+            const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+            const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+            const lanes: Array<{ arm: string; box: LayoutBox }> = [];
+            for (const arm of ARM_IDS) {
+              const chain = board.arms[arm];
+              let minX = Infinity;
+              let minY = Infinity;
+              let maxX = -Infinity;
+              let maxY = -Infinity;
+              let laneTiles = 0;
+              let seenLane = false;
+              for (let index = 0; index < chain.length; index += 1) {
+                const placed = byId.get(chain[index]!.tileId)!;
+                const parent = index === 0 ? byId.get(board.center!.tileId)! : byId.get(chain[index - 1]!.tileId)!;
+                if (placed.direction !== parent.direction || index === 0) {
+                  const cx = parent.x + parent.w / 2;
+                  const cy = parent.y + parent.h / 2;
+                  const { x, y } = step(placed.direction);
+                  const outward = cx * x + cy * y;
+                  const halfW = (limit?.width ?? PHONE_WIDTH) / 2;
+                  const halfH = (limit?.height ?? PHONE_HEIGHT) / 2;
+                  const alongEdge = Math.abs(Math.abs(cx) - halfW) <= TILE_LONG || Math.abs(Math.abs(cy) - halfH) <= TILE_LONG;
+                  expect(outward >= -TILE_SHORT || alongEdge, `${arm} ${placed.tileId} heads ${placed.direction}`).toBe(true);
+                  if (index > 0 && placed.direction !== parent.direction) corners += 1;
+                }
+                const laneDir = arm === "west" || arm === "north" ? "north" : "south";
+                if (arm === "west" || arm === "east") {
+                  if (placed.direction === laneDir) seenLane = true;
+                  if (!seenLane) continue;
+                }
+                laneTiles += 1;
+                minX = Math.min(minX, placed.x);
+                minY = Math.min(minY, placed.y);
+                maxX = Math.max(maxX, placed.x + placed.w);
+                maxY = Math.max(maxY, placed.y + placed.h);
+              }
+              if (laneTiles > 0) lanes.push({ arm, box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY } });
+            }
+            for (let i = 0; i < lanes.length; i += 1) {
+              for (let j = i + 1; j < lanes.length; j += 1) {
+                expect(
+                  boxesOverlap(lanes[i]!.box, lanes[j]!.box),
+                  `${lanes[i]!.arm} lane meets ${lanes[j]!.arm}`,
+                ).toBe(false);
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(corners).toBeGreaterThan(4);
   });
 
   it("reports a fit box with a margin around the tiles", () => {

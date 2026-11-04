@@ -18,12 +18,13 @@ import { ARM_IDS, openEnds } from "./board.js";
  * turn after one or two tiles and run the full height of the left and right
  * thirds. West runs up, east runs down, so they do not meet in one corner.
  *
- * An arm runs straight out from the spinner. When the next tile would
- * leave its region it makes one corner, always turning the same way
- * (west turns up, north turns right, east turns down, south turns left),
- * then runs back parallel to the first row. The rows stay a tile apart.
- * A corner is one ordinary tile. A double stays on the straight run,
- * crosswise and centred, and the tiles on either side meet it at its middle.
+ * An arm runs straight out from the spinner. When it meets the felt it
+ * makes one corner, always the same way (west turns up, north turns
+ * right, east turns down, south turns left). It does not turn back
+ * toward the spinner. On a tall phone the side arms make that corner
+ * after one or two tiles and then run their third of the felt. A corner
+ * is one ordinary tile. A double stays on the straight run, crosswise
+ * and centred, and the tiles on either side meet it at its middle.
  */
 
 export const TILE_SHORT = 36;
@@ -498,6 +499,151 @@ function portraitFold(
   return null;
 }
 
+/**
+ * Where a side column sits so a crosswise double fits in that third and
+ * stays clear of the centre double.
+ */
+function portraitLaneX(arm: ArmId): number {
+  if (arm === "north" || arm === "south") return 0;
+  const half = activeLimit.width / 2;
+  const sign = arm === "west" ? -1 : 1;
+  const ideal = activeLimit.width / 3;
+  const inner = TILE_LONG / 2 + TILE_GAP + TILE_LONG / 2;
+  const outer = half - TILE_LONG / 2;
+  if (outer <= inner) return sign * Math.max(TILE_SHORT, outer);
+  return sign * Math.min(outer, Math.max(inner, ideal));
+}
+
+/** True when `dir` does not walk the tile back toward the spinner. */
+function headsOut(box: LayoutBox, dir: LayoutDir): boolean {
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const dx = dir === "east" ? 1 : dir === "west" ? -1 : 0;
+  const dy = dir === "south" ? 1 : dir === "north" ? -1 : 0;
+  return cx * dx + cy * dy >= -TILE_SHORT;
+}
+
+/** The one corner off a side stem, centred in the lane and butted to the stem. */
+function sideCornerBox(stem: LayoutBox, arm: "west" | "east"): LayoutBox {
+  const half = activeLimit.width / 2;
+  const minOverlap = TILE_SHORT * 0.5;
+  const w = TILE_SHORT;
+  const h = TILE_LONG;
+  if (arm === "west") {
+    const leftmost = stem.x + minOverlap - w / 2;
+    const felt = -(half - TILE_LONG / 2);
+    let centerX = portraitLaneX(arm);
+    if (centerX < leftmost) centerX = leftmost;
+    if (centerX < felt) centerX = felt;
+    return { x: centerX - w / 2, y: stem.y - TILE_GAP - h, w, h };
+  }
+  const rightmost = stem.x + stem.w - minOverlap + w / 2;
+  const felt = half - TILE_LONG / 2;
+  let centerX = portraitLaneX(arm);
+  if (centerX > rightmost) centerX = rightmost;
+  if (centerX > felt) centerX = felt;
+  return { x: centerX - w / 2, y: stem.y + stem.h + TILE_GAP, w, h };
+}
+
+function portraitOwns(box: LayoutBox, arm: ArmId): boolean {
+  const edge = Math.abs(portraitLaneX("east")) - TILE_LONG / 2 - TILE_GAP;
+  if (arm === "west") return box.x + box.w <= -TILE_LONG / 2 - TILE_GAP + 0.5;
+  if (arm === "east") return box.x >= TILE_LONG / 2 + TILE_GAP - 0.5;
+  return box.x >= -edge - 0.5 && box.x + box.w <= edge + 0.5;
+}
+
+/**
+ * Tall felt. North and south run the centre column. West and east take one
+ * or two tiles out, then one corner and the outer third. A later turn goes
+ * outward along the edge, never back toward the spinner.
+ */
+function portraitSnakeStep(
+  tile: OrientedTile,
+  cursor: SnakeCursor,
+  arm: ArmId,
+  _center: LayoutBox,
+  upcoming: readonly OrientedTile[],
+  placed: readonly LayoutBox[],
+  fromCenter: boolean,
+): StepResult {
+  const double = isDoubleTile(tile);
+  const laneDir: LayoutDir = arm === "west" || arm === "north" ? "north" : "south";
+  const edgeDir: LayoutDir = arm === "west" || arm === "south" ? "west" : "east";
+  const free = (box: LayoutBox) => !overlapsPlaced(box, placed) && !boxesOverlap(box, cursor.box);
+  const kept = (dir: LayoutDir, row: number, run: number, line = cursor.line): StepResult => {
+    const box = straightBox(cursor.box, dir, double);
+    return { box, dir, row, line, run, opening: false, fromDouble: false, column: false };
+  };
+
+  if (fromCenter) {
+    const box = straightBox(cursor.box, arm, double);
+    return { box, dir: arm, row: 0, line: portraitLaneX(arm), run: 1, opening: false, fromDouble: false, column: false };
+  }
+
+  if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
+    if (double) return kept(arm, 0, cursor.run + 1);
+    const lane = portraitLaneX(arm);
+    const reached = arm === "west"
+      ? cursor.box.x <= lane + TILE_SHORT / 2
+      : cursor.box.x + cursor.box.w >= lane - TILE_SHORT / 2;
+    const stem = straightBox(cursor.box, arm, false);
+    const nextDouble = upcoming[1] ? isDoubleTile(upcoming[1]) : false;
+    // Reach the lane, then turn on this tile so the following double lies on the column.
+    if (!reached && !nextDouble && cursor.run < 2 && free(stem) && insideActive(stem)) {
+      return kept(arm, 0, cursor.run + 1);
+    }
+    const parentDouble = cursor.box.h > cursor.box.w;
+    const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : sideCornerBox(cursor.box, arm);
+    if (free(corner)) {
+      return {
+        box: corner,
+        dir: laneDir,
+        row: 1,
+        line: corner.x + corner.w / 2,
+        run: 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+    return kept(arm, 0, cursor.run + 1);
+  }
+
+  const dir = cursor.dir;
+  const straight = straightBox(cursor.box, dir, double);
+  const follower = !double && upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(straight, dir, true) : null;
+  const followerOk = !follower || (free(follower) && insideActive(follower) && portraitOwns(follower, arm));
+  const onLine = free(straight) && portraitOwns(straight, arm) && headsOut(cursor.box, dir);
+  if (double || (onLine && insideActive(straight) && followerOk)) return kept(dir, cursor.row, cursor.run + 1);
+
+  // One corner at the far end of the lane. A double that merely hangs past
+  // the side is not that end: turning there runs a tail across the felt.
+  const turnedOnce = arm === "west" || arm === "east" ? cursor.row >= 2 : cursor.row >= 1;
+  const halfH = activeLimit.height / 2;
+  const halfW = activeLimit.width / 2;
+  const pastEnd = dir === "north" ? straight.y < -halfH
+    : dir === "south" ? straight.y + straight.h > halfH
+    : dir === "west" ? straight.x < -halfW
+    : straight.x + straight.w > halfW;
+  if (!double && !turnedOnce && pastEnd && headsOut(cursor.box, edgeDir)) {
+    const turn = bendBox(cursor.box, dir, edgeDir, false);
+    if (free(turn) && insideActive(turn)) {
+      return { box: turn, dir: edgeDir, row: cursor.row + 1, line: cursor.line, run: 1, opening: false, fromDouble: false, column: false };
+    }
+  }
+  // Along the edge only while the tile stays on the felt. The rest leave
+  // by the long side, still heading away from the spinner.
+  if (turnedOnce && dir !== laneDir && !double) {
+    const along = free(straight) && insideActive(straight) && headsOut(cursor.box, dir);
+    if (along) return kept(dir, cursor.row, cursor.run + 1);
+    const outward = straightBox(cursor.box, laneDir, false);
+    if (free(outward) && headsOut(cursor.box, laneDir)) {
+      return { box: outward, dir: laneDir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    }
+  }
+  return kept(dir, cursor.row, cursor.run + 1);
+}
+
 function snakeStep(
   tile: OrientedTile,
   cursor: SnakeCursor,
@@ -507,6 +653,7 @@ function snakeStep(
   placed: readonly LayoutBox[],
   fromCenter: boolean,
 ): StepResult {
+  if (isPortrait()) return portraitSnakeStep(tile, cursor, arm, center, upcoming, placed, fromCenter);
   const double = isDoubleTile(tile);
   const clear = (box: LayoutBox, dir: LayoutDir, tight: boolean) =>
     !overlapsPlaced(box, placed)
@@ -765,8 +912,9 @@ function snakeStep(
   const box = chosen ?? centered;
   const nextRow = cursor.row + 1;
   let nextDir = shiftDir(arm);
-  let nextLine = cursor.line + rowSign(arm) * ROW_PITCH;
-  let opening = true;
+  let nextLine = acrossCenter(box, arm);
+  // Continue in the clockwise turn. A return row is the hook back toward the spinner.
+  let opening = false;
   if (portraitSide(arm)) {
     if (cursor.row === 0) {
       // The corner is the first tile of the vertical lane. The run continues straight up or down it.
