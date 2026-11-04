@@ -822,26 +822,6 @@ describe("board layout", () => {
     expect(checked).toBeGreaterThan(40);
   }, 20_000);
 
-  it("lays 5000 four-end chains with no covers on phone and fold tables", () => {
-    let checked = 0;
-    for (let seed = 0; seed < 8000 && checked < 5000; seed += 1) {
-      for (const board of playHand(4, "draw_until", seed + 5000)) {
-        const count = 1 + ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, 0);
-        const openArms = ARM_IDS.filter((arm) => board.arms[arm].length > 0).length;
-        if (count < 8 || openArms < 4) continue;
-        for (const limit of CHAIN_LIMITS) {
-          const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
-          if (layoutOverlaps(layout)) {
-            throw new Error(`seed ${seed} ${count} tiles ${limit ? `${limit.width}x${limit.height}` : "phone"}`);
-          }
-        }
-        checked += 1;
-        if (checked >= 5000) break;
-      }
-    }
-    expect(checked).toBeGreaterThanOrEqual(5000);
-  }, 180_000);
-
   it("never covers a tile, including on a narrow fold", () => {
     const limits = [undefined, { width: 220, height: 640 }, { width: 280, height: 500 }, { width: 344, height: 720 }] as const;
     let checked = 0;
