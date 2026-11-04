@@ -1,4 +1,5 @@
-import { FIT_MARGIN, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
+import type { BoardState } from "../../rules/src/board.js";
+import { FIT_MARGIN, layoutBoard, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -76,6 +77,70 @@ function withAir(insets: AxisInsets, felt: FeltSize, air: number): AxisInsets {
     next.bottom += air;
   }
   return next;
+}
+
+/**
+ * Tile size and the felt the arms run out to are the same decision.
+ * The region is the on-screen felt, minus badges and hands, measured in
+ * board pixels at the current scale. Arms run to that edge. The picture
+ * eases out only when the chain still does not fit after that, and only
+ * outward.
+ */
+export function feltScale(input: {
+  board: BoardState;
+  felt: FeltSize;
+  screenWidth: number;
+  reserve?: AxisInsets;
+  zones?: readonly ZoneRect[];
+  previous: number | null;
+  newHand: boolean;
+  readablePx?: number;
+}): { scale: number; limits: { width: number; height: number } } {
+  const screen = Math.max(1, input.screenWidth);
+  const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const readablePx = input.readablePx ?? (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX);
+  const readable = Math.min(open, readablePx / TILE_SHORT);
+  const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
+  const roomW = Math.max(TILE_LONG * 2, input.felt.w - insets.left - insets.right);
+  const roomH = Math.max(TILE_LONG * 2, input.felt.h - insets.top - insets.bottom);
+  const limitsAt = (scale: number) => ({
+    width: Math.max(TILE_LONG * 2, roomW / scale),
+    height: Math.max(TILE_LONG * 2, roomH / scale),
+  });
+  const fitAt = (scale: number) => {
+    const layout = layoutBoard(input.board, limitsAt(scale));
+    const span = centeredChain(layout.tiles);
+    return Math.min(roomW / Math.max(1, span.w), roomH / Math.max(1, span.h));
+  };
+  const table = layoutBoard(input.board, { width: roomW / readable, height: roomH / readable });
+  const tableFit = Math.min(roomW / Math.max(1, centeredChain(table.tiles).w), roomH / Math.max(1, centeredChain(table.tiles).h));
+  // The opening picture still holds this chain. Do not zoom out yet.
+  if (tableFit >= open * 0.985) {
+    return { scale: open, limits: { width: roomW / readable, height: roomH / readable } };
+  }
+  const natural = centeredChain(layoutBoard(input.board).tiles);
+  const naturalFit = Math.min(roomW / Math.max(1, natural.w), roomH / Math.max(1, natural.h));
+  if (naturalFit >= open * 0.985) {
+    return { scale: open, limits: limitsAt(Math.min(open, readable)) };
+  }
+  let scale = open;
+  for (let step = 0; step < 8; step += 1) {
+    const fit = fitAt(scale);
+    // Still fits at this size. A short chain stays at the opening zoom.
+    if (fit >= scale * 0.985) break;
+    const next = Math.max(fit, scale * 0.86);
+    if (next >= scale - 1e-4) break;
+    scale = next;
+  }
+  // Stay at a readable size when the chain still reaches the felt there.
+  if (scale < readable) {
+    const fit = fitAt(readable);
+    if (fit >= readable * 0.985) scale = readable;
+  }
+  if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
+    scale = Math.min(input.previous, scale);
+  }
+  return { scale, limits: limitsAt(scale) };
 }
 
 /**

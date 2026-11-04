@@ -7,8 +7,8 @@ import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
+  feltScale,
   fitInsets,
-  handZoom,
   READABLE_PHONE_PX,
   READABLE_WIDE_PX,
   handOverPlacement,
@@ -189,17 +189,12 @@ export function Table({
       const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
       const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
       const room = fitInsets(felt, zones, nextReserve);
-      const designW = Math.max(160, ((width - room.left - room.right) * TILE_SHORT) / readablePx);
-      const designH = Math.max(160, ((height - room.top - room.bottom) * TILE_SHORT) / readablePx);
-      setLimits((current) => {
-        if (current && Math.abs(current.width - designW) < 12 && Math.abs(current.height - designH) < 12) return current;
-        return { width: designW, height: designH };
-      });
-      // Open close on the spinner. Ease out in a few steps as the chain
-      // grows. The centre does not follow the last tile.
+      // The region is this felt at the current tile size. Arms run out to
+      // that edge. Zoom out only when the chain still does not fit.
+      if (!board?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
-      const zoom = handZoom({
-        tiles: layout.tiles,
+      const solved = feltScale({
+        board,
         felt,
         screenWidth,
         reserve: nextReserve,
@@ -208,6 +203,17 @@ export function Table({
         newHand: previous == null,
         readablePx,
       });
+      setLimits((current) => {
+        if (
+          current &&
+          Math.abs(current.width - solved.limits.width) < 8 &&
+          Math.abs(current.height - solved.limits.height) < 8
+        ) {
+          return current;
+        }
+        return solved.limits;
+      });
+      const zoom = solved.scale;
       const shift = boardShift(room);
       const none = { top: 0, right: 0, bottom: 0, left: 0 };
       setClip((current) => (sameInsets(current, none) ? current : none));

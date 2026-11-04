@@ -131,40 +131,17 @@ function withLimit<T>(limit: LayoutLimits, run: () => T): T {
   }
 }
 
-function fitIn(span: { w: number; h: number }, limits: LayoutLimits): number {
-  return Math.min(limits.width / span.w, limits.height / span.h);
-}
-
-/**
- * Box centred on the spinner. The camera stays on the spinner, so a long
- * arm on one side reserves the same room on the other side.
- */
-function centeredSpan(tiles: readonly LayoutBox[]): { w: number; h: number } {
-  let halfW = TILE_SHORT / 2;
-  let halfH = TILE_LONG / 2;
-  for (const tile of tiles) {
-    halfW = Math.max(halfW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
-    halfH = Math.max(halfH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
-  }
-  return { w: halfW * 2, h: halfH * 2 };
-}
-
 export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
-  const phone = withLimit(DEFAULT_LIMIT, () => layoutBoardNow(board));
   if (!limits || !Number.isFinite(limits.width) || !Number.isFinite(limits.height) || limits.width < 72 || limits.height < 72) {
-    return phone;
+    return withLimit(DEFAULT_LIMIT, () => layoutBoardNow(board));
   }
-  const phoneBox = centeredSpan(phone.tiles);
-  // Already readable on this table, with the spinner still in the middle.
-  if (phoneBox.w <= limits.width + 1 && phoneBox.h <= limits.height + 1) return phone;
-  const folded = withLimit(limits, () => layoutBoardNow(board));
-  // A pile of covered tiles has a small box and would look "more readable".
-  // That picture is never the one we show.
-  if (layoutOverlaps(folded)) return phone;
-  if (layoutOverlaps(phone)) return folded;
-  // Fold only when it actually leaves a larger tile. A turn that grows the
-  // other side is worse than shrinking the straight chain a little.
-  return fitIn(centeredSpan(folded.tiles), limits) > fitIn(phoneBox, limits) + 0.02 ? folded : phone;
+  // The caller's rectangle is the felt at the current tile size. Arms run
+  // out to that edge. A layout that covers another tile falls back to the
+  // phone picture.
+  const fitted = withLimit(limits, () => layoutBoardNow(board));
+  if (!layoutOverlaps(fitted)) return fitted;
+  const phone = withLimit(DEFAULT_LIMIT, () => layoutBoardNow(board));
+  return layoutOverlaps(phone) ? fitted : phone;
 }
 
 /** True when two faces share area. Touching edges do not count. */
@@ -178,7 +155,11 @@ export function layoutOverlaps(layout: BoardLayout): boolean {
   return false;
 }
 
-/** Centre-to-centre distance between parallel rows. One tile of felt between them. */
+/**
+ * Centre-to-centre distance between parallel rows.
+ * One corner tile is TILE_LONG, and it has to meet both rows, so the
+ * rows sit one tile length apart: a short side of felt shows between them.
+ */
 const ROW_PITCH = TILE_LONG + TILE_GAP;
 
 interface SnakeCursor {
@@ -222,6 +203,17 @@ function isDoubleTile(tile: OrientedTile): boolean {
 
 function overlapsPlaced(box: LayoutBox, placed: readonly LayoutBox[]): boolean {
   return placed.some((other) => boxesOverlap(box, other));
+}
+
+/** True when two tiles meet end to end with the usual short gap. */
+function sharedRun(a: LayoutBox, b: LayoutBox): boolean {
+  const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const gapX = Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w), 0);
+  const gapY = Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h), 0);
+  if (gapY === 0 && Math.abs(gapX - TILE_GAP) < 0.5) return xOverlap >= TILE_SHORT * 0.45;
+  if (gapX === 0 && Math.abs(gapY - TILE_GAP) < 0.5) return yOverlap >= TILE_SHORT * 0.45;
+  return false;
 }
 
 /**
@@ -343,12 +335,14 @@ function straightFits(
   const midY = center.y + center.h / 2;
   const box = straightBox(prev, dir, isDouble);
   const tight = row > 0;
-  if (!staysOnSide(box, arm, center, tight) || overlapsPlaced(box, placed)) return false;
+  if (!staysOnSide(box, arm, center, tight) || overlapsPlaced(box, placed) || !insideActive(box)) return false;
   if (!isDouble && !inArmRegion(box, arm, row, center)) return false;
   const next = upcoming[1];
   if (!isDouble && next && isDoubleTile(next)) {
     const doubled = straightBox(box, dir, true);
-    if (!staysOnSide(doubled, arm, center, tight) || overlapsPlaced(doubled, placed) || boxesOverlap(doubled, box)) return false;
+    if (!staysOnSide(doubled, arm, center, tight) || overlapsPlaced(doubled, placed) || boxesOverlap(doubled, box) || !insideActive(doubled)) {
+      return false;
+    }
   }
   if (!isDouble) {
     const corner = placeCorner(box, arm, row, midX, midY);
@@ -398,16 +392,23 @@ function snakeStep(
     return { box: straightBox(cursor.box, dir, double), dir, row: cursor.row, opening: false, fromDouble: false };
   }
   if (double) {
-    // A double cannot be the corner. The tile before it turns when this
-    // would cross another arm. If it only hangs past the felt, it stays put.
-    return { box: straightBox(cursor.box, dir, true), dir, row: cursor.row, opening: false, fromDouble: false };
+    const ahead = straightBox(cursor.box, dir, true);
+    if (insideActive(ahead) && staysOnSide(ahead, arm, center, cursor.row > 0) && !overlapsPlaced(ahead, placed)) {
+      return { box: ahead, dir, row: cursor.row, opening: false, fromDouble: false };
+    }
+    const parked = placeOnRow(cursor.box, arm, cursor.row + 1, true, midX, midY);
+    const joined = sharedRun(cursor.box, parked);
+    if (joined && insideActive(parked) && staysOnSide(parked, arm, center, true) && !overlapsPlaced(parked, placed)) {
+      return { box: parked, dir: travelDir(arm, cursor.row + 1), row: cursor.row + 1, opening: false, fromDouble: false };
+    }
+    return { box: ahead, dir, row: cursor.row, opening: false, fromDouble: false };
   }
   const onDouble = (dir === "east" || dir === "west") ? cursor.box.h > cursor.box.w : cursor.box.w > cursor.box.h;
-  // Off a double, the corner leaves from the middle. Off a normal tile, it
-  // sits on the leading end so the row can come back a tile away.
-  const box = onDouble
-    ? straightBox(cursor.box, shiftDir(arm), false)
-    : placeCorner(cursor.box, arm, cursor.row, midX, midY);
+  const centered = straightBox(cursor.box, shiftDir(arm), false);
+  const ended = placeCorner(cursor.box, arm, cursor.row, midX, midY);
+  const legal = (box: LayoutBox) => staysOnSide(box, arm, center, true) && !overlapsPlaced(box, placed);
+  // Off a double, leave from its middle when that stays in the arm's side.
+  const box = onDouble && legal(centered) ? centered : legal(ended) ? ended : centered;
   return { box, dir: shiftDir(arm), row: cursor.row + 1, opening: true, fromDouble: false };
 }
 

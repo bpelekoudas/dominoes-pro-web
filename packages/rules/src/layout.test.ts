@@ -668,6 +668,46 @@ describe("board layout", () => {
     assertLaidOut(board, "crosswise double", false);
   });
 
+  it("fills most of the felt on a long hand at a readable size", () => {
+    const phones = [
+      // Felt at the target tile size, inset by one short side so a corner
+      // past the straight run still lands on the felt.
+      { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 340, h: 680 }, tile: 30 },
+      { name: "fold", limits: { width: 504, height: 428 }, felt: { w: 576, h: 500 }, safe: { w: 640, h: 556 }, tile: 40 },
+    ];
+    for (const phone of phones) {
+      let best = 0;
+      let bestTile = 0;
+      for (let seed = 0; seed < 6; seed += 1) {
+        for (const board of playHand(4, "draw_until", seed + 300)) {
+          const count = ARM_IDS.reduce((sum, arm) => sum + board.arms[arm].length, board.center ? 1 : 0);
+          if (count < 20) continue;
+          const layout = layoutBoard(board, phone.limits);
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+          for (const tile of layout.tiles) {
+            minX = Math.min(minX, tile.x);
+            minY = Math.min(minY, tile.y);
+            maxX = Math.max(maxX, tile.x + tile.w);
+            maxY = Math.max(maxY, tile.y + tile.h);
+          }
+          const spanW = maxX - minX;
+          const spanH = maxY - minY;
+          const cover = Math.max(spanW / phone.felt.w, spanH / phone.felt.h);
+          const fit = Math.min(phone.safe.w / spanW, phone.safe.h / spanH);
+          best = Math.max(best, cover);
+          bestTile = Math.max(bestTile, fit * TILE_SHORT);
+          expect(cover, `${phone.name} seed ${seed} covers ${cover.toFixed(2)}`).toBeGreaterThanOrEqual(0.6);
+          expect(fit * TILE_SHORT, `${phone.name} seed ${seed} tile ${ (fit * TILE_SHORT).toFixed(1) }`).toBeGreaterThanOrEqual(phone.tile);
+        }
+      }
+      expect(best, phone.name).toBeGreaterThanOrEqual(0.6);
+      expect(bestTile, phone.name).toBeGreaterThanOrEqual(phone.tile);
+    }
+  });
+
   it("keeps each arm in its own region and doubles crosswise", () => {
     let checked = 0;
     for (const players of [2, 4] as const) {
