@@ -271,41 +271,48 @@ describe("board scale", () => {
     }
   });
 
-  it("draws a turned arm at the same size as the horizontal tiles, with nothing sliced", () => {
-    const felt = { w: 412, h: 700 };
-    const layout = layoutFor(LONG, felt, 412, PHONE_ZONES, PHONE_RESERVE);
-    const frame = chainBounds(layout.tiles, 0);
-    const shot = followCamera({
+  it("holds a readable tile and keeps a playable end on screen when the chain cannot fit", () => {
+    const ends = [
+      { id: "north", x: -18, y: -900, w: 36, h: 72 },
+      { id: "south", x: -18, y: 860, w: 36, h: 72 },
+      { id: "east", x: 80, y: -18, w: 72, h: 36 },
+      { id: "west", x: -140, y: -18, w: 72, h: 36 },
+    ];
+    const frame = chainBounds(ends, 0);
+    const felt = { w: 390, h: 640 };
+    const reserve = { top: 70, right: 40, bottom: 30, left: 40 };
+    const phone = followCamera({
       frame,
-      ends: layout.ends,
-      tiles: layout.tiles,
+      ends,
+      tiles: ends,
+      playableIds: ["north"],
       felt,
-      screenWidth: 412,
-      reserve: PHONE_RESERVE,
-      zones: PHONE_ZONES,
+      screenWidth: 390,
+      reserve,
     });
-    expect(shot.mode).toBe("fit");
-    const vertical = layout.tiles.filter((tile) => tile.h > tile.w);
-    const horizontal = layout.tiles.filter((tile) => tile.w > tile.h);
-    expect(vertical.length).toBeGreaterThan(0);
-    expect(horizontal.length).toBeGreaterThan(0);
-    const shortOf = (tile: { x: number; y: number; w: number; h: number }) => {
-      const seen = screenBox(felt, frame, shot.scale, shot.shiftX, shot.shiftY, tile);
-      expect(seen.left).toBeGreaterThanOrEqual(-0.6);
-      expect(seen.top).toBeGreaterThanOrEqual(-0.6);
-      expect(seen.right).toBeLessThanOrEqual(felt.w + 0.6);
-      expect(seen.bottom).toBeLessThanOrEqual(felt.h + 0.6);
-      const width = seen.right - seen.left;
-      const height = seen.bottom - seen.top;
-      // The whole tile is on screen. A clip through it is what made the slivers.
-      expect(width).toBeGreaterThanOrEqual(tile.w * shot.scale - 0.6);
-      expect(height).toBeGreaterThanOrEqual(tile.h * shot.scale - 0.6);
-      return Math.min(width, height);
-    };
-    const verticalShort = Math.min(...vertical.map(shortOf));
-    const horizontalShort = Math.min(...horizontal.map(shortOf));
-    expect(Math.abs(verticalShort - horizontalShort)).toBeLessThan(1);
-    expect(verticalShort).toBeGreaterThanOrEqual(TILE_SHORT * shot.scale - 0.6);
+    expect(phone.mode).toBe("floor");
+    expect(phone.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    expect(phone.fitScale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
+    const north = ends[0]!;
+    const seen = screenBox(felt, frame, phone.scale, phone.shiftX, phone.shiftY, north);
+    const insets = fitInsets(felt, [], reserve);
+    expect(seen.left).toBeGreaterThanOrEqual(insets.left - 1);
+    expect(seen.top).toBeGreaterThanOrEqual(insets.top - 1);
+    expect(seen.right).toBeLessThanOrEqual(felt.w - insets.right + 1);
+    expect(seen.bottom).toBeLessThanOrEqual(felt.h - insets.bottom + 1);
+    const fitted = followCamera({
+      frame,
+      ends,
+      tiles: ends,
+      playableIds: ["north"],
+      felt,
+      screenWidth: 390,
+      reserve,
+      fitAll: true,
+    });
+    expect(fitted.mode).toBe("fit");
+    expect(fitted.scale * TILE_SHORT).toBeLessThan(READABLE_PHONE_PX);
+    expect(tilesClear(ends, frame, felt, fitted.scale, fitted.shiftX, fitted.shiftY, [], 1)).toBe(true);
   });
 
   it("keeps every tile of a crowded chain clear of the seat badges", () => {
