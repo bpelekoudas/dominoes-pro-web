@@ -237,7 +237,7 @@ export function Table({
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
     const app = viewport.closest(".felt-app");
-    app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
+    app?.querySelectorAll(".playbar, .hand-tray, .edge-top, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
       observer.observe(node);
     });
     return () => observer.disconnect();
@@ -323,7 +323,7 @@ export function Table({
   const popup = scorePopupForPlay(view.lastPlay, pop);
   const popAt =
     popup && pop && popFrom && pop.tileId === lastTileId
-      ? { left: popFrom.x, top: popFrom.y, place: "tile" as const }
+      ? { left: popFrom.x, top: popFrom.y - 48, place: "above" as const }
       : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
@@ -750,7 +750,7 @@ function measureZones(viewport: HTMLElement): ZoneRect[] {
   const felt = viewport.getBoundingClientRect();
   const zones: ZoneRect[] = [];
   const app = viewport.closest(".felt-app");
-  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-top, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
     if (!(node instanceof HTMLElement)) return;
     const rect = node.getBoundingClientRect();
     const left = Math.max(rect.left, felt.left) - felt.left;
@@ -767,7 +767,7 @@ function measureReserve(viewport: HTMLElement): AxisInsets {
   const felt = viewport.getBoundingClientRect();
   const zones: DOMRect[] = [];
   const app = viewport.closest(".felt-app");
-  app?.querySelectorAll(".playbar, .hand-tray, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
+  app?.querySelectorAll(".playbar, .hand-tray, .edge-top, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
     if (node instanceof HTMLElement) zones.push(node.getBoundingClientRect());
   });
   return zoneInsets(

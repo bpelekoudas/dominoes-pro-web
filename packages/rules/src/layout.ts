@@ -507,11 +507,11 @@ function portraitLaneX(arm: ArmId): number {
   if (arm === "north" || arm === "south") return 0;
   const half = activeLimit.width / 2;
   const sign = arm === "west" ? -1 : 1;
-  const ideal = activeLimit.width / 3;
+  // Just inside the badge line: a crosswise double's outer edge meets the
+  // clear zone. On a phone that lands near a sixth of the felt.
+  const clear = half - TILE_LONG / 2;
   const inner = TILE_LONG / 2 + TILE_GAP + TILE_LONG / 2;
-  const outer = half - TILE_LONG / 2;
-  if (outer <= inner) return sign * Math.max(TILE_SHORT, outer);
-  return sign * Math.min(outer, Math.max(inner, ideal));
+  return sign * Math.max(inner, clear);
 }
 
 /** True when `dir` does not walk the tile back toward the spinner. */
@@ -583,13 +583,10 @@ function portraitSnakeStep(
   if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
     if (double) return kept(arm, 0, cursor.run + 1);
     const lane = portraitLaneX(arm);
-    const reached = arm === "west"
-      ? cursor.box.x <= lane + TILE_SHORT / 2
-      : cursor.box.x + cursor.box.w >= lane - TILE_SHORT / 2;
+    const covers = cursor.box.x <= lane && lane <= cursor.box.x + cursor.box.w;
     const stem = straightBox(cursor.box, arm, false);
-    const nextDouble = upcoming[1] ? isDoubleTile(upcoming[1]) : false;
-    // Reach the lane, then turn on this tile so the following double lies on the column.
-    if (!reached && !nextDouble && cursor.run < 2 && free(stem) && insideActive(stem)) {
+    // One or two tiles out, then the corner once this tile covers the lane.
+    if (!covers && cursor.run < 2 && free(stem) && insideActive(stem)) {
       return kept(arm, 0, cursor.run + 1);
     }
     const parentDouble = cursor.box.h > cursor.box.w;
@@ -631,10 +628,11 @@ function portraitSnakeStep(
       return { box: turn, dir: edgeDir, row: cursor.row + 1, line: cursor.line, run: 1, opening: false, fromDouble: false, column: false };
     }
   }
-  // Along the edge only while the tile stays on the felt. The rest leave
-  // by the long side, still heading away from the spinner.
+  // The clockwise turn is one tile along the seat line. Another tile that
+  // way would run across the felt and shrink the picture, so the rest of
+  // the arm keeps going out, away from the spinner.
   if (turnedOnce && dir !== laneDir && !double) {
-    const along = free(straight) && insideActive(straight) && headsOut(cursor.box, dir);
+    const along = free(straight) && insideActive(straight) && portraitOwns(straight, arm) && headsOut(cursor.box, dir);
     if (along) return kept(dir, cursor.row, cursor.run + 1);
     const outward = straightBox(cursor.box, laneDir, false);
     if (free(outward) && headsOut(cursor.box, laneDir)) {

@@ -137,9 +137,34 @@ export function FeelTally({
     };
   }, [lineKey, reduced]);
   const text = tally.lines[Math.min(step, tally.lines.length - 1)] ?? "";
+  const spot = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const node = spot.current;
+    if (!node || !text) return;
+    const tile = document.querySelector(".board-tile.last-move");
+    if (!tile) return;
+    const tr = tile.getBoundingClientRect();
+    const mine = node.getBoundingClientRect();
+    let top = window.innerHeight * 0.18;
+    let left = window.innerWidth / 2;
+    const hits = (y: number, x: number) =>
+      x - mine.width / 2 < tr.right + 8
+      && x + mine.width / 2 > tr.left - 8
+      && y < tr.bottom + 8
+      && y + mine.height > tr.top - 8;
+    if (hits(top, left)) {
+      const below = tr.bottom + 16;
+      const above = tr.top - mine.height - 16;
+      if (below + mine.height < window.innerHeight * 0.72) top = below;
+      else if (above > 56) top = above;
+      else left = tr.left > window.innerWidth / 2 ? tr.left - mine.width / 2 - 16 : tr.right + mine.width / 2 + 16;
+    }
+    node.style.top = `${top}px`;
+    node.style.left = `${left}px`;
+  }, [text, step]);
   if (!text) return null;
   return (
-    <p className="feel-tally" data-feel-tally={String(step)} data-feel-awarded={tally.awarded} role="status">
+    <p ref={spot} className="feel-tally" data-feel-tally={String(step)} data-feel-awarded={tally.awarded} role="status">
       {text}
     </p>
   );

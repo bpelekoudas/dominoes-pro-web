@@ -101,14 +101,17 @@ export function feltScale(input: {
   const readablePx = input.readablePx ?? (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX);
   const readable = Math.min(open, readablePx / TILE_SHORT);
   const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
+  // Side lanes use the full gap between the seat badges. The extra air is
+  // vertical, so a column turns before the top seat and the bottom rule.
   const roomW = Math.max(TILE_LONG * 2, input.felt.w - insets.left - insets.right);
-  const roomH = Math.max(TILE_LONG * 2, input.felt.h - insets.top - insets.bottom);
-  // Lay the snake out once, into the felt at a readable tile. Zooming out
-  // must not hand the arms a taller felt, or a straight column grows to fill
-  // it and the picture chases itself smaller.
+  const roomH = Math.max(TILE_LONG * 2, input.felt.h - insets.top - insets.bottom - CHAIN_CLEAR);
+  // Lay the snake out once, into the felt at 30px on a phone. That is wide
+  // enough for the side lanes to sit on the badge line, and tall enough that
+  // a column turns when it reaches the seat instead of growing past it.
+  const layoutScale = Math.min(readable, (screen >= 720 ? 40 : 30) / TILE_SHORT);
   const limits = {
-    width: Math.max(TILE_LONG * 2, roomW / readable),
-    height: Math.max(TILE_LONG * 2, roomH / readable),
+    width: Math.max(TILE_LONG * 3, roomW / layoutScale),
+    height: Math.max(TILE_LONG * 2, roomH / layoutScale),
   };
   // Fit the chain's own box, not a spinner-centred square. A long column
   // on one side then does not force the empty side to shrink the picture.
@@ -184,6 +187,8 @@ export const CAMERA_EASE_MS = 240;
 
 /** Air between a tile and a seat badge, rack, header, or the bottom bar. */
 export const BADGE_GAP = 10;
+/** Extra air inside the clear zone. The chain shrinks before it touches a seat or the felt edge. */
+const CHAIN_CLEAR = 16;
 
 export interface AxisInsets {
   top: number;
