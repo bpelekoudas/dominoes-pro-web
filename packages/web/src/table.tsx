@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { layoutBoard, layoutOverlaps, PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
-  chainBounds,
   fitInsets,
   followCamera,
   READABLE_PHONE_PX,
@@ -87,6 +86,17 @@ function endPoints(plays: Array<{ endId: string; points: number }>, endId: strin
   return points > 0 ? `+${points}` : "0";
 }
 
+/**
+ * Grow the felt in a few big steps so the view does not shrink on every
+ * play. A few pixels past the edge stays at the normal size.
+ */
+function steppedHalf(needed: number, feltHalf: number): number {
+  if (needed <= feltHalf + 10) return feltHalf;
+  const ratio = needed / feltHalf;
+  const bucket = ratio <= 1.15 ? 1.15 : ratio <= 1.35 ? 1.35 : Math.ceil(ratio * 4) / 4;
+  return feltHalf * bucket;
+}
+
 export function Table({
   view,
   selectedTile,
@@ -127,7 +137,23 @@ export function Table({
       }
     }
   }, [board, limits]);
-  const frame = useMemo(() => (layout ? chainBounds(layout.tiles, 0) : null), [layout]);
+  const frame = useMemo(() => {
+    if (!layout) return null;
+    // The picture is the whole felt, centred on the spinner. It stays put
+    // as tiles are added. A chain that outgrows the felt widens this frame
+    // on both sides at once, so the view steps down without sliding.
+    const w = limits?.width ?? PHONE_WIDTH;
+    const h = limits?.height ?? PHONE_HEIGHT;
+    let needW = w / 2;
+    let needH = h / 2;
+    for (const tile of layout.tiles) {
+      needW = Math.max(needW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
+      needH = Math.max(needH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
+    }
+    const halfW = steppedHalf(needW, w / 2);
+    const halfH = steppedHalf(needH, h / 2);
+    return { x: -halfW, y: -halfH, w: halfW * 2, h: halfH * 2 };
+  }, [layout, limits]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -157,7 +183,7 @@ export function Table({
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || !layout) return;
+    if (!viewport || !layout || !frame) return;
     const measure = () => {
       const nextReserve = measureReserve(viewport);
       // Hand over keeps the last scale. The sheet must not zoom the chain.
@@ -175,7 +201,6 @@ export function Table({
       } else {
         feltLock.current = { hand: handKey, w: width, h: height };
       }
-      const bounds = chainBounds(layout.tiles, 0);
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
       const zones = measureZones(viewport);
@@ -189,8 +214,10 @@ export function Table({
         if (current && Math.abs(current.width - designW) < 12 && Math.abs(current.height - designH) < 12) return current;
         return { width: designW, height: designH };
       });
+      // Fit the frame the stage actually draws. That frame is the whole felt
+      // until a chain sticks out, then it steps out on both sides together.
       const shot = followCamera({
-        frame: bounds,
+        frame,
         ends: layout.ends,
         tiles: layout.tiles,
         playableIds: view.legalPlays.map((play) => play.endId),
@@ -198,8 +225,8 @@ export function Table({
         screenWidth,
         reserve: nextReserve,
         zones,
-        overview: handOver || overview,
-        punch,
+        overview: false,
+        punch: 1,
       });
       setClip((current) => (sameInsets(current, shot.clip) ? current : shot.clip));
       held.current = { hand: handKey, scale: shot.scale };
@@ -225,7 +252,7 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, handOver, handKey, lastTileId, playableKey, overview, punch]);
+  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -311,70 +338,19 @@ export function Table({
       : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
-  useEffect(() => {
-    const awarded = view.lastPlay?.awarded ?? 0;
-    if (awarded < 10) return;
-    setPunch(awarded >= 25 ? 1.12 : 1.06);
-    const timer = window.setTimeout(() => setPunch(1), 720);
-    return () => window.clearTimeout(timer);
-  }, [view.lastPlay?.seq, view.lastPlay?.awarded]);
-
-  useEffect(() => {
-    if (!overview) return;
-    const timer = window.setTimeout(() => setOverview(false), 1700);
-    return () => window.clearTimeout(timer);
-  }, [overview]);
-
   function onCamDown(event: ReactPointerEvent<HTMLDivElement>) {
     const target = event.target;
     if (target instanceof Element && target.closest("button, a, .end-cap")) return;
-    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointers.current.size === 1) drag.current = { x: event.clientX, y: event.clientY, moved: false };
-    if (pointers.current.size >= 2) {
-      const pts = [...pointers.current.values()];
-      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
-      pinch.current = { dist, zoom: nudge.zoom };
-    }
+    // The board does not pan or pinch. A tap still falls through to the felt.
+    void event;
   }
 
-  function onCamMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!pointers.current.has(event.pointerId)) return;
-    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (pointers.current.size >= 2 && pinch.current) {
-      const pts = [...pointers.current.values()];
-      const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y) || 1;
-      const zoom = Math.min(1.85, Math.max(0.55, pinch.current.zoom * (dist / pinch.current.dist)));
-      setUserCam("drag");
-      setNudge((current) => ({ ...current, zoom }));
-      return;
-    }
-    const start = drag.current;
-    if (!start) return;
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    if (!start.moved && Math.hypot(dx, dy) < 8) return;
-    start.moved = true;
-    setUserCam("drag");
-    setNudge({ x: dx, y: dy, zoom: nudge.zoom });
+  function onCamMove(_event: ReactPointerEvent<HTMLDivElement>) {
+    return;
   }
 
-  function onCamUp(event: ReactPointerEvent<HTMLDivElement>) {
-    const start = drag.current;
-    pointers.current.delete(event.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
-    if (pointers.current.size > 0) return;
-    drag.current = null;
-    if (start && !start.moved) {
-      setNudge({ x: 0, y: 0, zoom: 1 });
-      setUserCam("follow");
-      setOverview((value) => !value);
-      return;
-    }
-    if (!start?.moved) return;
-    window.setTimeout(() => {
-      setNudge({ x: 0, y: 0, zoom: 1 });
-      setUserCam("follow");
-    }, 1500);
+  function onCamUp(_event: ReactPointerEvent<HTMLDivElement>) {
+    return;
   }
 
   return (

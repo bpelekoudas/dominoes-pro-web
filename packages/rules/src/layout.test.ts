@@ -10,7 +10,6 @@ import {
 } from "./engine.js";
 import {
   ARM_GAP,
-  boxGap,
   boxesOverlap,
   FIT_MARGIN,
   HARD_HEIGHT,
@@ -21,7 +20,6 @@ import {
   layoutOverlaps,
   PHONE_HEIGHT,
   PHONE_WIDTH,
-  STRAIGHT_CAP,
   TILE_GAP,
   TILE_LONG,
   TILE_SHORT,
@@ -117,22 +115,13 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
     const first = board.arms[arm][0];
     if (first) stems.add(first.tileId);
   }
-  const center = layout.tiles.find((tile) => tile.arm === null);
-  if (center) {
-    const pad = TILE_SHORT;
-    const region = { x: center.x - pad, y: center.y - pad, w: center.w + pad * 2, h: center.h + pad * 2 };
-    for (const tile of layout.tiles) {
-      if (tile.arm === null || stems.has(tile.tileId)) continue;
-      expect(boxesOverlap(tile, region), `${label} ${tile.tileId} re-enters the centre`).toBe(false);
-    }
-  }
   for (let i = 0; i < layout.tiles.length; i += 1) {
     for (let j = i + 1; j < layout.tiles.length; j += 1) {
       const a = layout.tiles[i]!;
       const b = layout.tiles[j]!;
       if (!a.arm || !b.arm || a.arm === b.arm) continue;
       if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
-      expect(boxGap(a, b), `${label} ${a.tileId} near ${b.tileId}`).toBeGreaterThanOrEqual(ARM_GAP);
+      expect(boxesOverlap(a, b), `${label} ${a.tileId} covers ${b.tileId}`).toBe(false);
     }
   }
   for (const arm of ARM_IDS) {
@@ -140,9 +129,9 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
     for (let i = 0; i < placed.length; i += 1) {
       for (let j = i + 2; j < placed.length; j += 1) {
         expect(
-          boxGap(placed[i]!, placed[j]!),
-          `${label} ${arm} ${placed[i]!.tileId} runs beside ${placed[j]!.tileId}`,
-        ).toBeGreaterThanOrEqual(ARM_GAP);
+          boxesOverlap(placed[i]!, placed[j]!),
+          `${label} ${arm} ${placed[i]!.tileId} covers ${placed[j]!.tileId}`,
+        ).toBe(false);
       }
     }
   }
@@ -154,10 +143,25 @@ function perpendicular(a: string, b: string): boolean {
   return horizontal !== otherHorizontal;
 }
 
+/** Clockwise into the arm's own quadrant. The return run is the opposite way. */
+function shiftOf(arm: string): string {
+  if (arm === "west") return "north";
+  if (arm === "north") return "east";
+  if (arm === "east") return "south";
+  return "west";
+}
+
+function oppositeOf(arm: string): string {
+  if (arm === "west") return "east";
+  if (arm === "east") return "west";
+  if (arm === "north") return "south";
+  return "north";
+}
+
 /**
- * An arm leaves along its own direction, then turns 90 degrees. Two
- * bends cross the open felt. Later bends wrap away from a collision.
- * It may not reverse into the tile it just left.
+ * An arm leaves along its own direction and snakes in its quadrant:
+ * out, one turn, back toward the spinner, one turn, out again.
+ * Every turn is 90 degrees. The arm never turns toward the other three.
  */
 function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): void {
   for (const arm of ARM_IDS) {
@@ -174,7 +178,10 @@ function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): 
     }
     if (dirs.length === 0) continue;
     expect(dirs[0], `${label} ${arm} left the spinner ${dirs.join(">")}`).toBe(arm);
-    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(6);
+    const allowed = new Set([arm, shiftOf(arm), oppositeOf(arm)]);
+    for (const dir of dirs) {
+      expect(allowed.has(dir), `${label} ${arm} turned ${dir} in ${dirs.join(">")}`).toBe(true);
+    }
   }
 }
 
@@ -236,10 +243,21 @@ function assertDoublesCentered(board: BoardState, layout: BoardLayout, label: st
       const prev = chain[i - 1]!;
       const prevPlaced = byId.get(prev.tileId)!;
       const prevDouble = prev.low === prev.high;
-      if (prevDouble) expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`);
+      if (prevDouble && placed.direction === prevPlaced.direction) {
+        expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`);
+      }
       if (placed.direction !== prevPlaced.direction) {
-        expect(isDouble, `${label} bent on double ${placed.tileId}`).toBe(false);
-        expect(prevDouble, `${label} bent off double ${prev.tileId}`).toBe(false);
+        expect(perpendicular(prevPlaced.direction, placed.direction), `${label} ${prev.tileId}>${placed.tileId}`).toBe(true);
+        if (prevDouble) {
+          // The corner is the tile after the double, and it stays centred on it.
+          expect(isDouble, `${label} bent on double ${placed.tileId}`).toBe(false);
+          const horizontal = prevPlaced.direction === "east" || prevPlaced.direction === "west";
+          if (horizontal) {
+            expect(placed.x + placed.w / 2, `${label} ${prev.tileId}`).toBeCloseTo(prevPlaced.x + prevPlaced.w / 2, 5);
+          } else {
+            expect(placed.y + placed.h / 2, `${label} ${prev.tileId}`).toBeCloseTo(prevPlaced.y + prevPlaced.h / 2, 5);
+          }
+        }
       }
     }
   }
@@ -389,10 +407,12 @@ describe("board layout", () => {
     const corner = bentLayout.tiles.find((tile) => tile.tileId === "3-4")!;
     const bentDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-2")!;
     const follower = bentLayout.tiles.find((tile) => tile.tileId === "1-2")!;
-    expect(corner.direction).not.toBe("east");
-    expect(bentDouble.direction).toBe(corner.direction);
-    expect(bentDouble.direction).toBe(follower.direction);
-    expectJoinedToDouble(bentDouble, follower, bentDouble.direction, "double at a bend");
+    // The row turns on the normal tile. The double sits crosswise on the way
+    // back, and the next tile turns off that double once the row has no room.
+    expect(corner.direction).toBe("south");
+    expect(bentDouble.direction).toBe("west");
+    expect(bentDouble.h).toBeGreaterThan(bentDouble.w);
+    expect(follower.x + follower.w / 2).toBeCloseTo(bentDouble.x + bentDouble.w / 2, 5);
     assertLaidOut(bent, "double at a bend", true);
   });
 
@@ -412,26 +432,14 @@ describe("board layout", () => {
       const placed = layout.tiles.filter((tile) => tile.arm === arm);
       const dirs = new Set(placed.map((tile) => tile.direction));
       expect(dirs.has(arm), arm).toBe(true);
+      expect(dirs.has(oppositeOf(arm)), `${arm} comes back`).toBe(true);
       expect(dirs.size, arm).toBeGreaterThan(1);
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const tile of layout.tiles) {
-        minX = Math.min(minX, tile.x);
-        minY = Math.min(minY, tile.y);
-        maxX = Math.max(maxX, tile.x + tile.w);
-        maxY = Math.max(maxY, tile.y + tile.h);
-      }
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      expect(Math.abs(cx), `${arm} centered x`).toBeLessThan(PHONE_WIDTH / 5);
-      expect(Math.abs(cy), `${arm} centered y`).toBeLessThan(PHONE_HEIGHT / 3);
-      expect(maxX - minX, `${arm} uses the width`).toBeGreaterThan(PHONE_WIDTH * 0.55);
-      const reachRight = Math.max(...placed.map((tile) => tile.x + tile.w));
-      const reachLeft = Math.min(...placed.map((tile) => tile.x));
-      expect(reachRight, `${arm} reaches the right`).toBeGreaterThan(24);
-      expect(reachLeft, `${arm} reaches the left`).toBeLessThan(-24);
+      const reach = arm === "west" || arm === "north"
+        ? Math.min(...placed.map((tile) => arm === "west" ? tile.x : tile.y))
+        : Math.max(...placed.map((tile) => arm === "east" ? tile.x + tile.w : tile.y + tile.h));
+      const edge = arm === "west" || arm === "north" ? -PHONE_WIDTH * 0.35 : PHONE_WIDTH * 0.35;
+      if (arm === "west" || arm === "north") expect(reach, `${arm} reaches its edge`).toBeLessThan(edge);
+      else expect(reach, `${arm} reaches its edge`).toBeGreaterThan(edge);
       assertLaidOut(board, `balanced ${arm}`, false);
     }
   });
@@ -530,25 +538,29 @@ describe("board layout", () => {
     const northDirs = board.arms.north.map(
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
-    expect(northDirs).not.toContain("south");
+    // The up arm may come back down on the right. It does not cross to the left.
     expect(northDirs).not.toContain("west");
+    expect(northDirs[0]).toBe("north");
     const westDirs = board.arms.west.map(
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
     expect(westDirs).not.toContain("south");
+    expect(westDirs[0]).toBe("west");
     assertLaidOut(board, "up arm beside left arm", false);
 
-    let nearest = Infinity;
     const north = layout.tiles.filter((tile) => tile.arm === "north");
     const west = layout.tiles.filter((tile) => tile.arm === "west");
-    const stems = new Set([board.arms.north[0]!.tileId, board.arms.west[0]!.tileId]);
+    for (const tile of north) {
+      if (tile.direction === "south") expect(tile.x + tile.w / 2, "north return").toBeGreaterThan(0);
+    }
+    for (const tile of west) {
+      if (tile.direction === "east") expect(tile.y + tile.h / 2, "west return").toBeLessThan(0);
+    }
     for (const a of north) {
       for (const b of west) {
-        if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
-        nearest = Math.min(nearest, boxGap(a, b));
+        expect(boxesOverlap(a, b), `${a.tileId} covers ${b.tileId}`).toBe(false);
       }
     }
-    expect(nearest).toBeGreaterThanOrEqual(ARM_GAP);
   });
 
   it("keeps a full tile between arms across long four-player games", () => {
@@ -656,57 +668,14 @@ describe("board layout", () => {
     const dirs = board.arms.east.map(
       (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
     );
-    // The short neighbours leave the left side open, so the south run turns west.
+    // A long east arm snakes down its own side and comes back. It does not
+    // run one straight column off the felt.
+    expect(dirs).toContain("south");
     expect(dirs).toContain("west");
-    let run = 0;
-    let prev = "";
-    let longest = 0;
-    for (const dir of dirs) {
-      run = dir === prev ? run + 1 : 1;
-      prev = dir;
-      longest = Math.max(longest, run);
-    }
-    expect(longest).toBeLessThanOrEqual(STRAIGHT_CAP);
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const tile of layout.tiles) {
-      minX = Math.min(minX, tile.x);
-      minY = Math.min(minY, tile.y);
-      maxX = Math.max(maxX, tile.x + tile.w);
-      maxY = Math.max(maxY, tile.y + tile.h);
-    }
-    // The previous router kept one south column. On a 390×649 felt, with the
-    // 18px sliver inset, that picture scaled to 0.542.
-    const feltW = 390 - 18 * 2;
-    const feltH = 649 - 18 * 2;
-    const scale = Math.min(feltW / (maxX - minX), feltH / (maxY - minY));
-    expect(scale).toBeGreaterThan(0.542);
-
-    // While the other arms are still short, there is room to turn, so no
-    // straight run grows past the cap.
-    for (const seed of [9, 27, 28]) {
-      for (const sample of playHand(4, "draw_until", seed)) {
-        const sampleLayout = layoutBoard(sample);
-        for (const arm of ARM_IDS) {
-          const others = ARM_IDS.filter((id) => id !== arm).map((id) => sample.arms[id].length);
-          const longestOther = Math.max(...others);
-          if (longestOther > 4 || sample.arms[arm].length <= STRAIGHT_CAP) continue;
-          const armDirs = sample.arms[arm].map(
-            (tile) => sampleLayout.tiles.find((item) => item.tileId === tile.tileId)!.direction,
-          );
-          let sampleRun = 0;
-          let samplePrev = "";
-          let sampleLongest = 0;
-          for (const dir of armDirs) {
-            sampleRun = dir === samplePrev ? sampleRun + 1 : 1;
-            samplePrev = dir;
-            sampleLongest = Math.max(sampleLongest, sampleRun);
-          }
-          expect(sampleLongest, `seed ${seed} ${arm}`).toBeLessThanOrEqual(STRAIGHT_CAP);
-        }
-      }
+    expect(dirs[0]).toBe("east");
+    const eastTiles = layout.tiles.filter((tile) => tile.arm === "east");
+    for (const tile of eastTiles) {
+      expect(tile.x + tile.w / 2, tile.tileId).toBeGreaterThan(-TILE_SHORT);
     }
   });
 

@@ -6,29 +6,19 @@ import { ARM_IDS, openEnds } from "./board.js";
  *
  * Coordinates are design pixels. The spinner sits at the origin. Every
  * client uses this same function, so a hand looks the same on every phone.
- * The view scales the picture into the felt.
+ * The view is the whole felt. It does not zoom or pan as tiles are added.
  *
- * The felt is tall, matching the board area on a phone once the header is
- * slim. An arm leaves the spinner straight, in its own quadrant. It keeps
- * that direction for a short run, then turns while there is still open
- * felt beside it. A straight run is capped at about six tiles, which is
- * the shorter side of the phone in tile-lengths. The turn goes to the
- * side whose snake keeps the board's box smaller, so the view can stay
- * zoomed in. A side that only ties on scale stays in the arm's quadrant.
- * Width is 416 so the tile forced straight off an early double still
- * lands inside: spinner, one tile, a double, then a full tile.
+ * Each arm owns one quadrant and snakes inside it, the way a dominoes
+ * table does: straight out to the edge of that quadrant, one corner, then
+ * straight back toward the spinner, then another corner, and so on.
+ * West owns the top-left and turns up. North owns the top-right and turns
+ * right. East owns the bottom-right and turns down. South owns the
+ * bottom-left and turns left. An arm never enters another arm's quadrant.
  *
- * The first bend at the edge of the phone still prefers the clockwise
- * side (up turns right, right turns down, down turns left, left turns
- * up) unless the other side is clearly emptier. The chain does not fold
- * onto another arm or onto itself. When the next straight step would
- * overlap another arm or the spinner row, the chain bends again and
- * wraps away. A double, and the tile centred on it, never bend.
- *
- * A double sits crosswise to the chain. The next tile continues in the
- * same direction, its short end centred on the double's long side.
- * A bend is made on a normal tile, before a double, so nothing steps off
- * a double at an angle.
+ * Tiles meet end to end on a shared center line. A double sits crosswise
+ * and centered, and it never changes direction. A corner is one non-double
+ * tile. The tile after a double stays centered on it. That tile may be the
+ * corner only when continuing straight would leave the quadrant.
  */
 
 export const TILE_SHORT = 36;
@@ -188,80 +178,245 @@ export function layoutOverlaps(layout: BoardLayout): boolean {
   return false;
 }
 
+/** One row of a quadrant snake: out to the edge, or back toward the spinner. */
+type SnakeLeg = "out" | "back";
+
+interface SnakeCursor {
+  box: LayoutBox;
+  dir: LayoutDir;
+  leg: SnakeLeg;
+  /** The tile just placed is the corner. The next tile starts the new row. */
+  shifting: boolean;
+  prevDouble: boolean;
+}
+
+interface SnakeStep {
+  box: LayoutBox;
+  dir: LayoutDir;
+  leg: SnakeLeg;
+  shifting: boolean;
+  /** In the lane, and any double that must follow still fits there. */
+  ready: boolean;
+}
+
+function shiftDir(arm: ArmId): LayoutDir {
+  if (arm === "west") return "north";
+  if (arm === "north") return "east";
+  if (arm === "east") return "south";
+  return "west";
+}
+
+function runDir(arm: ArmId, leg: SnakeLeg): LayoutDir {
+  return leg === "out" ? arm : opposite(arm);
+}
+
+function nextLeg(leg: SnakeLeg): SnakeLeg {
+  return leg === "out" ? "back" : "out";
+}
+
+/**
+ * The arm's own felt. The outward row may sit on the spinner's axis.
+ * Later rows stay in the quadrant, clear of a crosswise double on the
+ * neighbouring arm. West stays left, east stays right, north stays up,
+ * south stays down.
+ */
+/** Quadrant rule, ignoring the felt edge. Return rows stay off the neighbouring arm. */
+function inHalf(box: LayoutBox, arm: ArmId, center: LayoutBox, leg: SnakeLeg): boolean {
+  const cy = box.y + box.h / 2;
+  const cx = box.x + box.w / 2;
+  const midY = center.y + center.h / 2;
+  const midX = center.x + center.w / 2;
+  // A neighbour's double reaches half a long side past the spinner centre.
+  const spine = TILE_LONG / 2 + TILE_GAP;
+  if (arm === "west") {
+    const beside = box.y + box.h <= center.y - TILE_GAP + 0.5;
+    if (!beside && box.x + box.w > center.x - TILE_GAP + 0.5) return false;
+    if (beside && box.x + box.w > -spine + 0.5) return false;
+    return leg === "out" ? cy <= midY + TILE_SHORT / 2 : cy < midY - TILE_SHORT / 2;
+  }
+  if (arm === "east") {
+    const beside = box.y >= center.y + center.h + TILE_GAP - 0.5;
+    if (!beside && box.x < center.x + center.w + TILE_GAP - 0.5) return false;
+    if (beside && box.x < spine - 0.5) return false;
+    return leg === "out" ? cy >= midY - TILE_SHORT / 2 : cy > midY + TILE_SHORT / 2;
+  }
+  if (arm === "north") {
+    const beside = box.x >= center.x + center.w + TILE_GAP - 0.5;
+    if (!beside && box.y + box.h > center.y - TILE_GAP + 0.5) return false;
+    if (beside && box.y + box.h > -spine + 0.5) return false;
+    return leg === "out" ? cx >= midX - TILE_SHORT / 2 : cx > midX + TILE_SHORT / 2;
+  }
+  const beside = box.x + box.w <= center.x - TILE_GAP + 0.5;
+  if (!beside && box.y < center.y + center.h + TILE_GAP - 0.5) return false;
+  if (beside && box.y < spine - 0.5) return false;
+  return leg === "out" ? cx <= midX + TILE_SHORT / 2 : cx < midX - TILE_SHORT / 2;
+}
+
+function inLane(box: LayoutBox, arm: ArmId, center: LayoutBox, leg: SnakeLeg): boolean {
+  return insideActive(box) && inHalf(box, arm, center, leg);
+}
+
+function overlapsPlaced(box: LayoutBox, placed: readonly LayoutBox[]): boolean {
+  return placed.some((other) => boxesOverlap(box, other));
+}
+
+function isDoubleTile(tile: OrientedTile): boolean {
+  return tile.low === tile.high;
+}
+
+/**
+ * The next tile when it is a double. A double cannot turn, so it has to
+ * fit on this line. The tile after that double may be the corner.
+ */
+function lockedTail(upcoming: readonly OrientedTile[]): number {
+  const next = upcoming[1];
+  if (!next || !isDoubleTile(next)) return 0;
+  return 1;
+}
+
+/** The double that must follow `box` stays in the lane and covers nothing. */
+function tailFits(
+  box: LayoutBox,
+  dir: LayoutDir,
+  upcoming: readonly OrientedTile[],
+  arm: ArmId,
+  center: LayoutBox,
+  leg: SnakeLeg,
+  placed: readonly LayoutBox[],
+): boolean {
+  const count = lockedTail(upcoming);
+  let cursor = box;
+  const extra: LayoutBox[] = [];
+  for (let index = 1; index <= count; index += 1) {
+    const step = straightBox(cursor, dir, true);
+    if (!inLane(step, arm, center, leg) || overlapsPlaced(step, placed) || overlapsPlaced(step, extra)) return false;
+    extra.push(step);
+    cursor = step;
+  }
+  return true;
+}
+
+function snakeStep(
+  tile: OrientedTile,
+  cursor: SnakeCursor,
+  arm: ArmId,
+  center: LayoutBox,
+  upcoming: readonly OrientedTile[],
+  placed: readonly LayoutBox[],
+  fromCenter: boolean,
+): SnakeStep {
+  const double = isDoubleTile(tile);
+  const want = runDir(arm, cursor.leg);
+  const clear = (box: LayoutBox) => !overlapsPlaced(box, placed);
+  const lane = (box: LayoutBox, leg: SnakeLeg) => inLane(box, arm, center, leg) && clear(box);
+
+  if (fromCenter) {
+    const box = straightBox(cursor.box, arm, double);
+    return { box, dir: arm, leg: "out", shifting: false, ready: lane(box, "out") };
+  }
+
+  const choices: SnakeStep[] = [];
+  const keep = (dir: LayoutDir, leg: SnakeLeg, shifting: boolean, ready: boolean): SnakeStep => ({
+    box: straightBox(cursor.box, dir, double),
+    dir,
+    leg,
+    shifting,
+    ready,
+  });
+  const turnTo = (to: LayoutDir, leg: SnakeLeg, shifting: boolean, ready: boolean): SnakeStep => ({
+    box: bendBox(cursor.box, cursor.dir, to, double),
+    dir: to,
+    leg,
+    shifting,
+    ready,
+  });
+
+  // The corner is down. This tile starts the next row, centered on that corner.
+  if (cursor.shifting && cursor.dir !== want) {
+    const ontoOk = (step: SnakeStep, dir: LayoutDir) =>
+      lane(step.box, step.leg) && (double || tailFits(step.box, dir, upcoming, arm, center, step.leg, placed));
+    const onto = turnTo(want, cursor.leg, false, false);
+    const stay = keep(cursor.dir, cursor.leg, true, false);
+    onto.ready = ontoOk(onto, want);
+    stay.ready = ontoOk(stay, cursor.dir);
+    if (onto.ready) choices.push(onto, stay);
+    else if (stay.ready) choices.push(stay, onto);
+    else choices.push(onto, stay);
+  } else if (double) {
+    // A double never turns. It stays crosswise on the line it was dealt.
+    const kept = keep(cursor.dir, cursor.leg, false, false);
+    kept.ready = lane(kept.box, kept.leg);
+    choices.push(kept);
+  } else {
+    const along = cursor.prevDouble ? cursor.dir : want;
+    const kept = keep(along, cursor.leg, false, false);
+    const turn = turnTo(shiftDir(arm), nextLeg(cursor.leg), true, false);
+    kept.ready = lane(kept.box, kept.leg) && tailFits(kept.box, along, upcoming, arm, center, kept.leg, placed);
+    turn.ready = lane(turn.box, turn.leg);
+    if (kept.ready) choices.push(kept, turn);
+    else choices.push(turn, kept);
+  }
+
+  const perfect = choices.find((choice) => choice.ready);
+  if (perfect) return perfect;
+  // Stay in the arm's quadrant even when the felt edge has to give.
+  const half = choices.find((choice) => inHalf(choice.box, arm, center, choice.leg) && clear(choice.box));
+  if (half) return half;
+  const apart = choices.find((choice) => clear(choice.box));
+  if (apart) return apart;
+  return choices[0]!;
+}
+
 function layoutBoardNow(board: BoardState): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
   }
 
+  // Every quadrant stays reserved, even when its arm is empty. Borrowing it
+  // would slide the other arms the moment that end is played.
   const center = centerBox(board.center);
   const tiles: PlacedTile[] = [centerTile(board.center, center)];
-  const occupants: Occupant[] = [{ box: center, arm: null }];
-  const centre = centreRegion(center);
-  const cursors = new Map<ArmId, Cursor>();
+  const placed: LayoutBox[] = [center];
+  const cursors = new Map<ArmId, SnakeCursor>();
 
   for (const arm of ARM_IDS) {
-    const first = board.arms[arm][0];
+    const chain = board.arms[arm];
+    const first = chain[0];
     if (!first) continue;
-    const box = straightBox(center, arm, first.low === first.high);
-    const placed = toTile(first, box, arm, arm);
-    tiles.push(placed);
-    occupants.push({ box: placed, arm });
-    cursors.set(arm, { box: placed, dir: arm, prevDouble: first.low === first.high, bends: 0, run: 1 });
-  }
-
-  // Grow the arms together. A finished arm must not cross a lane another
-  // arm still has to walk, including the tile that follows a double.
-  const nextIndex = new Map<ArmId, number>();
-  for (const arm of ARM_IDS) {
-    const cursor = cursors.get(arm);
-    if (!cursor) continue;
-    holdAhead(arm, cursor, occupants, centre);
-    nextIndex.set(arm, 1);
-  }
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const arm of ARM_IDS) {
-      const index = nextIndex.get(arm);
-      const chain = board.arms[arm];
-      const cursor = cursors.get(arm);
-      if (index === undefined || !cursor || index >= chain.length) continue;
-      releaseHold(arm, occupants);
-      const upcoming = chain.slice(index);
-      const tile = upcoming[0]!;
-      const choice = chooseStep(tile, upcoming, cursor, arm, occupants, centre);
-      const placed = toTile(tile, choice.box, choice.dir, arm);
-      tiles.push(placed);
-      occupants.push({ box: placed, arm });
-      const nextCursor: Cursor = {
-        box: placed,
-        dir: choice.dir,
-        prevDouble: tile.low === tile.high,
-        bends: choice.bends,
-        run: choice.dir === cursor.dir ? cursor.run + 1 : 1,
-      };
-      cursors.set(arm, nextCursor);
-      nextIndex.set(arm, index + 1);
-      holdAhead(arm, nextCursor, occupants, centre);
-      grew = true;
-    }
-  }
-
-  // A step that still landed on another face is walked into open felt.
-  // The hand keeps going, and no tile is covered.
-  for (let i = 1; i < tiles.length; i += 1) {
-    const tile = tiles[i]!;
-    const earlier = tiles.slice(0, i);
-    if (!earlier.some((other) => boxesOverlap(tile, other))) continue;
-    const parked = nudgeClear(
-      tile,
-      tile.direction,
-      earlier.map((other) => ({ box: other, arm: other.arm })),
-      centre,
-      earlier[earlier.length - 1]!,
+    const opening = snakeStep(
+      first,
+      { box: center, dir: arm, leg: "out", shifting: false, prevDouble: false },
+      arm,
+      center,
+      chain,
+      placed,
+      true,
     );
-    tile.x = parked.x;
-    tile.y = parked.y;
+    const laid = toTile(first, opening.box, opening.dir, arm);
+    tiles.push(laid);
+    placed.push(laid);
+    let cursor: SnakeCursor = {
+      box: laid,
+      dir: opening.dir,
+      leg: opening.leg,
+      shifting: opening.shifting,
+      prevDouble: first.low === first.high,
+    };
+    for (let index = 1; index < chain.length; index += 1) {
+      const tile = chain[index]!;
+      const choice = snakeStep(tile, cursor, arm, center, chain.slice(index), placed, false);
+      const next = toTile(tile, choice.box, choice.dir, arm);
+      tiles.push(next);
+      placed.push(next);
+      cursor = {
+        box: next,
+        dir: choice.dir,
+        leg: choice.leg,
+        shifting: choice.shifting,
+        prevDouble: tile.low === tile.high,
+      };
+    }
+    cursors.set(arm, cursor);
   }
 
   const ends: PlacedEnd[] = [];
@@ -276,7 +431,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
   for (const end of ends) {
     const cursor = cursors.get(end.id);
     previews[end.id] = cursor
-      ? chooseStep(PREVIEW_TILE, [PREVIEW_TILE], cursor, end.id, occupants, centre).box
+      ? snakeStep(PREVIEW_TILE, cursor, end.id, center, [PREVIEW_TILE], placed, false).box
       : straightBox(center, end.id, false);
   }
 
