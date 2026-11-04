@@ -57,20 +57,6 @@ function seedBytes(n: number): Buffer {
   return seed;
 }
 
-function spanOf(layout: BoardLayout): { w: number; h: number } {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const tile of layout.tiles) {
-    minX = Math.min(minX, tile.x);
-    minY = Math.min(minY, tile.y);
-    maxX = Math.max(maxX, tile.x + tile.w);
-    maxY = Math.max(maxY, tile.y + tile.h);
-  }
-  return { w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
-}
-
 function playHand(players: 2 | 3 | 4, mode: "draw_one" | "draw_until", seed: number): BoardState[] {
   let match = createMatch([...PLAYERS[players]], {
     playerCount: players,
@@ -722,29 +708,6 @@ describe("board layout", () => {
         }
       }
     }
-  });
-
-  it("turns a wide cross up a tall phone before the tiles shrink away", () => {
-    const limits = { width: 280, height: 580 };
-    let taller = 0;
-    for (const seed of [1, 11, 17, 21]) {
-      const board = playHand(4, "draw_until", seed).find((item) => {
-        const count = 1 + ARM_IDS.reduce((sum, arm) => sum + item.arms[arm].length, 0);
-        return count === 15;
-      });
-      expect(board, `seed ${seed}`).toBeTruthy();
-      if (!board) continue;
-      const phone = layoutBoard(board);
-      const folded = layoutBoard(board, limits);
-      expect(layoutOverlaps(folded), `seed ${seed}`).toBe(false);
-      const phoneSpan = spanOf(phone);
-      const foldSpan = spanOf(folded);
-      const phoneFit = Math.min(limits.width / phoneSpan.w, limits.height / phoneSpan.h);
-      const foldFit = Math.min(limits.width / foldSpan.w, limits.height / foldSpan.h);
-      expect(foldFit, `seed ${seed}`).toBeGreaterThan(phoneFit + 0.05);
-      if (foldSpan.h > foldSpan.w) taller += 1;
-    }
-    expect(taller).toBeGreaterThanOrEqual(3);
   });
 
   it("never covers a tile, including on a narrow fold", () => {

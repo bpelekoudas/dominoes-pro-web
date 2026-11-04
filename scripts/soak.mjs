@@ -1613,36 +1613,15 @@ function auditTable() {
     return { selector: [edge && `edge-${edge}`, classes].filter(Boolean).join(" "), box: node.getBoundingClientRect() };
   });
   const overlaps = (a, b) => a.left < b.right - 0.6 && a.right > b.left + 0.6 && a.top < b.bottom - 0.6 && a.bottom > b.top + 0.6;
-  const floor = felt.getAttribute("data-cam-mode") === "floor";
-  const windowBox = floor
-    ? {
-        left: safe.left + Number(felt.getAttribute("data-fit-left") || 0),
-        top: safe.top + Number(felt.getAttribute("data-fit-top") || 0),
-        right: safe.right - Number(felt.getAttribute("data-fit-right") || 0),
-        bottom: safe.bottom - Number(felt.getAttribute("data-fit-bottom") || 0),
-      }
-    : { left: safe.left, top: safe.top, right: safe.right, bottom: safe.bottom };
-  const shown = (box) => {
-    const left = Math.max(box.left, windowBox.left);
-    const top = Math.max(box.top, windowBox.top);
-    const right = Math.min(box.right, windowBox.right);
-    const bottom = Math.min(box.bottom, windowBox.bottom);
-    if (right - left < 1 || bottom - top < 1) return null;
-    return { left, top, right, bottom };
-  };
   for (const tile of tiles) {
     const box = tile.getBoundingClientRect();
     const tileId = tile.getAttribute("data-board-tile");
     const inside =
       box.left >= safe.left - 0.6 && box.top >= safe.top - 0.6 && box.right <= safe.right + 0.6 && box.bottom <= safe.bottom + 0.6;
-    // A chain that cannot fit at a readable size stays large and can be dragged.
-    // Only the part still on the felt has to stay clear of the seats.
-    if (!inside && !floor) {
+    if (!inside) {
       return { ok: false, reason: "A tile sits outside the felt.", tile: { id: tileId, rect: plain(box) }, ...evidence };
     }
-    const visible = shown(box);
-    if (!visible) continue;
-    const hit = zones.find((zone) => overlaps(visible, zone.box));
+    const hit = zones.find((zone) => overlaps(box, zone.box));
     if (hit) {
       return {
         ok: false,
@@ -1654,16 +1633,6 @@ function auditTable() {
       };
     }
   }
-  if (floor) {
-    const tilePx = Number(felt.getAttribute("data-tile-px") || 0);
-    if (tilePx < 32) {
-      return { ok: false, reason: "The chain shrank below a readable tile.", tilePx, ...evidence };
-    }
-    const endVisible = [...felt.querySelectorAll(".end-cap")].some((end) => shown(end.getBoundingClientRect()));
-    if (!endVisible) {
-      return { ok: false, reason: "No open end is on the felt.", ...evidence };
-    }
-  }
   const rail = document.querySelector(".edge-top");
   const badge = rail?.querySelector(".edge-badge");
   if (!badge) return { ok: false, reason: "The top seat is missing, so the talk line was not checked.", ...evidence };
@@ -1673,10 +1642,7 @@ function auditTable() {
   badge.appendChild(bubble);
   const bubbleBox = bubble.getBoundingClientRect();
   const badgeBox = badge.getBoundingClientRect();
-  const onTile = tiles.some((tile) => {
-    const visible = shown(tile.getBoundingClientRect());
-    return visible ? overlaps(bubbleBox, visible) : false;
-  });
+  const onTile = tiles.some((tile) => overlaps(bubbleBox, tile.getBoundingClientRect()));
   const inBadge =
     bubbleBox.left >= badgeBox.left - 1 &&
     bubbleBox.right <= badgeBox.right + 1 &&
@@ -1714,10 +1680,7 @@ function auditTable() {
       return { ok: false, reason: "The control token is not on a seated player.", holder, ...evidence };
     }
     const tokenBox = token.getBoundingClientRect();
-    const covered = tiles.find((tile) => {
-      const visible = shown(tile.getBoundingClientRect());
-      return visible ? overlaps(tokenBox, visible) : false;
-    });
+    const covered = tiles.find((tile) => overlaps(tokenBox, tile.getBoundingClientRect()));
     const talkHit = [...document.querySelectorAll(".talk-line")].find((line) => overlaps(tokenBox, line.getBoundingClientRect()));
     const sliverHit = [...document.querySelectorAll(".sliver")].find((sliver) => overlaps(tokenBox, sliver.getBoundingClientRect()));
     if (covered || talkHit || sliverHit) {

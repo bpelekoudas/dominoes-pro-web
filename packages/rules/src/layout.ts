@@ -12,9 +12,7 @@ import { ARM_IDS, openEnds } from "./board.js";
  * slim. An arm leaves the spinner straight, in its own quadrant. It keeps
  * that direction for a short run, then turns while there is still open
  * felt beside it. A straight run is capped at about six tiles, which is
- * the shorter side of the phone in tile-lengths. On a narrower table the
- * east and west arms turn after the one tile that fits, and climb the
- * tall felt, before the picture has to shrink. The turn goes to the
+ * the shorter side of the phone in tile-lengths. The turn goes to the
  * side whose snake keeps the board's box smaller, so the view can stay
  * zoomed in. A side that only ties on scale stays in the arm's quadrant.
  * Width is 416 so the tile forced straight off an early double still
@@ -291,96 +289,6 @@ function layoutBoardNow(board: BoardState): BoardLayout {
  */
 const TURN_BIAS = 72;
 
-/** The passed felt is smaller than the reference phone on at least one side. */
-function isTightLimit(): boolean {
-  return activeLimit.width < PHONE_WIDTH - 1 || activeLimit.height < PHONE_HEIGHT - 1;
-}
-
-/**
- * How many tiles may stay straight on this axis.
- * The short side of a tall phone fits one tile beside the spinner, so an
- * east or west arm turns up or down instead of making a wide cross.
- * The long side keeps the normal cap and uses the empty felt.
- */
-function runCap(dir: LayoutDir): number {
-  const horizontal = dir === "east" || dir === "west";
-  const span = horizontal ? activeLimit.width : activeLimit.height;
-  const other = horizontal ? activeLimit.height : activeLimit.width;
-  if (span >= other - 1) return STRAIGHT_CAP;
-  const phoneSpan = horizontal ? PHONE_WIDTH : PHONE_HEIGHT;
-  if (span >= phoneSpan - 1) return STRAIGHT_CAP;
-  const reach = Math.max(TILE_LONG, span / 2 - TILE_SHORT / 2 - TILE_GAP);
-  const fit = Math.max(1, Math.floor(reach / (TILE_LONG + TILE_GAP)));
-  return Math.min(STRAIGHT_CAP, fit);
-}
-
-/**
- * A turn that stays on the felt. The arm may leave its quadrant when that
- * is the side with room. Overlapping another chain is still refused.
- */
-function bestInsideTurn(
-  tile: OrientedTile,
-  upcoming: readonly OrientedTile[],
-  cursor: Cursor,
-  home: ArmId,
-  occupants: readonly Occupant[],
-  centre: LayoutBox,
-): { box: LayoutBox; dir: LayoutDir; bends: number } | null {
-  const isDouble = tile.low === tile.high;
-  const collect = (reserveDouble: boolean) => {
-    const options: Array<{ box: LayoutBox; dir: LayoutDir; scale: number }> = [];
-    for (const turn of sideTurns(cursor.dir)) {
-      for (const box of bendCandidates(cursor.box, cursor.dir, turn, isDouble)) {
-        if (!insideActive(box) || !isClear(box, occupants, centre, cursor.box)) continue;
-        if (reserveDouble && !roomForDouble(upcoming, turn, box, home, occupants, centre, false, false)) continue;
-        options.push({
-          box,
-          dir: turn,
-          scale: snakeScale(box, turn, 1, upcoming, occupants, centre, home),
-        });
-        break;
-      }
-    }
-    return options;
-  };
-  const options = collect(true);
-  const pickedFrom = options.length > 0 ? options : collect(false);
-  if (pickedFrom.length > 0) {
-    let picked = pickedFrom[0]!;
-    for (const option of pickedFrom) {
-      if (option.scale > picked.scale + 1e-6) picked = option;
-    }
-    return { box: picked.box, dir: picked.dir, bends: cursor.bends + 1 };
-  }
-  // Already past the edge. Turn back toward the felt when that sticks out less
-  // than another straight step. Later tiles can fold into the open side.
-  const straight = straightBox(cursor.box, cursor.dir, isDouble);
-  const straightOut = overflowAmount(straight);
-  if (straightOut <= 0) return null;
-  let recovered: { box: LayoutBox; dir: LayoutDir; out: number; scale: number } | null = null;
-  for (const turn of sideTurns(cursor.dir)) {
-    for (const box of bendCandidates(cursor.box, cursor.dir, turn, isDouble)) {
-      if (!isClear(box, occupants, centre, cursor.box)) continue;
-      const out = overflowAmount(box);
-      if (out >= straightOut - 0.5) continue;
-      const scale = snakeScale(box, turn, 1, upcoming, occupants, centre, home);
-      if (!recovered || out < recovered.out - 0.5 || (Math.abs(out - recovered.out) <= 0.5 && scale > recovered.scale)) {
-        recovered = { box, dir: turn, out, scale };
-      }
-    }
-  }
-  if (!recovered) return null;
-  return { box: recovered.box, dir: recovered.dir, bends: cursor.bends + 1 };
-}
-
-function overflowAmount(box: LayoutBox): number {
-  const halfW = activeLimit.width / 2;
-  const halfH = activeLimit.height / 2;
-  const dx = Math.max(0, -halfW - box.x, box.x + box.w - halfW);
-  const dy = Math.max(0, -halfH - box.y, box.y + box.h - halfH);
-  return dx + dy;
-}
-
 /**
  * Go straight while the run is short and the next tile fits on the phone.
  * At the straight-run cap, or once the straight step leaves the felt, turn
@@ -400,28 +308,7 @@ function chooseStep(
   const straight = straightBox(cursor.box, cursor.dir, isDouble);
   const keep = { box: straight, dir: cursor.dir, bends: cursor.bends };
 
-  if (lock) {
-    // A double stays crosswise. The tile after it may turn when the straight
-    // step would leave a short phone table: that turn sits on the end of the
-    // double, and it keeps the chain from running off the side.
-    const follower = cursor.prevDouble && !isDouble;
-    if (!(follower && isTightLimit() && !insideActive(straight))) return keep;
-    const turned = bestInsideTurn(tile, upcoming, cursor, home, occupants, centre);
-    if (turned) return turned;
-    return keep;
-  }
-
-  // A short phone table. Turn into the tall felt before the arm runs off
-  // the side and the whole picture has to shrink.
-  if (isTightLimit()) {
-    const cap = runCap(cursor.dir);
-    // Stay on a short run that still fits. A following double may stick out
-    // a little; turning away from that would run the arm back across the table.
-    const straightInside = insideActive(straight) && fits(straight, home, occupants, centre, true, cursor.box);
-    if (straightInside && cursor.run < cap) return keep;
-    const turned = bestInsideTurn(tile, upcoming, cursor, home, occupants, centre);
-    if (turned) return turned;
-  }
+  if (lock) return keep;
 
   const mustTurn = cursor.run >= STRAIGHT_CAP;
   const straightOk = fits(straight, home, occupants, centre, true, cursor.box)
