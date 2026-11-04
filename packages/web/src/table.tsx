@@ -7,6 +7,7 @@ import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
+  chainViewShift,
   feltScale,
   fitInsets,
   READABLE_PHONE_PX,
@@ -214,7 +215,7 @@ export function Table({
         return solved.limits;
       });
       const zoom = solved.scale;
-      const shift = boardShift(room);
+      const shift = chainViewShift(layout.tiles, zoom, boardShift(room));
       const none = { top: 0, right: 0, bottom: 0, left: 0 };
       setClip((current) => (sameInsets(current, none) ? current : none));
       held.current = { hand: handKey, scale: zoom };

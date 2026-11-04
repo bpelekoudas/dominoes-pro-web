@@ -110,7 +110,9 @@ export function feltScale(input: {
     width: Math.max(TILE_LONG * 2, roomW / readable),
     height: Math.max(TILE_LONG * 2, roomH / readable),
   };
-  const span = centeredChain(layoutBoard(input.board, limits).tiles);
+  // Fit the chain's own box, not a spinner-centred square. A long column
+  // on one side then does not force the empty side to shrink the picture.
+  const span = chainBounds(layoutBoard(input.board, limits).tiles, 0);
   const fit = Math.min(roomW / Math.max(1, span.w), roomH / Math.max(1, span.h));
   let scale = Math.min(open, Number.isFinite(fit) && fit > 0 ? fit : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
@@ -213,6 +215,22 @@ export const READABLE_WIDE_PX = 44;
 /** Move a felt-centered chain into an asymmetric safe rect. */
 export function boardShift(insets: AxisInsets): { x: number; y: number } {
   return { x: (insets.left - insets.right) / 2, y: (insets.top - insets.bottom) / 2 };
+}
+
+/**
+ * Put the chain's box in the safe centre. The spinner stays the coordinate
+ * origin, so tiles do not slide inside the stage; the whole picture eases
+ * once to this shift.
+ */
+export function chainViewShift(
+  tiles: readonly LayoutBox[],
+  scale: number,
+  insetShift: { x: number; y: number },
+): { x: number; y: number } {
+  const box = chainBounds(tiles, 0);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return { x: insetShift.x - cx * scale, y: insetShift.y - cy * scale };
 }
 
 export function scaleForAxis(bounds: FeltSize, felt: FeltSize, insets: AxisInsets): number {

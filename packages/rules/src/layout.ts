@@ -633,14 +633,12 @@ function snakeStep(
     const box = straightBox(cursor.box, dir, true);
     const onSide = (candidate: LayoutBox, tight: boolean) =>
       staysOnSide(candidate, arm, center, tight) && !overlapsPlaced(candidate, placed) && !boxesOverlap(candidate, cursor.box);
-    const free = (candidate: LayoutBox) =>
-      !overlapsPlaced(candidate, placed) && !boxesOverlap(candidate, cursor.box);
-    if (onSide(box, cursor.row > 0) && free(box) && (!isPortrait() || runInside(box, dir))) {
+    if (onSide(box, cursor.row > 0) && (!isPortrait() || runInside(box, dir))) {
       const line = dir === shiftDir(arm) && !portraitSide(arm) ? acrossCenter(box, arm) : cursor.line;
       return { box, dir, row: cursor.row, line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
     const cap = straightBox(cursor.box, shiftDir(arm), true);
-    if (!isPortrait() && free(cap) && (onSide(cap, true) || staysOnSide(cap, arm, center, true))) {
+    if (!isPortrait() && !overlapsPlaced(cap, placed) && !boxesOverlap(cap, cursor.box) && (onSide(cap, true) || staysOnSide(cap, arm, center, true))) {
       return {
         box: cap,
         dir: shiftDir(arm),
@@ -670,7 +668,7 @@ function snakeStep(
   // A double at the edge of a tall felt. Leave across its middle, back down
   // the open side, instead of carrying the line off the table.
   if (onDouble && isPortrait() && !runInside(straightBox(cursor.box, dir, false), dir)) {
-    const back: LayoutDir = cursor.box.y + cursor.box.h / 2 < 0 ? "south" : "north";
+    const back: LayoutDir = portraitSide(arm) ? shiftDir(arm) : arm;
     const turned = straightBox(cursor.box, back, false);
     const clearTurn = !overlapsPlaced(turned, placed) && !boxesOverlap(turned, cursor.box) && centreInside(turned);
     if (clearTurn) {
