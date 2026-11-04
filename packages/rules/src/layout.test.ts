@@ -19,7 +19,6 @@ import {
   insidePhone,
   layoutBoard,
   layoutOverlaps,
-  straightBox,
   PHONE_HEIGHT,
   PHONE_WIDTH,
   STRAIGHT_CAP,
@@ -31,7 +30,6 @@ import {
   type PlacedTile,
 } from "./layout.js";
 import { shuffleWithSeed } from "./rng.js";
-import { chainBounds, followCamera, READABLE_PHONE_PX } from "../../web/src/board-scale.js";
 import { allTiles, tileById, type Tile } from "./tiles.js";
 
 const PLAYERS = {
@@ -67,47 +65,6 @@ function seedBytes(n: number): Buffer {
   seed.writeUInt32BE(n + 1, 0);
   seed.writeUInt32BE(0x4c4159, 4);
   return seed;
-}
-
-function nearFeltEdge(box: LayoutBox, limit?: { width: number; height: number }): boolean {
-  const margin = TILE_LONG + TILE_GAP;
-  const edges = [
-    { width: PHONE_WIDTH, height: PHONE_HEIGHT },
-    ...(limit ? [limit] : []),
-  ];
-  return edges.some((edge) => box.x <= -edge.width / 2 + margin
-    || box.y <= -edge.height / 2 + margin
-    || box.x + box.w >= edge.width / 2 - margin
-    || box.y + box.h >= edge.height / 2 - margin);
-}
-
-function insideLimit(box: LayoutBox, limit?: { width: number; height: number }): boolean {
-  if (!limit) return insidePhone(box);
-  return box.x >= -limit.width / 2 && box.y >= -limit.height / 2 && box.x + box.w <= limit.width / 2 && box.y + box.h <= limit.height / 2;
-}
-
-/** A step moved back toward the spinner even though straight ahead was open. */
-function inwardWhileOpen(board: BoardState, layout: BoardLayout, limit?: { width: number; height: number }): string | null {
-  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
-  const center = board.center ? byId.get(board.center.tileId) : undefined;
-  if (!center) return null;
-  for (const arm of ARM_IDS) {
-    let parent = center;
-    for (const step of board.arms[arm]) {
-      const tile = byId.get(step.tileId);
-      if (!tile) return null;
-      const parentDistance = Math.hypot(parent.x + parent.w / 2, parent.y + parent.h / 2);
-      const tileDistance = Math.hypot(tile.x + tile.w / 2, tile.y + tile.h / 2);
-      if (tile.direction !== parent.direction && tileDistance + TILE_SHORT * 0.5 < parentDistance && !nearFeltEdge(tile, limit) && !nearFeltEdge(parent, limit)) {
-        const straight = straightBox(parent, parent.direction, false);
-        const blocked = !insideLimit(straight, limit)
-          || layout.tiles.some((other) => other !== parent && other !== tile && (boxesOverlap(straight, other) || boxGap(straight, other) < ARM_GAP));
-        if (!blocked) return `${arm} ${parent.tileId}->${tile.tileId}`;
-      }
-      parent = tile;
-    }
-  }
-  return null;
 }
 
 function spanOf(layout: BoardLayout): { w: number; h: number } {
@@ -199,8 +156,7 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
       const b = layout.tiles[j]!;
       if (!a.arm || !b.arm || a.arm === b.arm) continue;
       if (stems.has(a.tileId) && stems.has(b.tileId)) continue;
-      // A full tile of air is preferred. A crowded chain may sit edge to edge, and must not cover.
-      expect(boxGap(a, b), `${label} ${a.tileId} near ${b.tileId}`).toBeGreaterThanOrEqual(0);
+      expect(boxGap(a, b), `${label} ${a.tileId} near ${b.tileId}`).toBeGreaterThanOrEqual(ARM_GAP);
     }
   }
   for (const arm of ARM_IDS) {
@@ -210,7 +166,7 @@ function assertArmsSeparated(board: BoardState, layout: BoardLayout, label: stri
         expect(
           boxGap(placed[i]!, placed[j]!),
           `${label} ${arm} ${placed[i]!.tileId} runs beside ${placed[j]!.tileId}`,
-        ).toBeGreaterThanOrEqual(0);
+        ).toBeGreaterThanOrEqual(ARM_GAP);
       }
     }
   }
@@ -242,7 +198,7 @@ function assertPinwheel(board: BoardState, layout: BoardLayout, label: string): 
     }
     if (dirs.length === 0) continue;
     expect(dirs[0], `${label} ${arm} left the spinner ${dirs.join(">")}`).toBe(arm);
-    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(12);
+    expect(dirs.length, `${label} ${arm} bent ${dirs.join(">")}`).toBeLessThanOrEqual(6);
   }
 }
 
@@ -286,7 +242,7 @@ function assertDoublesCentered(board: BoardState, layout: BoardLayout, label: st
     for (const arm of ["east", "west"] as const) {
       const first = board.arms[arm][0];
       if (!first || !spinner) continue;
-      expectJoinedToDouble(spinner, byId.get(first.tileId)!, arm, `${label} spinner ${arm}`, layout);
+      expectJoinedToDouble(spinner, byId.get(first.tileId)!, arm, `${label} spinner ${arm}`);
     }
   }
   for (const arm of ARM_IDS) {
@@ -304,52 +260,17 @@ function assertDoublesCentered(board: BoardState, layout: BoardLayout, label: st
       const prev = chain[i - 1]!;
       const prevPlaced = byId.get(prev.tileId)!;
       const prevDouble = prev.low === prev.high;
-      if (prevDouble) expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`, layout, chain[i + 1] ?? null);
+      if (prevDouble) expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`);
       if (placed.direction !== prevPlaced.direction) {
-        if (isDouble) {
-          const ahead = straightBox(prevPlaced, prevPlaced.direction, true);
-          const spinner = layout.tiles.find((tile) => tile.arm === null);
-          const pad = spinner
-            ? { x: spinner.x - TILE_SHORT, y: spinner.y - TILE_SHORT, w: spinner.w + TILE_SHORT * 2, h: spinner.h + TILE_SHORT * 2 }
-            : null;
-          const blocked = !insidePhone(ahead)
-            || (pad ? boxesOverlap(ahead, pad) : false)
-            || layout.tiles.some((other) => other !== prevPlaced && other !== placed && boxesOverlap(ahead, other));
-          expect(blocked, `${label} bent on double ${placed.tileId} while the line was open`).toBe(true);
-        }
-        if (prevDouble) {
-          expect(leftDoubleForCause(prevPlaced, placed, chain[i + 1] ?? null, layout), `${label} bent off double ${prev.tileId} while the way was open`).toBe(true);
-        }
+        expect(isDouble, `${label} bent on double ${placed.tileId}`).toBe(false);
+        expect(prevDouble, `${label} bent off double ${prev.tileId}`).toBe(false);
       }
     }
   }
 }
 
-function leftDoubleForCause(
-  double: PlacedTile,
-  next: PlacedTile,
-  following: { low: number; high: number } | null,
-  layout: BoardLayout,
-): boolean {
-  const ahead = straightBox(double, double.direction, false);
-  if (!insidePhone(ahead) || layout.tiles.some((other) => other !== double && other !== next && boxesOverlap(ahead, other))) return true;
-  if (!following) return false;
-  const further = straightBox(ahead, double.direction, following.low === following.high);
-  return !insidePhone(further) || layout.tiles.some((other) => other !== double && other !== next && boxesOverlap(further, other));
-}
-
-function expectJoinedToDouble(
-  double: PlacedTile,
-  next: PlacedTile,
-  dir: ArmId,
-  label: string,
-  layout: BoardLayout,
-  following: { low: number; high: number } | null,
-): void {
-  if (next.direction !== dir) {
-    expect(leftDoubleForCause(double, next, following, layout), `${label} left the double while the way was open`).toBe(true);
-    return;
-  }
+function expectJoinedToDouble(double: PlacedTile, next: PlacedTile, dir: ArmId, label: string): void {
+  expect(next.direction, label).toBe(dir);
   const along = dir === "east"
     ? next.x - (double.x + double.w)
     : dir === "west"
@@ -358,21 +279,13 @@ function expectJoinedToDouble(
         ? next.y - (double.y + double.h)
         : double.y - (next.y + next.h);
   expect(along, label).toBe(TILE_GAP);
-  const delta = dir === "east" || dir === "west"
-    ? next.y + next.h / 2 - (double.y + double.h / 2)
-    : next.x + next.w / 2 - (double.x + double.w / 2);
-  if (Math.abs(delta) > 0.5) {
-    const centered = dir === "east" || dir === "west"
-      ? { ...next, y: double.y + double.h / 2 - next.h / 2 }
-      : { ...next, x: double.x + double.w / 2 - next.w / 2 };
-    const blocked = layout.tiles.some((other) => other !== double && other !== next && boxesOverlap(centered, other));
-    expect(blocked, `${label} slid off a free double`).toBe(true);
-  }
   if (dir === "east" || dir === "west") {
+    expect(next.y + next.h / 2, label).toBeCloseTo(double.y + double.h / 2, 5);
     expect(double.h, label).toBe(TILE_LONG);
     expect(next.h, label).toBeLessThanOrEqual(double.h);
     expect(next.h, label).toBe(TILE_SHORT);
   } else {
+    expect(next.x + next.w / 2, label).toBeCloseTo(double.x + double.w / 2, 5);
     expect(double.w, label).toBe(TILE_LONG);
     expect(next.w, label).toBeLessThanOrEqual(double.w);
     expect(next.w, label).toBe(TILE_SHORT);
@@ -497,11 +410,11 @@ describe("board layout", () => {
       bent = placeTile(bent, "east", tileById(id));
     }
     const bentLayout = layoutBoard(bent);
-    const beforeDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-3")!;
+    const corner = bentLayout.tiles.find((tile) => tile.tileId === "3-4")!;
     const bentDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-2")!;
     const follower = bentLayout.tiles.find((tile) => tile.tileId === "1-2")!;
-    expect(beforeDouble.direction).not.toBe("east");
-    expect(bentDouble.direction).toBe(beforeDouble.direction);
+    expect(corner.direction).not.toBe("east");
+    expect(bentDouble.direction).toBe(corner.direction);
     expect(bentDouble.direction).toBe(follower.direction);
     expectJoinedToDouble(bentDouble, follower, bentDouble.direction, "double at a bend");
     assertLaidOut(bent, "double at a bend", true);
@@ -659,7 +572,7 @@ describe("board layout", () => {
         nearest = Math.min(nearest, boxGap(a, b));
       }
     }
-    expect(nearest).toBeGreaterThan(0);
+    expect(nearest).toBeGreaterThanOrEqual(ARM_GAP);
   });
 
   it("keeps a full tile between arms across long four-player games", () => {
@@ -727,9 +640,6 @@ describe("board layout", () => {
               const slot = layout.previews[end.id];
               expect(slot, `${label} preview ${end.id}`).toBeTruthy();
               if (!slot) continue;
-              const covered = layout.tiles.some((tile) => boxesOverlap(slot, tile));
-              // A boxed-in end has no square that both touches the chain and misses every tile.
-              if (covered) continue;
               for (const tile of layout.tiles) {
                 expect(boxesOverlap(slot, tile), `${label} preview ${end.id} on ${tile.tileId}`).toBe(false);
               }
@@ -780,7 +690,7 @@ describe("board layout", () => {
       prev = dir;
       longest = Math.max(longest, run);
     }
-    expect(longest).toBeLessThanOrEqual(8);
+    expect(longest).toBeLessThanOrEqual(STRAIGHT_CAP);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -818,7 +728,7 @@ describe("board layout", () => {
             samplePrev = dir;
             sampleLongest = Math.max(sampleLongest, sampleRun);
           }
-          expect(sampleLongest, `seed ${seed} ${arm}`).toBeLessThanOrEqual(8);
+          expect(sampleLongest, `seed ${seed} ${arm}`).toBeLessThanOrEqual(STRAIGHT_CAP);
         }
       }
     }
@@ -834,9 +744,14 @@ describe("board layout", () => {
       });
       expect(board, `seed ${seed}`).toBeTruthy();
       if (!board) continue;
+      const phone = layoutBoard(board);
       const folded = layoutBoard(board, limits);
       expect(layoutOverlaps(folded), `seed ${seed}`).toBe(false);
+      const phoneSpan = spanOf(phone);
       const foldSpan = spanOf(folded);
+      const phoneFit = Math.min(limits.width / phoneSpan.w, limits.height / phoneSpan.h);
+      const foldFit = Math.min(limits.width / foldSpan.w, limits.height / foldSpan.h);
+      expect(foldFit, `seed ${seed}`).toBeGreaterThan(phoneFit + 0.05);
       if (foldSpan.h > foldSpan.w) taller += 1;
     }
     expect(taller).toBeGreaterThanOrEqual(3);
@@ -916,21 +831,9 @@ describe("board layout", () => {
         if (count < 8 || openArms < 4) continue;
         for (const limit of CHAIN_LIMITS) {
           const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
-          const where = limit ? `${limit.width}x${limit.height}` : "phone";
-          if (layoutOverlaps(layout)) throw new Error(`seed ${seed} ${count} tiles ${where}`);
-          const inward = inwardWhileOpen(board, layout, limit);
-          if (inward) throw new Error(`seed ${seed} ${count} ${where} turned back: ${inward}`);
-        }
-        const phone = layoutBoard(board, { width: 280, height: 780 });
-        const shot = followCamera({
-          frame: chainBounds(phone.tiles, 0),
-          ends: phone.ends,
-          tiles: phone.tiles,
-          felt: { w: 390, h: 700 },
-          screenWidth: 390,
-        });
-        if (shot.scale * TILE_SHORT < READABLE_PHONE_PX - 0.5) {
-          throw new Error(`seed ${seed} tile ${Math.round(shot.scale * TILE_SHORT)}px`);
+          if (layoutOverlaps(layout)) {
+            throw new Error(`seed ${seed} ${count} tiles ${limit ? `${limit.width}x${limit.height}` : "phone"}`);
+          }
         }
         checked += 1;
         if (checked >= 5000) break;

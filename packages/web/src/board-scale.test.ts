@@ -284,13 +284,24 @@ describe("board scale", () => {
       reserve: PHONE_RESERVE,
       zones: PHONE_ZONES,
     });
-    expect(shot.scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
-    expect(shot.clip).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(shot.mode).toBe("fit");
     const vertical = layout.tiles.filter((tile) => tile.h > tile.w);
     const horizontal = layout.tiles.filter((tile) => tile.w > tile.h);
     expect(vertical.length).toBeGreaterThan(0);
     expect(horizontal.length).toBeGreaterThan(0);
-    const shortOf = (tile: { w: number; h: number }) => Math.min(tile.w, tile.h) * shot.scale;
+    const shortOf = (tile: { x: number; y: number; w: number; h: number }) => {
+      const seen = screenBox(felt, frame, shot.scale, shot.shiftX, shot.shiftY, tile);
+      expect(seen.left).toBeGreaterThanOrEqual(-0.6);
+      expect(seen.top).toBeGreaterThanOrEqual(-0.6);
+      expect(seen.right).toBeLessThanOrEqual(felt.w + 0.6);
+      expect(seen.bottom).toBeLessThanOrEqual(felt.h + 0.6);
+      const width = seen.right - seen.left;
+      const height = seen.bottom - seen.top;
+      // The whole tile is on screen. A clip through it is what made the slivers.
+      expect(width).toBeGreaterThanOrEqual(tile.w * shot.scale - 0.6);
+      expect(height).toBeGreaterThanOrEqual(tile.h * shot.scale - 0.6);
+      return Math.min(width, height);
+    };
     const verticalShort = Math.min(...vertical.map(shortOf));
     const horizontalShort = Math.min(...horizontal.map(shortOf));
     expect(Math.abs(verticalShort - horizontalShort)).toBeLessThan(1);
