@@ -8,12 +8,14 @@ import {
   boardShift,
   CAMERA_EDGE,
   cameraScale,
+  centeredChain,
   chainBounds,
   clearanceInsets,
   FELT_PAD_Y,
   fitInsets,
   fitScale,
   followCamera,
+  handZoom,
   handOverPlacement,
   landedTileBox,
   MIN_TILE_FRAC,
@@ -183,6 +185,105 @@ describe("board scale", () => {
     const again = cameraScale({ bounds: one, felt, screenWidth: screen, previous: scale, newHand: true });
     expect(again).toBeCloseTo(open, 5);
     expect(cameraScale({ bounds: one, felt, screenWidth: screen, previous: scale, newHand: false })).toBeLessThanOrEqual(scale);
+  });
+
+  it("opens zoomed in and eases out in a few steps, never back in", () => {
+    const felt = { w: 390, h: 700 };
+    const screen = 390;
+    const reserve = { top: 46, right: 54, bottom: 36, left: 54 };
+    const spinner = { x: -18, y: -36, w: 36, h: 72 };
+    const open = handZoom({
+      tiles: [spinner],
+      felt,
+      screenWidth: screen,
+      reserve,
+      previous: null,
+      newHand: true,
+    });
+    expect((TILE_SHORT * open) / screen).toBeGreaterThanOrEqual(0.12);
+    expect((TILE_SHORT * open) / screen).toBeLessThanOrEqual(0.15);
+
+    let previous = open;
+    let changes = 0;
+    for (let n = 1; n <= 18; n += 1) {
+      const tiles = [spinner];
+      for (let i = 0; i < n; i += 1) tiles.push({ x: -18, y: -110 - i * 74, w: 36, h: 72 });
+      const next = handZoom({ tiles, felt, screenWidth: screen, reserve, previous, newHand: false });
+      expect(next).toBeLessThanOrEqual(previous + 1e-9);
+      if (next < previous - 1e-6) changes += 1;
+      const span = centeredChain(tiles);
+      const roomH = felt.h - reserve.top - reserve.bottom;
+      expect(span.h * next).toBeLessThanOrEqual(roomH + 1);
+      // A tile that does not reach any farther must not move the zoom.
+      const last = tiles[tiles.length - 1]!;
+      const held = handZoom({
+        tiles: [...tiles, { x: last.x + 4, y: last.y + 4, w: 20, h: 20 }],
+        felt,
+        screenWidth: screen,
+        reserve,
+        previous: next,
+        newHand: false,
+      });
+      expect(held).toBeCloseTo(next, 5);
+      previous = next;
+    }
+    // A long straight column eases out as it grows, and only outward.
+    expect(changes).toBeGreaterThan(0);
+    expect(changes).toBeLessThanOrEqual(18);
+    expect(previous).toBeLessThan(open);
+    // A new hand opens large again. The same chain must not zoom back in.
+    const again = handZoom({ tiles: [spinner], felt, screenWidth: screen, reserve, previous, newHand: true });
+    expect(again).toBeCloseTo(open, 5);
+    expect(
+      handZoom({ tiles: [spinner], felt, screenWidth: screen, reserve, previous, newHand: false }),
+    ).toBeLessThanOrEqual(previous + 1e-9);
+  });
+
+  it("stays at a readable size while the chain fits, and a one-sided arm does not slide the view", () => {
+    const felt = { w: 390, h: 700 };
+    const reserve = { top: 46, right: 54, bottom: 36, left: 54 };
+    const modest = [
+      { x: -18, y: -36, w: 36, h: 72 },
+      { x: -92, y: -18, w: 72, h: 36 },
+      { x: 20, y: -18, w: 72, h: 36 },
+      { x: -18, y: -110, w: 36, h: 72 },
+      { x: -18, y: 38, w: 36, h: 72 },
+    ];
+    const scale = handZoom({
+      tiles: modest,
+      felt,
+      screenWidth: 390,
+      reserve,
+      previous: null,
+      newHand: true,
+      readablePx: READABLE_PHONE_PX,
+    });
+    expect(scale * TILE_SHORT).toBeGreaterThanOrEqual(READABLE_PHONE_PX - 0.5);
+    const east = handZoom({
+      tiles: [
+        { x: -18, y: -36, w: 36, h: 72 },
+        { x: 20, y: -18, w: 72, h: 36 },
+        { x: 94, y: -18, w: 72, h: 36 },
+      ],
+      felt,
+      screenWidth: 390,
+      reserve,
+      previous: null,
+      newHand: true,
+    });
+    const west = handZoom({
+      tiles: [
+        { x: -18, y: -36, w: 36, h: 72 },
+        { x: -92, y: -18, w: 72, h: 36 },
+        { x: -166, y: -18, w: 72, h: 36 },
+      ],
+      felt,
+      screenWidth: 390,
+      reserve,
+      previous: null,
+      newHand: true,
+    });
+    expect(east).toBeCloseTo(west, 5);
   });
 
   it("fits a tall chain under a top badge and clear of the side racks", () => {

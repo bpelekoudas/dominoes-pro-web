@@ -833,12 +833,12 @@ input {
 }
 .table-scroll[data-camera="armed"] .board-scaler {
   transition:
-    width 360ms cubic-bezier(0.22, 0.8, 0.28, 1),
-    height 360ms cubic-bezier(0.22, 0.8, 0.28, 1),
-    transform 360ms cubic-bezier(0.22, 0.8, 0.28, 1);
+    width 480ms cubic-bezier(0.22, 0.8, 0.28, 1),
+    height 480ms cubic-bezier(0.22, 0.8, 0.28, 1),
+    transform 480ms cubic-bezier(0.22, 0.8, 0.28, 1);
 }
 .table-scroll[data-camera="armed"] .board-stage {
-  transition: transform 360ms cubic-bezier(0.22, 0.8, 0.28, 1);
+  transition: transform 480ms cubic-bezier(0.22, 0.8, 0.28, 1);
 }
 .table-scroll[data-cam-user="drag"] .board-scaler,
 .table-scroll[data-cam-user="drag"] .board-stage {

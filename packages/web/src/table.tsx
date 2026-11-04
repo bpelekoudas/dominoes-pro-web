@@ -6,8 +6,9 @@ import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
+  boardShift,
   fitInsets,
-  followCamera,
+  handZoom,
   READABLE_PHONE_PX,
   READABLE_WIDE_PX,
   handOverPlacement,
@@ -86,17 +87,6 @@ function endPoints(plays: Array<{ endId: string; points: number }>, endId: strin
   return points > 0 ? `+${points}` : "0";
 }
 
-/**
- * Grow the felt in a few big steps so the view does not shrink on every
- * play. A few pixels past the edge stays at the normal size.
- */
-function steppedHalf(needed: number, feltHalf: number): number {
-  if (needed <= feltHalf + 10) return feltHalf;
-  const ratio = needed / feltHalf;
-  const bucket = ratio <= 1.15 ? 1.15 : ratio <= 1.35 ? 1.35 : Math.ceil(ratio * 4) / 4;
-  return feltHalf * bucket;
-}
-
 export function Table({
   view,
   selectedTile,
@@ -139,20 +129,11 @@ export function Table({
   }, [board, limits]);
   const frame = useMemo(() => {
     if (!layout) return null;
-    // The picture is the whole felt, centred on the spinner. It stays put
-    // as tiles are added. A chain that outgrows the felt widens this frame
-    // on both sides at once, so the view steps down without sliding.
+    // The stage is the whole felt, centred on the spinner. Tile positions
+    // stay put. Only the scale changes, and it only eases outward.
     const w = limits?.width ?? PHONE_WIDTH;
     const h = limits?.height ?? PHONE_HEIGHT;
-    let needW = w / 2;
-    let needH = h / 2;
-    for (const tile of layout.tiles) {
-      needW = Math.max(needW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
-      needH = Math.max(needH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
-    }
-    const halfW = steppedHalf(needW, w / 2);
-    const halfH = steppedHalf(needH, h / 2);
-    return { x: -halfW, y: -halfH, w: halfW * 2, h: halfH * 2 };
+    return { x: -w / 2, y: -h / 2, w, h };
   }, [layout, limits]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -214,30 +195,31 @@ export function Table({
         if (current && Math.abs(current.width - designW) < 12 && Math.abs(current.height - designH) < 12) return current;
         return { width: designW, height: designH };
       });
-      // Fit the frame the stage actually draws. That frame is the whole felt
-      // until a chain sticks out, then it steps out on both sides together.
-      const shot = followCamera({
-        frame,
-        ends: layout.ends,
+      // Open close on the spinner. Ease out in a few steps as the chain
+      // grows. The centre does not follow the last tile.
+      const previous = held.current?.hand === handKey ? held.current.scale : null;
+      const zoom = handZoom({
         tiles: layout.tiles,
-        playableIds: view.legalPlays.map((play) => play.endId),
         felt,
         screenWidth,
         reserve: nextReserve,
         zones,
-        overview: false,
-        punch: 1,
+        previous,
+        newHand: previous == null,
+        readablePx,
       });
-      setClip((current) => (sameInsets(current, shot.clip) ? current : shot.clip));
-      held.current = { hand: handKey, scale: shot.scale };
+      const shift = boardShift(room);
+      const none = { top: 0, right: 0, bottom: 0, left: 0 };
+      setClip((current) => (sameInsets(current, none) ? current : none));
+      held.current = { hand: handKey, scale: zoom };
       frozen.current = handOver;
-      setScale((current) => (Math.abs(current - shot.scale) < 0.01 ? current : shot.scale));
-      setPan((current) => (Math.abs(current.x - shot.shiftX) < 0.5 && Math.abs(current.y - shot.shiftY) < 0.5 ? current : { x: shot.shiftX, y: shot.shiftY }));
-      setCamMode(shot.mode);
+      setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
+      setPan((current) => (Math.abs(current.x - shift.x) < 1 && Math.abs(current.y - shift.y) < 1 ? current : shift));
+      setCamMode("fit");
       setOffscreen((current) =>
-        current.top === shot.off.top && current.right === shot.off.right && current.bottom === shot.off.bottom && current.left === shot.off.left
-          ? current
-          : shot.off,
+        current.top || current.right || current.bottom || current.left
+          ? { top: false, right: false, bottom: false, left: false }
+          : current,
       );
       if (!armOnce.current) {
         armOnce.current = true;

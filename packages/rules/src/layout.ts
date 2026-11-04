@@ -6,7 +6,8 @@ import { ARM_IDS, openEnds } from "./board.js";
  *
  * Coordinates are design pixels. The spinner sits at the origin. Every
  * client uses this same function, so a hand looks the same on every phone.
- * The view is the whole felt. It does not zoom or pan as tiles are added.
+ * The view stays centred on the spinner. A hand opens close up and eases
+ * outward as the chain grows. It does not pan, and it does not zoom back in.
  *
  * Each arm owns one quadrant and snakes inside it, the way a dominoes
  * table does: straight out to the edge of that quadrant, one corner, then
@@ -130,23 +131,22 @@ function withLimit<T>(limit: LayoutLimits, run: () => T): T {
   }
 }
 
-function tileSpan(tiles: readonly LayoutBox[]): { w: number; h: number } {
-  if (tiles.length === 0) return { w: 1, h: 1 };
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const tile of tiles) {
-    minX = Math.min(minX, tile.x);
-    minY = Math.min(minY, tile.y);
-    maxX = Math.max(maxX, tile.x + tile.w);
-    maxY = Math.max(maxY, tile.y + tile.h);
-  }
-  return { w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
-}
-
 function fitIn(span: { w: number; h: number }, limits: LayoutLimits): number {
   return Math.min(limits.width / span.w, limits.height / span.h);
+}
+
+/**
+ * Box centred on the spinner. The camera stays on the spinner, so a long
+ * arm on one side reserves the same room on the other side.
+ */
+function centeredSpan(tiles: readonly LayoutBox[]): { w: number; h: number } {
+  let halfW = TILE_SHORT / 2;
+  let halfH = TILE_LONG / 2;
+  for (const tile of tiles) {
+    halfW = Math.max(halfW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
+    halfH = Math.max(halfH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
+  }
+  return { w: halfW * 2, h: halfH * 2 };
 }
 
 export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
@@ -154,8 +154,8 @@ export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayo
   if (!limits || !Number.isFinite(limits.width) || !Number.isFinite(limits.height) || limits.width < 72 || limits.height < 72) {
     return phone;
   }
-  const phoneBox = tileSpan(phone.tiles);
-  // Already readable on this table. Keep the phone picture.
+  const phoneBox = centeredSpan(phone.tiles);
+  // Already readable on this table, with the spinner still in the middle.
   if (phoneBox.w <= limits.width + 1 && phoneBox.h <= limits.height + 1) return phone;
   const folded = withLimit(limits, () => layoutBoardNow(board));
   // A pile of covered tiles has a small box and would look "more readable".
@@ -164,7 +164,7 @@ export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayo
   if (layoutOverlaps(phone)) return folded;
   // Fold only when it actually leaves a larger tile. A turn that grows the
   // other side is worse than shrinking the straight chain a little.
-  return fitIn(tileSpan(folded.tiles), limits) > fitIn(phoneBox, limits) + 0.02 ? folded : phone;
+  return fitIn(centeredSpan(folded.tiles), limits) > fitIn(phoneBox, limits) + 0.02 ? folded : phone;
 }
 
 /** True when two faces share area. Touching edges do not count. */

@@ -1,4 +1,4 @@
-import { FIT_MARGIN, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
+import { FIT_MARGIN, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -41,6 +41,75 @@ export function fitScale(bounds: FeltSize, felt: FeltSize, cap: number): number 
 
 export function scaleForTiles(tiles: readonly LayoutBox[], felt: FeltSize, cap: number): number {
   return fitScale(chainBounds(tiles), felt, cap);
+}
+
+/**
+ * Box centred on the spinner that contains every tile. The two sides are
+ * always equal, so a long arm on one side does not drag the picture over.
+ */
+export function centeredChain(tiles: readonly LayoutBox[]): FeltSize {
+  let halfW = TILE_SHORT / 2;
+  let halfH = TILE_LONG / 2;
+  for (const tile of tiles) {
+    halfW = Math.max(halfW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
+    halfH = Math.max(halfH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
+  }
+  return { w: halfW * 2, h: halfH * 2 };
+}
+
+/**
+ * After a zoom, sit a little inside the fit so the next tile or two
+ * does not zoom again. 6% is about one short side on a phone.
+ */
+const ZOOM_AIR_RATIO = 0.94;
+/** Screen pixels of air between the chain and a badge or the felt edge. */
+const ZOOM_AIR = 4;
+
+function withAir(insets: AxisInsets, felt: FeltSize, air: number): AxisInsets {
+  const next = { ...insets };
+  if (felt.w - next.left - next.right > air * 2 + TILE_SHORT) {
+    next.left += air;
+    next.right += air;
+  }
+  if (felt.h - next.top - next.bottom > air * 2 + TILE_LONG) {
+    next.top += air;
+    next.bottom += air;
+  }
+  return next;
+}
+
+/**
+ * A hand opens zoomed in. It eases out only when the chain would leave the
+ * felt, only far enough to fit, and only ever outward. The picture stays
+ * centred on the spinner.
+ */
+export function handZoom(input: {
+  tiles: readonly LayoutBox[];
+  felt: FeltSize;
+  screenWidth: number;
+  reserve?: AxisInsets;
+  zones?: readonly ZoneRect[];
+  previous: number | null;
+  newHand: boolean;
+  /** Short side of a tile that should still be readable, in screen pixels. */
+  readablePx?: number;
+}): number {
+  const screen = Math.max(1, input.screenWidth);
+  const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const readablePx = input.readablePx ?? (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX);
+  const readable = Math.min(open, readablePx / TILE_SHORT);
+  const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
+  const needed = scaleForAxis(centeredChain(input.tiles), input.felt, insets);
+  const fit = Math.min(open, Number.isFinite(needed) && needed > 0 ? needed : open);
+  const settle = (exact: number) => {
+    if (exact + 1e-9 >= open) return open;
+    if (exact <= readable) return exact;
+    return Math.max(readable, exact * ZOOM_AIR_RATIO);
+  };
+  if (input.newHand || input.previous == null || !Number.isFinite(input.previous)) return settle(fit);
+  // Still on the felt. Do not zoom, and do not zoom back in.
+  if (input.previous <= fit + 1e-6) return input.previous;
+  return Math.min(input.previous, settle(fit));
 }
 
 /**
