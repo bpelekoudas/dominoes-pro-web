@@ -423,13 +423,8 @@ function straightFits(
     const horizontal = dir === "east" || dir === "west";
     const leavingDouble = horizontal ? prev.h > prev.w : prev.w > prev.h;
     if (horizontal && !isDouble && run >= 1 && !leavingDouble) return false;
-    // Leave a tile of felt at the end of a vertical lane so the snake can
-    // turn along the edge instead of running off it.
-    if (!horizontal && !isDouble && !leavingDouble) {
-      const limit = activeLimit.height / 2;
-      const leading = dir === "south" ? box.y + box.h : -box.y;
-      if (leading > limit - TILE_LONG) return false;
-    }
+    // The vertical lane runs until the tile itself leaves the felt. Turning
+    // earlier is what hooked the west arm back into the centre column.
     return true;
   }
   if (!isDouble) {
@@ -461,35 +456,27 @@ function portraitFold(
   center: LayoutBox,
   placed: readonly LayoutBox[],
 ): StepResult | null {
-  if (portraitSide(arm) && cursor.row === 0) return null;
+  if (!portraitSide(arm) || cursor.row === 0) return null;
   const from = cursor.dir;
-  const order: LayoutDir[] = from === "north"
-    ? ["east", "west"]
-    : from === "south"
-      ? ["west", "east"]
-      : from === "east"
-        ? ["south", "north"]
-        : ["north", "south"];
-  const gap = TILE_SHORT / 2 + TILE_GAP;
+  // A side lane snakes away from the centre column, never back into it.
+  // West going up turns further left; east going down turns further right.
+  const order: LayoutDir[] = portraitSide(arm) && (from === "north" || from === "south")
+    ? [arm]
+    : from === "north"
+      ? ["east", "west"]
+      : from === "south"
+        ? ["west", "east"]
+        : from === "east"
+          ? ["south", "north"]
+          : ["north", "south"];
   const holds = (box: LayoutBox) => {
     if (overlapsPlaced(box, placed) || boxesOverlap(box, cursor.box) || !insideActive(box)) return false;
-    // Stay on this arm's side of the spinner. The inner column may sit in the
-    // gap beside the centre tiles; it may not cross onto them.
-    if (arm === "west") return box.x + box.w <= -gap + 0.5;
-    if (arm === "east") return box.x >= gap - 0.5;
+    if (arm === "west") return box.x + box.w <= -laneInner() + 0.5;
+    if (arm === "east") return box.x >= laneInner() - 0.5;
     if (arm === "north") return box.y + box.h <= center.y - TILE_GAP + 0.5;
     return box.y >= center.y + center.h + TILE_GAP - 0.5;
   };
-  const turnBoxes = (to: LayoutDir): LayoutBox[] => {
-    const boxes = [bendBox(cursor.box, from, to, false)];
-    const horizontal = to === "east" || to === "west";
-    if ((from === "north" || from === "south") && horizontal) {
-      const y = from === "north" ? cursor.box.y - TILE_GAP - TILE_SHORT : cursor.box.y + cursor.box.h + TILE_GAP;
-      const x = to === "west" ? cursor.box.x + cursor.box.w - TILE_LONG : cursor.box.x;
-      boxes.push({ x, y, w: TILE_LONG, h: TILE_SHORT });
-    }
-    return boxes;
-  };
+  const turnBoxes = (to: LayoutDir): LayoutBox[] => [bendBox(cursor.box, from, to, false)];
   for (const to of order) {
     if (arm === "north" && to === "west") continue;
     if (arm === "south" && to === "east") continue;
@@ -665,44 +652,8 @@ function snakeStep(
         column: false,
       };
     }
-    // A double stays on the tile's axis. Hanging off the felt is better than
-    // parking it against the long side. It still may not cross into another arm.
-    if (isPortrait() && !staysOnSide(box, arm, center, cursor.row > 0)) {
-      const lane = shiftDir(arm);
-      for (const way of [lane, opposite(lane)] as LayoutDir[]) {
-        const turned = straightBox(cursor.box, way, true);
-        if (staysOnSide(turned, arm, center, true) && free(turned)) {
-          return {
-            box: turned,
-            dir: way,
-            row: cursor.row,
-            line: acrossCenter(turned, arm),
-            run: cursor.run + 1,
-            opening: false,
-            fromDouble: true,
-            column: false,
-          };
-        }
-      }
-    }
-    if (isPortrait() && !runInside(box, dir)) {
-      const lane = shiftDir(arm);
-      for (const way of [lane, opposite(lane), dir] as LayoutDir[]) {
-        const turned = straightBox(cursor.box, way, true);
-        if (free(turned) && runInside(turned, way) && staysOnSide(turned, arm, center, cursor.row > 0)) {
-          return {
-            box: turned,
-            dir: way,
-            row: cursor.row,
-            line: acrossCenter(turned, arm),
-            run: cursor.run + 1,
-            opening: false,
-            fromDouble: way !== dir,
-            column: false,
-          };
-        }
-      }
-    }
+    // A double stays on the tile's axis, even when that hangs off the felt.
+    // Parking it to one side is the 56px miss and the overlapping return.
     return { box, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
   if (dir !== travelDir(arm, cursor.row) && !isPortrait()) {
@@ -770,71 +721,38 @@ function snakeStep(
     && runInside(candidate, arm);
   // Off a double, leave from its middle when that stays in the arm's side.
   // On a tall phone the center arms stay in their column instead of stepping into a side lane.
+  const centreArm = arm === "north" || arm === "south";
   const onAxisBox = isPortrait()
     && onDouble
     && !overlapsPlaced(centered, placed)
     && !boxesOverlap(centered, cursor.box)
-    && centreInside(centered);
+    && centreInside(centered)
+    && !(centreArm && shiftDir(arm) !== dir && !inCenterColumn(centered));
   const chosen = onAxisBox ? centered : legal(ended) ? ended : near && legal(near) ? near : null;
   if (onAxisBox) {
+    const turning = shiftDir(arm) !== dir;
     return {
       box: centered,
       dir: shiftDir(arm),
-      row: cursor.row,
-      line: acrossCenter(centered, arm),
-      run: cursor.run + 1,
+      row: turning && portraitSide(arm) ? cursor.row + 1 : cursor.row,
+      line: portraitSide(arm) ? centered.x + centered.w / 2 : acrossCenter(centered, arm),
+      run: turning ? 1 : cursor.run + 1,
       opening: false,
       fromDouble: false,
       column: false,
     };
   }
-  if (!chosen && isPortrait() && !onDouble) {
-    const folded = portraitFold(cursor, arm, center, placed);
-    if (folded) return folded;
-    // No open column. One more step on this line, then the next tile tries again.
+  if (!chosen && isPortrait()) {
+    if (!onDouble) {
+      const folded = portraitFold(cursor, arm, center, placed);
+      if (folded) return folded;
+    }
+    // Stay on this line, on the same axis. Leaving the felt zooms out.
+    // Turning toward the centre, or relabeling this step, is what overlapped.
     const stuck = straightBox(cursor.box, dir, false);
-    const cx = stuck.x + stuck.w / 2;
-    const cy = stuck.y + stuck.h / 2;
-    const centreIn = Math.abs(cx) <= activeLimit.width / 2 && Math.abs(cy) <= activeLimit.height / 2;
-    if (
-      centreIn
-      && !overlapsPlaced(stuck, placed)
-      && !boxesOverlap(stuck, cursor.box)
-      && staysOnSide(stuck, arm, center, true)
-    ) {
-      return { box: stuck, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
-    }
+    return { box: stuck, dir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
   }
-  let box = chosen ?? centered;
-  if (overlapsPlaced(box, placed) || boxesOverlap(box, cursor.box)) {
-    const straight = straightBox(cursor.box, dir, false);
-    if (!overlapsPlaced(straight, placed) && !boxesOverlap(straight, cursor.box)) box = straight;
-  }
-  if (isPortrait() && (chosen == null || overlapsPlaced(box, placed) || !runInside(box, dir))) {
-    const dirs: LayoutDir[] = dir === "north" || dir === "south"
-      ? [dir === "north" ? "east" : "west", dir === "north" ? "west" : "east"]
-      : [cursor.box.y < 0 ? "south" : "north", cursor.box.y < 0 ? "north" : "south"];
-    const parked = dirs
-      .map((way) => ({ way, box: straightBox(cursor.box, way, false) }))
-      .find((candidate) =>
-        !overlapsPlaced(candidate.box, placed)
-        && !boxesOverlap(candidate.box, cursor.box)
-        && runInside(candidate.box, candidate.way)
-        && staysOnSide(candidate.box, arm, center, true)
-        && inArmRegion(candidate.box, arm, cursor.row, center));
-    if (parked) {
-      return {
-        box: parked.box,
-        dir: parked.way,
-        row: cursor.row,
-        line: acrossCenter(parked.box, arm),
-        run: cursor.run + 1,
-        opening: false,
-        fromDouble: false,
-        column: false,
-      };
-    }
-  }
+  const box = chosen ?? centered;
   const nextRow = cursor.row + 1;
   let nextDir = shiftDir(arm);
   let nextLine = cursor.line + rowSign(arm) * ROW_PITCH;
@@ -850,6 +768,11 @@ function snakeStep(
       nextLine = arm === "west" ? box.x + TILE_SHORT / 2 : box.x + box.w - TILE_SHORT / 2;
       opening = true;
     }
+  } else if (isPortrait()) {
+    // North and south stay in the centre column. A return row would run into a side lane.
+    nextDir = arm;
+    nextLine = acrossCenter(box, arm);
+    opening = false;
   }
   if (isPortrait() && !runInside(box, nextDir)) {
     const straight = straightBox(cursor.box, dir, false);
