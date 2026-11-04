@@ -130,8 +130,8 @@ export function Table({
   }, [board, limits]);
   const frame = useMemo(() => {
     if (!layout) return null;
-    // The stage is the whole felt, centred on the spinner. Tile positions
-    // stay put. Only the scale changes, and it only eases outward.
+    // The stage stays centred on the spinner so a tile's place does not jump.
+    // The camera shift moves the whole chain's box into the safe felt.
     const w = limits?.width ?? PHONE_WIDTH;
     const h = limits?.height ?? PHONE_HEIGHT;
     return { x: -w / 2, y: -h / 2, w, h };
