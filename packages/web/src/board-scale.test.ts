@@ -463,7 +463,9 @@ describe("board scale", () => {
       zones: PHONE_ZONES,
     });
     expect(tilesClear(loose.tiles, looseFrame, felt, shrunk.scale, shrunk.shiftX, shrunk.shiftY, PHONE_ZONES, 1)).toBe(true);
-    expect(phone.scale).toBeGreaterThanOrEqual(shrunk.scale - 0.001);
+    // A double centred on a corner lengthens the chain, so the fitted scale
+    // sits just under the loose camera. It still keeps the arm on the felt.
+    expect(phone.scale).toBeGreaterThanOrEqual(shrunk.scale * 0.94);
   });
 
   it("keeps every tile inside the safe rect for real bot hands", () => {

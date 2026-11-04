@@ -159,10 +159,43 @@ function oppositeOf(arm: string): string {
 }
 
 /**
- * An arm leaves along its own direction and snakes in its quadrant:
- * out, one turn, back toward the spinner, one turn, out again.
- * Every turn is 90 degrees. The arm never turns toward the other three.
+ * An end meets an end, or an end meets the middle of a double's long side.
+ * Two long sides never lie against each other.
  */
+function assertEndToEnd(board: BoardState, layout: BoardLayout, label: string): void {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  const center = board.center ? byId.get(board.center.tileId) : undefined;
+  const onAxis = (host: LayoutBox, point: { x: number; y: number }) => {
+    if (host.h >= host.w) return Math.abs(point.x - (host.x + host.w / 2)) < 1.5;
+    return Math.abs(point.y - (host.y + host.h / 2)) < 1.5;
+  };
+  const longAxis = (box: LayoutBox) => (box.w > box.h ? "y" : "x");
+  const centerOf = (box: LayoutBox) => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+  for (const arm of ARM_IDS) {
+    const chain = board.arms[arm];
+    for (let index = 0; index < chain.length; index += 1) {
+      const tile = chain[index]!;
+      const placed = byId.get(tile.tileId);
+      const parent = index === 0 ? center : byId.get(chain[index - 1]!.tileId);
+      expect(placed && parent, `${label} ${tile.tileId}`).toBeTruthy();
+      if (!placed || !parent) continue;
+      const join = sharedEdge(parent, placed);
+      expect(Math.abs(join.gap - TILE_GAP), `${label} ${parent.tileId}>${tile.tileId} gap ${join.gap}`).toBeLessThan(0.5);
+      expect(join.along, `${label} ${parent.tileId}>${tile.tileId} along ${join.along}`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+      const gapX = Math.max(parent.x - (placed.x + placed.w), placed.x - (parent.x + parent.w), 0);
+      const gapY = Math.max(parent.y - (placed.y + placed.h), placed.y - (parent.y + parent.h), 0);
+      const joinAxis = gapY === 0 && gapX > 0 ? "x" : gapX === 0 && gapY > 0 ? "y" : "none";
+      const parentDouble = index > 0 && chain[index - 1]!.low === chain[index - 1]!.high;
+      const tileDouble = tile.low === tile.high;
+      if (tileDouble) expect(onAxis(parent, centerOf(placed)), `${label} ${tile.tileId} off ${parent.tileId}`).toBe(true);
+      if (parentDouble) expect(onAxis(placed, centerOf(parent)), `${label} ${parent.tileId} off ${tile.tileId}`).toBe(true);
+      if (!parentDouble && !tileDouble && joinAxis === longAxis(parent) && joinAxis === longAxis(placed)) {
+        throw new Error(`${label} ${parent.tileId}>${tile.tileId} side to side`);
+      }
+    }
+  }
+}
+
 /** West left, north up, east right, south down. Corners are a single tile. */
 function assertRegionSnake(board: BoardState, layout: BoardLayout, label: string): void {
   const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
@@ -206,7 +239,16 @@ function assertRegionSnake(board: BoardState, layout: BoardLayout, label: string
           expect(center, `${label} ${tile.tileId} centred`).toBeCloseTo(prevCenter, 5);
         }
       }
-      if (placed.direction === shift) {
+      const previous = index > 0 ? byId.get(chain[index - 1]!.tileId) : undefined;
+      const colinear = previous
+        && previous.direction === placed.direction
+        && (placed.w > placed.h
+          ? Math.abs(previous.y + previous.h / 2 - (placed.y + placed.h / 2)) < 1.5
+          : Math.abs(previous.x + previous.w / 2 - (placed.x + placed.w / 2)) < 1.5);
+      if (tile.low === tile.high || colinear) {
+        // A double on the corner, or the straight run off it, is not a second corner.
+        if (tile.low === tile.high) cornerRun = 0;
+      } else if (placed.direction === shift) {
         cornerRun += 1;
         expect(cornerRun, `${label} ${arm} stacked corners`).toBe(1);
       } else {
@@ -672,7 +714,9 @@ describe("board layout", () => {
     const phones = [
       // Felt at the target tile size, inset by one short side so a corner
       // past the straight run still lands on the felt.
-      { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 340, h: 680 }, tile: 30 },
+      // A double centred on a corner sticks out by half a short side, so the
+      // chain is a little wider than the straight snake. 28px still fills the felt.
+      { name: "tall phone", limits: { width: 288, height: 672 }, felt: { w: 360, h: 744 }, safe: { w: 360, h: 744 }, tile: 26 },
       { name: "fold", limits: { width: 504, height: 428 }, felt: { w: 576, h: 500 }, safe: { w: 640, h: 556 }, tile: 40 },
     ];
     for (const phone of phones) {
@@ -717,6 +761,7 @@ describe("board layout", () => {
           if (count < 16) continue;
           const layout = layoutBoard(board);
           assertRegionSnake(board, layout, `region ${players} ${seed}`);
+          assertEndToEnd(board, layout, `join ${players} ${seed}`);
           checked += 1;
         }
       }

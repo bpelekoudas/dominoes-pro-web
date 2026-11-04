@@ -4,7 +4,7 @@
   but it does not allow the font inside a website, app, or game.
   Bebas Neue is the closest free condensed all-caps face. Body is Red Hat Text.
   Default tile skin is ivory: black pips stay readable on a phone, with a red
-  bar and a gold spinner ring. data-skin marks the hook for a later skin.
+  bar. data-skin marks the hook for a later skin.
 */
 :root {
   color-scheme: dark;
@@ -1078,8 +1078,10 @@ input {
 .ghost-slot .domino.horizontal,
 .arrive-tile .domino,
 .arrive-tile .domino.horizontal {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
   min-width: 0;
   min-height: 0;
 }
@@ -1167,7 +1169,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
     repeating-linear-gradient(-32deg, #141414, #141414 5px, #2a1517 5px, #2a1517 6px);
   box-shadow: inset 0 0 0 1px rgba(239, 239, 239, 0.28);
 }
-.domino.spinner { box-shadow: inset 0 0 0 2px var(--gold), 0 1px 2px rgba(0, 0, 0, 0.55); }
+.domino.spinner { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.55); }
 .half {
   position: relative;
   flex: 1;
