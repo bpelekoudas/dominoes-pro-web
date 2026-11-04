@@ -86,6 +86,64 @@ function insideLimit(box: LayoutBox, limit?: { width: number; height: number }):
   return box.x >= -limit.width / 2 && box.y >= -limit.height / 2 && box.x + box.w <= limit.width / 2 && box.y + box.h <= limit.height / 2;
 }
 
+/** A double slid off its line, or an arm turned twice in a row, or turned while straight ahead fit. */
+function lineFault(board: BoardState, layout: BoardLayout, limit?: { width: number; height: number }): string | null {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  const center = board.center ? byId.get(board.center.tileId) : undefined;
+  if (!center) return null;
+  for (const arm of ARM_IDS) {
+    let parent = center;
+    let previousDirection: string | null = null;
+    const chain = board.arms[arm];
+    for (let index = 0; index < chain.length; index += 1) {
+      const step = chain[index]!;
+      const tile = byId.get(step.tileId);
+      if (!tile) return null;
+      const isDouble = step.low === step.high;
+      const horizontal = tile.direction === "east" || tile.direction === "west";
+      const axis = horizontal
+        ? tile.y + tile.h / 2 - (parent.y + parent.h / 2)
+        : tile.x + tile.w / 2 - (parent.x + parent.w / 2);
+      if (isDouble && Math.abs(axis) > 0.5) return `${arm} double ${step.tileId} off ${axis.toFixed(1)}`;
+      const previous = index > 0 ? chain[index - 1]! : null;
+      if (previous && (isDouble || previous.low === previous.high) && tile.direction !== parent.direction) {
+        return `${arm} ${previous.tileId}->${step.tileId} bent on a double`;
+      }
+      if (previous && previous.low === previous.high && Math.abs(axis) > 0.5) {
+        return `${arm} ${step.tileId} left the double by ${axis.toFixed(1)}`;
+      }
+      if (parent.arm !== null && tile.direction !== parent.direction) {
+        const ahead = straightBox(parent, parent.direction, isDouble);
+        const blocked = !insidePhone(ahead)
+          || (limit ? !insideLimit(ahead, limit) : false)
+          || layout.tiles.some((other) => other !== parent && other !== tile && boxesOverlap(ahead, other));
+        let locked = isDouble;
+        let cursor = ahead;
+        let doubleNeedsRoom = false;
+        for (let look = index + 1; look < chain.length && !doubleNeedsRoom; look += 1) {
+          const lookTile = chain[look]!;
+          const doubled = lookTile.low === lookTile.high;
+          if (!locked && !doubled) break;
+          const stepBox = straightBox(cursor, parent.direction, doubled);
+          const miss = !insidePhone(stepBox)
+            || (limit ? !insideLimit(stepBox, limit) : false)
+            || layout.tiles.some((other) => other !== parent && other !== tile && boxesOverlap(stepBox, other));
+          if (miss) doubleNeedsRoom = true;
+          locked = doubled;
+          cursor = stepBox;
+        }
+        const consecutive = previousDirection !== null && parent.direction !== previousDirection;
+        if (!blocked && !doubleNeedsRoom) {
+          return `${arm} ${step.tileId} ${consecutive ? "stair-step" : "turned while straight was open"}`;
+        }
+      }
+      previousDirection = parent.arm === null ? null : parent.direction;
+      parent = tile;
+    }
+  }
+  return null;
+}
+
 /** A step moved back toward the spinner even though straight ahead was open. */
 function inwardWhileOpen(board: BoardState, layout: BoardLayout, limit?: { width: number; height: number }): string | null {
   const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
@@ -306,20 +364,15 @@ function assertDoublesCentered(board: BoardState, layout: BoardLayout, label: st
       const prevDouble = prev.low === prev.high;
       if (prevDouble) expectJoinedToDouble(prevPlaced, placed, prevPlaced.direction, `${label} ${prev.tileId}`, layout, chain[i + 1] ?? null);
       if (placed.direction !== prevPlaced.direction) {
-        if (isDouble) {
-          const ahead = straightBox(prevPlaced, prevPlaced.direction, true);
-          const spinner = layout.tiles.find((tile) => tile.arm === null);
-          const pad = spinner
-            ? { x: spinner.x - TILE_SHORT, y: spinner.y - TILE_SHORT, w: spinner.w + TILE_SHORT * 2, h: spinner.h + TILE_SHORT * 2 }
-            : null;
-          const blocked = !insidePhone(ahead)
-            || (pad ? boxesOverlap(ahead, pad) : false)
-            || layout.tiles.some((other) => other !== prevPlaced && other !== placed && boxesOverlap(ahead, other));
-          expect(blocked, `${label} bent on double ${placed.tileId} while the line was open`).toBe(true);
-        }
-        if (prevDouble) {
-          expect(leftDoubleForCause(prevPlaced, placed, chain[i + 1] ?? null, layout), `${label} bent off double ${prev.tileId} while the way was open`).toBe(true);
-        }
+        expect(isDouble, `${label} bent on double ${placed.tileId}`).toBe(false);
+        expect(prevDouble, `${label} bent off double ${prev.tileId}`).toBe(false);
+      }
+      if (isDouble || prevDouble) {
+        const horizontal = placed.direction === "east" || placed.direction === "west";
+        const delta = horizontal
+          ? placed.y + placed.h / 2 - (prevPlaced.y + prevPlaced.h / 2)
+          : placed.x + placed.w / 2 - (prevPlaced.x + prevPlaced.w / 2);
+        expect(Math.abs(delta), `${label} ${placed.tileId} off the line by ${delta}`).toBeLessThanOrEqual(0.5);
       }
     }
   }
@@ -920,6 +973,8 @@ describe("board layout", () => {
           if (layoutOverlaps(layout)) throw new Error(`seed ${seed} ${count} tiles ${where}`);
           const inward = inwardWhileOpen(board, layout, limit);
           if (inward) throw new Error(`seed ${seed} ${count} ${where} turned back: ${inward}`);
+          const fault = lineFault(board, layout, limit);
+          if (fault) throw new Error(`seed ${seed} ${count} ${where} ${fault}`);
         }
         const phone = layoutBoard(board, { width: 280, height: 780 });
         const shot = followCamera({
