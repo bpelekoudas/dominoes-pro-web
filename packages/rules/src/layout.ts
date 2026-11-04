@@ -9,23 +9,15 @@ import { ARM_IDS, openEnds } from "./board.js";
  * The view scales the picture into the felt.
  *
  * The felt is tall, matching the board area on a phone once the header is
- * slim. An arm leaves the spinner straight, in its own quadrant. It keeps
- * that direction for a short run, then turns while there is still open
- * felt beside it. A straight run is capped at about six tiles, which is
- * the shorter side of the phone in tile-lengths. On a narrower table the
- * east and west arms turn after the one tile that fits, and climb the
- * tall felt, before the picture has to shrink. The turn goes to the
- * side whose snake keeps the board's box smaller, so the view can stay
- * zoomed in. A side that only ties on scale stays in the arm's quadrant.
- * Width is 416 so the tile forced straight off an early double still
- * lands inside: spinner, one tile, a double, then a full tile.
- *
- * The first bend at the edge of the phone still prefers the clockwise
- * side (up turns right, right turns down, down turns left, left turns
- * up) unless the other side is clearly emptier. The chain does not fold
- * onto another arm or onto itself. When the next straight step would
- * overlap another arm or the spinner row, the chain bends again and
- * wraps away. A double, and the tile centred on it, never bend.
+ * slim. Each arm leaves the spinner and keeps going straight toward the
+ * open felt. It turns only when the next tile would leave the felt or
+ * land on another arm, and it takes the turn with the longest clear run.
+ * A turn that curls back toward the spinner is used only along the felt
+ * edge, where the snake has to follow the table. A double stays on its
+ * line, so the tile before a double turns early when the double and the
+ * tile after it would not both fit. Width is 416 so the tile forced
+ * straight off an early double still lands inside: spinner, one tile,
+ * a double, then a full tile.
  *
  * A double sits crosswise to the chain. The next tile continues in the
  * same direction, its short end centred on the double's long side.
@@ -236,12 +228,9 @@ function layoutBoardNow(board: BoardState, pass: "route" | "clear" = "route"): B
       releaseHold(arm, occupants);
       const upcoming = chain.slice(index);
       const tile = upcoming[0]!;
-      const routed = pass === "clear"
-        ? null
-        : chooseStep(tile, upcoming, cursor, arm, occupants, centre);
-      const choice = routed && !coversPlaced(routed.box, occupants, cursor.box)
-        ? routed
-        : clearStep(tile, cursor, occupants);
+      const choice = pass === "clear"
+        ? clearStep(tile, cursor, occupants)
+        : outwardStep(tile, cursor, occupants, upcoming);
       const placed = toTile(tile, choice.box, choice.dir, arm);
       tiles.push(placed);
       occupants.push({ box: placed, arm });
@@ -271,7 +260,7 @@ function layoutBoardNow(board: BoardState, pass: "route" | "clear" = "route"): B
   for (const end of ends) {
     const cursor = cursors.get(end.id);
     previews[end.id] = cursor
-      ? chooseStep(PREVIEW_TILE, [PREVIEW_TILE], cursor, end.id, occupants, centre).box
+      ? (pass === "clear" ? clearStep(PREVIEW_TILE, cursor, occupants) : outwardStep(PREVIEW_TILE, cursor, occupants, [PREVIEW_TILE])).box
       : straightBox(center, end.id, false);
   }
 
@@ -318,6 +307,168 @@ function sideAttachments(parent: LayoutBox, dir: LayoutDir, isDouble: boolean): 
   return boxes;
 }
 
+/**
+ * Keep walking away from the spinner. Turn only at the felt edge or another
+ * tile, and turn into the side with the most open felt. Curling back toward
+ * the middle is the last resort, and only when every outward square is taken.
+ */
+function outwardStep(
+  tile: OrientedTile,
+  cursor: Cursor,
+  occupants: readonly Occupant[],
+  upcoming: readonly OrientedTile[],
+): { box: LayoutBox; dir: LayoutDir; bends: number } {
+  const isDouble = tile.low === tile.high;
+  const blocks = placedBoxes(occupants).filter((box) => !sameBox(box, cursor.box));
+  const covers = occupants.filter((item) => item.reserved).map((item) => item.box);
+  const spinner = occupants.find((item) => item.arm === null)?.box;
+  const centre = spinner ? centreRegion(spinner) : null;
+  const hits = (box: LayoutBox) => overlapsAny(box, blocks) || overlapsAny(box, covers);
+  const cramped = (box: LayoutBox) => blocks.some((other) => boxGap(box, other) < ARM_GAP);
+  const free = (box: LayoutBox) => insideHard(box) && !hits(box) && !cramped(box);
+  const straight = straightBox(cursor.box, cursor.dir, isDouble);
+  // A double stays on the line it is already on. Turning the double itself
+  // makes the corner look broken, so the previous tile turns before it.
+  if (isDouble) {
+    if (insideActive(straight) && !hits(straight) && !cramped(straight) && !(centre && boxesOverlap(straight, centre))) {
+      return { box: straight, dir: cursor.dir, bends: cursor.bends };
+    }
+    const slides = sideAttachments(cursor.box, cursor.dir, true).filter((box) => insideHard(box) && !hits(box) && !(centre && boxesOverlap(box, centre)));
+    const roomy = slides.find((box) => insideActive(box) && !cramped(box));
+    if (roomy) return { box: roomy, dir: cursor.dir, bends: cursor.bends };
+    const fitted = slides.find((box) => insideActive(box));
+    if (fitted) return { box: fitted, dir: cursor.dir, bends: cursor.bends };
+    if (slides[0]) return { box: slides[0], dir: cursor.dir, bends: cursor.bends };
+  } else if (cursor.prevDouble && insideActive(straight) && !hits(straight) && !(centre && boxesOverlap(straight, centre))) {
+    // Stay centred on the double. The tile before the double picked a line where this fits.
+    return { box: straight, dir: cursor.dir, bends: cursor.bends };
+  } else if (free(straight) && insideActive(straight) && clearRun(straight, cursor.dir, upcoming, blocks, covers, centre, true)) {
+    return { box: straight, dir: cursor.dir, bends: cursor.bends };
+  }
+  const airy = pickTurn(cursor, isDouble, blocks, covers, centre, upcoming, "roomy");
+  if (airy) return { box: airy.box, dir: airy.dir, bends: cursor.bends + 1 };
+  if (!isDouble && insideActive(straight) && !hits(straight) && clearRun(straight, cursor.dir, upcoming, blocks, covers, centre, false)) {
+    return { box: straight, dir: cursor.dir, bends: cursor.bends };
+  }
+  const fitted = pickTurn(cursor, isDouble, blocks, covers, centre, upcoming, "fit");
+  if (fitted) return { box: fitted.box, dir: fitted.dir, bends: cursor.bends + 1 };
+  const turn = pickTurn(cursor, isDouble, blocks, covers, centre, upcoming, "any");
+  if (turn) return { box: turn.box, dir: turn.dir, bends: cursor.bends + 1 };
+  for (const box of sideAttachments(cursor.box, cursor.dir, isDouble)) {
+    if (free(box) && insideActive(box)) return { box, dir: cursor.dir, bends: cursor.bends };
+  }
+  if (insideHard(straight) && !hits(straight) && (isDouble || cursor.prevDouble)) {
+    return { box: straight, dir: cursor.dir, bends: cursor.bends };
+  }
+  for (const dir of sideTurns(cursor.dir)) {
+    for (const box of sideAttachments(cursor.box, dir, isDouble)) {
+      if (!insideActive(box) || hits(box) || cramped(box)) continue;
+      if (centre && boxesOverlap(box, centre)) continue;
+      if (headsIn(cursor.box, box) && !nearActiveEdge(box)) continue;
+      return { box, dir, bends: cursor.bends + 1 };
+    }
+  }
+  const fallback = attachClear(cursor.box, isDouble, cursor.dir, occupants);
+  if (fallback) {
+    return {
+      box: fallback.box,
+      dir: fallback.dir,
+      bends: fallback.dir === cursor.dir ? cursor.bends : cursor.bends + 1,
+    };
+  }
+  return { box: straight, dir: cursor.dir, bends: cursor.bends };
+}
+
+/**
+ * A double cannot turn, and the tile centred on it has to stay straight.
+ * Keep going only when that locked run still fits on the felt. A later
+ * ordinary tile can turn on its own, so it does not force an early bend.
+ */
+function clearRun(
+  box: LayoutBox,
+  dir: LayoutDir,
+  upcoming: readonly OrientedTile[],
+  blocks: readonly LayoutBox[],
+  covers: readonly LayoutBox[],
+  centre: LayoutBox | null,
+  roomy: boolean,
+): boolean {
+  if (upcoming.length <= 1) return true;
+  const steps = [upcoming[1]!];
+  // A double cannot turn, and the tile after it has to stay on that line.
+  if (steps[0]!.low === steps[0]!.high && upcoming[2]) steps.push(upcoming[2]!);
+  let prev = box;
+  for (const stepTile of steps) {
+    const step = straightBox(prev, dir, stepTile.low === stepTile.high);
+    if (!insideActive(step) || overlapsAny(step, blocks) || overlapsAny(step, covers)) return false;
+    if (centre && boxesOverlap(step, centre)) return false;
+    if (roomy && blocks.some((other) => boxGap(step, other) < ARM_GAP)) return false;
+    prev = step;
+  }
+  return true;
+}
+
+/**
+ * The 90 degree turn with the longest clear run. A turn back toward the
+ * spinner is kept only when the chain is already against the felt edge.
+ */
+function pickTurn(
+  cursor: Cursor,
+  isDouble: boolean,
+  blocks: readonly LayoutBox[],
+  covers: readonly LayoutBox[],
+  centre: LayoutBox | null,
+  upcoming: readonly OrientedTile[],
+  run: "roomy" | "fit" | "any",
+): { box: LayoutBox; dir: LayoutDir; room: number } | null {
+  for (const needRoom of [true, false]) {
+    let best: { box: LayoutBox; dir: LayoutDir; room: number } | null = null;
+    for (const dir of sideTurns(cursor.dir)) {
+      const corner = bendBox(cursor.box, cursor.dir, dir, isDouble);
+      if (!insideActive(corner) || overlapsAny(corner, blocks) || overlapsAny(corner, covers)) continue;
+      if (centre && boxesOverlap(corner, centre)) continue;
+      if (needRoom && blocks.some((other) => boxGap(corner, other) < ARM_GAP)) continue;
+      if (run === "roomy" && !clearRun(corner, dir, upcoming, blocks, covers, centre, true)) continue;
+      if (run === "fit" && !clearRun(corner, dir, upcoming, blocks, covers, centre, false)) continue;
+      if (headsIn(cursor.box, corner) && !nearActiveEdge(cursor.box) && !nearActiveEdge(corner)) continue;
+      const room = openAhead(corner, dir, blocks);
+      if (!best || room > best.room) best = { box: corner, dir, room };
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+function nearActiveEdge(box: LayoutBox): boolean {
+  const margin = TILE_LONG + TILE_GAP;
+  const halfW = activeLimit.width / 2;
+  const halfH = activeLimit.height / 2;
+  return box.x <= -halfW + margin
+    || box.y <= -halfH + margin
+    || box.x + box.w >= halfW - margin
+    || box.y + box.h >= halfH - margin;
+}
+
+/** The step moved back toward the spinner, not out into open felt. */
+function headsIn(parent: LayoutBox, child: LayoutBox): boolean {
+  const parentDistance = Math.hypot(parent.x + parent.w / 2, parent.y + parent.h / 2);
+  const childDistance = Math.hypot(child.x + child.w / 2, child.y + child.h / 2);
+  return childDistance + TILE_SHORT * 0.5 < parentDistance;
+}
+
+/** How many clear tiles fit straight ahead inside the felt. Farther from the spinner wins a tie. */
+function openAhead(box: LayoutBox, dir: LayoutDir, blocks: readonly LayoutBox[]): number {
+  let prev = box;
+  let steps = 0;
+  for (let index = 0; index < 6; index += 1) {
+    const next = straightBox(prev, dir, false);
+    if (!insideActive(next) || overlapsAny(next, blocks)) break;
+    steps += 1;
+    prev = next;
+  }
+  return steps * 1000 + Math.hypot(box.x + box.w / 2, box.y + box.h / 2);
+}
+
 /** Straight ahead, then either turn, then back. Never a square that covers a tile. */
 function attachClear(
   parent: LayoutBox,
@@ -325,14 +476,18 @@ function attachClear(
   prefer: LayoutDir,
   occupants: readonly Occupant[],
 ): { box: LayoutBox; dir: LayoutDir } | null {
-  const blocks = placedBoxes(occupants).filter((box) => !sameBox(box, parent));
+  const blocks = occupants.filter((item) => !sameBox(item.box, parent)).map((item) => item.box);
   const order: LayoutDir[] = [prefer, ...sideTurns(prefer), opposite(prefer)];
-  for (const doubled of [isDouble, !isDouble]) {
-    for (const dir of order) {
-      for (const box of sideAttachments(parent, dir, doubled)) {
-        if (!insideHard(box)) continue;
-        if (overlapsAny(box, blocks)) continue;
-        return { box, dir };
+  const roomy = (box: LayoutBox) => blocks.every((other) => boxGap(box, other) >= ARM_GAP);
+  for (const needRoom of [true, false]) {
+    for (const doubled of [isDouble, !isDouble]) {
+      for (const dir of order) {
+        for (const box of sideAttachments(parent, dir, doubled)) {
+          if (!insideHard(box)) continue;
+          if (overlapsAny(box, blocks)) continue;
+          if (needRoom && !roomy(box)) continue;
+          return { box, dir };
+        }
       }
     }
   }

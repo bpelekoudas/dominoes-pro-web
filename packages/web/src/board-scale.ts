@@ -277,6 +277,8 @@ export function followCamera(input: {
   const zones = input.zones ?? [];
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const floorPx = screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+  const floor = floorPx / TILE_SHORT;
   const insets = fitInsets(input.felt, zones, input.reserve);
   const room = scaleForAxis(input.frame, input.felt, insets);
   // A pixel of air so a rounded clip or the felt edge never shaves a pip.
@@ -286,9 +288,16 @@ export function followCamera(input: {
   const punched = applyPunch(fitted, open, input.punch, input.overview === true);
   if (punched <= room + 1e-6) fitted = punched;
 
-  // Show every tile whole. Clipping the picture sliced a turned arm into slivers.
-  const placed = placeTarget(input.frame, input.frame, input.felt, insets, fitted);
-  return { ...finish(input.frame, input.felt, fitted, placed.ox, placed.oy, NO_INSET, "fit"), fitScale: fitted };
+  // Double-tap, and the hand-over sheet, show the whole chain.
+  if (input.fitAll || input.overview || fitted + 1e-6 >= floor) {
+    const placed = placeTarget(input.frame, input.frame, input.felt, insets, fitted);
+    return { ...finish(input.frame, input.felt, fitted, placed.ox, placed.oy, NO_INSET, "fit"), fitScale: fitted };
+  }
+  // Hold a readable tile. No inset clip: that cut vertical arms into slivers.
+  // Anything past the felt is reached by a drag. A double-tap fits the rest.
+  const scale = Math.min(open, floor);
+  const placed = placeTarget(input.frame, input.frame, input.felt, insets, scale);
+  return { ...finish(input.frame, input.felt, scale, placed.ox, placed.oy, NO_INSET, "floor"), fitScale: fitted };
 }
 
 /**
