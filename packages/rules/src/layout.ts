@@ -157,14 +157,6 @@ export function layoutOverlaps(layout: BoardLayout): boolean {
   return false;
 }
 
-/**
- * Centre-to-centre distance between parallel rows.
- * A corner off a double is a long tile and the row after next has to clear
- * it, so the rows sit one long side apart. Closer than that, a later double
- * lands on the corner.
- */
-const ROW_PITCH = TILE_LONG + TILE_GAP;
-
 interface SnakeCursor {
   box: LayoutBox;
   dir: LayoutDir;
@@ -217,11 +209,6 @@ function travelDir(arm: ArmId, row: number): LayoutDir {
 
 function rowsHorizontal(arm: ArmId): boolean {
   return arm === "west" || arm === "east";
-}
-
-/** -1 steps west/south rows toward the corner they own. +1 steps the other two. */
-function rowSign(arm: ArmId): number {
-  return arm === "west" || arm === "south" ? -1 : 1;
 }
 
 function isDoubleTile(tile: OrientedTile): boolean {
@@ -285,32 +272,14 @@ function inArmRegion(box: LayoutBox, arm: ArmId, row: number, center: LayoutBox)
 }
 
 /**
- * Where the long axis of a corner sits so it meets both row ends.
- * The corner is centred on the two ends, so each keeps most of its face.
+ * One ordinary tile, turned clockwise off the open end.
+ * The new tile's matching half is flush with the leader's outer half.
  */
-function cornerSpan(line0: number, line1: number): number {
-  const half = TILE_SHORT / 2;
-  const lo = Math.min(line0, line1) - half;
-  const hi = Math.max(line0, line1) + half;
-  return (lo + hi) / 2 - TILE_LONG / 2;
-}
-
-/** One ordinary tile, turned into the arm's corner and clear of the row it leaves. */
-function placeCorner(prev: LayoutBox, arm: ArmId, row: number, line: number): LayoutBox {
+function placeCorner(prev: LayoutBox, arm: ArmId, row: number, from: LayoutDir): LayoutBox {
   if (portraitSide(arm) && row >= 1) {
     return bendBox(prev, travelDir(arm, row), arm, false);
   }
-  const from = travelDir(arm, row);
-  const line1 = line + rowSign(arm) * ROW_PITCH;
-  const horizontal = from === "east" || from === "west";
-  if (horizontal) {
-    const y = cornerSpan(line, line1);
-    const x = from === "west" ? prev.x - TILE_GAP - TILE_SHORT : prev.x + prev.w + TILE_GAP;
-    return { x, y, w: TILE_SHORT, h: TILE_LONG };
-  }
-  const x = cornerSpan(line, line1);
-  const y = from === "north" ? prev.y - TILE_GAP - TILE_SHORT : prev.y + prev.h + TILE_GAP;
-  return { x, y, w: TILE_LONG, h: TILE_SHORT };
+  return bendBox(prev, from, clockwise(from), false);
 }
 
 function acrossCenter(box: LayoutBox, arm: ArmId): number {
@@ -429,7 +398,7 @@ function straightFits(
     return true;
   }
   if (!isDouble) {
-    const corner = placeCorner(box, arm, row, line);
+    const corner = placeCorner(box, arm, row, dir);
     if (!staysOnSide(corner, arm, center, true) || overlapsPlaced(corner, placed) || boxesOverlap(corner, box)) return false;
   }
   return true;
@@ -523,28 +492,6 @@ function headsOut(box: LayoutBox, dir: LayoutDir): boolean {
   return cx * dx + cy * dy >= -TILE_SHORT;
 }
 
-/** The one corner off a side stem, centred in the lane and butted to the stem. */
-function sideCornerBox(stem: LayoutBox, arm: "west" | "east"): LayoutBox {
-  const half = activeLimit.width / 2;
-  const minOverlap = TILE_SHORT * 0.5;
-  const w = TILE_SHORT;
-  const h = TILE_LONG;
-  if (arm === "west") {
-    const leftmost = stem.x + minOverlap - w / 2;
-    const felt = -(half - TILE_LONG / 2);
-    let centerX = portraitLaneX(arm);
-    if (centerX < leftmost) centerX = leftmost;
-    if (centerX < felt) centerX = felt;
-    return { x: centerX - w / 2, y: stem.y - TILE_GAP - h, w, h };
-  }
-  const rightmost = stem.x + stem.w - minOverlap + w / 2;
-  const felt = half - TILE_LONG / 2;
-  let centerX = portraitLaneX(arm);
-  if (centerX > rightmost) centerX = rightmost;
-  if (centerX > felt) centerX = felt;
-  return { x: centerX - w / 2, y: stem.y + stem.h + TILE_GAP, w, h };
-}
-
 function portraitOwns(box: LayoutBox, arm: ArmId): boolean {
   const edge = Math.abs(portraitLaneX("east")) - TILE_LONG / 2 - TILE_GAP;
   if (arm === "west") return box.x + box.w <= -TILE_LONG / 2 - TILE_GAP + 0.5;
@@ -590,7 +537,7 @@ function portraitSnakeStep(
       return kept(arm, 0, cursor.run + 1);
     }
     const parentDouble = cursor.box.h > cursor.box.w;
-    const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : sideCornerBox(cursor.box, arm);
+    const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : bendBox(cursor.box, arm, laneDir, false);
     if (free(corner)) {
       return {
         box: corner,
@@ -634,7 +581,7 @@ function portraitSnakeStep(
   if (turnedOnce && dir !== laneDir && !double) {
     const along = free(straight) && insideActive(straight) && portraitOwns(straight, arm) && headsOut(cursor.box, dir);
     if (along) return kept(dir, cursor.row, cursor.run + 1);
-    const outward = straightBox(cursor.box, laneDir, false);
+    const outward = bendBox(cursor.box, dir, laneDir, false);
     if (free(outward) && headsOut(cursor.box, laneDir)) {
       return { box: outward, dir: laneDir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
@@ -848,7 +795,7 @@ function snakeStep(
       };
     }
   }
-  const ended = placeCorner(cursor.box, arm, cursor.row, cursor.line);
+  const ended = placeCorner(cursor.box, arm, cursor.row, dir);
   // On a narrow felt the far end of the stem is past the edge. The lane then
   // starts at the near end, one double clear of the centre column.
   const near = portraitSide(arm) && cursor.row === 0 ? bendBox(cursor.box, dir, shiftDir(arm), false) : null;

@@ -106,6 +106,7 @@ function assertLaidOut(board: BoardState, label: string, phone: boolean): void {
   assertDoublesCentered(board, layout, label);
   assertPinwheel(board, layout, label);
   assertJoined(board, layout, label);
+  assertCornerHalves(board, layout, label);
 }
 
 /** First tiles of each arm meet beside the spinner, so the gap rule starts after them. */
@@ -308,6 +309,68 @@ function assertJoined(board: BoardState, layout: BoardLayout, label: string): vo
       expect(edge.along, `${label} ${parent.tileId}>${tile.tileId} along ${edge.along}`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
     }
   }
+}
+
+/**
+ * The half that carries `which` pips. West and north draw the outward pips
+ * in `a` (left or top). East and south draw them in `b` (right or bottom).
+ */
+function halfBox(tile: PlacedTile, which: "outward" | "inward"): LayoutBox {
+  const outwardAtStart = tile.direction === "west" || tile.direction === "north";
+  const atStart = which === "outward" ? outwardAtStart : !outwardAtStart;
+  const horizontal = tile.w >= tile.h;
+  if (horizontal) {
+    return {
+      x: atStart ? tile.x : tile.x + tile.w - TILE_SHORT,
+      y: tile.y,
+      w: Math.min(TILE_SHORT, tile.w),
+      h: tile.h,
+    };
+  }
+  return {
+    x: tile.x,
+    y: atStart ? tile.y : tile.y + tile.h - TILE_SHORT,
+    w: tile.w,
+    h: Math.min(TILE_SHORT, tile.h),
+  };
+}
+
+/**
+ * A corner joins pip to pip. The follower's matching half sits on the
+ * leader's matching half, flush with the open end. A corner centred on
+ * the divider overlaps that half by only half a short side and fails.
+ * Doubles stay crosswise and centred, so they are not corners.
+ */
+function assertCornerHalves(board: BoardState, layout: BoardLayout, label: string): number {
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  let corners = 0;
+  for (const arm of ARM_IDS) {
+    const chain = board.arms[arm];
+    for (let index = 1; index < chain.length; index += 1) {
+      const tile = chain[index]!;
+      const prev = chain[index - 1]!;
+      if (tile.low === tile.high || prev.low === prev.high) continue;
+      const follower = byId.get(tile.tileId);
+      const leader = byId.get(prev.tileId);
+      if (!follower || !leader) continue;
+      if (!perpendicular(leader.direction, follower.direction)) continue;
+      corners += 1;
+      const leadHalf = halfBox(leader, "outward");
+      const followHalf = halfBox(follower, "inward");
+      const edge = sharedEdge(leadHalf, followHalf);
+      const name = `${label} ${arm} ${leader.tileId}>${follower.tileId}`;
+      expect(Math.abs(edge.gap - TILE_GAP), `${name} half gap ${edge.gap}`).toBeLessThan(0.5);
+      expect(edge.along, `${name} half overlap ${edge.along}`).toBeGreaterThanOrEqual(TILE_SHORT - 0.5);
+      const leaderPips = leader.direction === "west" || leader.direction === "north" ? leader.a : leader.b;
+      const followerPips = follower.direction === "west" || follower.direction === "north" ? follower.b : follower.a;
+      expect(followerPips, `${name} pips`).toBe(leaderPips);
+      if (leader.direction === "west") expect(follower.x, `${name} flush`).toBeCloseTo(leader.x, 5);
+      if (leader.direction === "east") expect(follower.x + follower.w, `${name} flush`).toBeCloseTo(leader.x + leader.w, 5);
+      if (leader.direction === "north") expect(follower.y, `${name} flush`).toBeCloseTo(leader.y, 5);
+      if (leader.direction === "south") expect(follower.y + follower.h, `${name} flush`).toBeCloseTo(leader.y + leader.h, 5);
+    }
+  }
+  return corners;
 }
 
 function sharedEdge(a: LayoutBox, b: LayoutBox): { gap: number; along: number } {
@@ -522,6 +585,63 @@ describe("board layout", () => {
     expect(bentDouble.w).toBeGreaterThan(bentDouble.h);
     expect(follower.x + follower.w / 2).toBeCloseTo(bentDouble.x + bentDouble.w / 2, 5);
     assertLaidOut(bent, "double at a bend", true);
+  });
+
+  it("seats every corner on the matching half, on a phone and on a wide felt", () => {
+    const empty = { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false };
+    let west = placeTile(empty, "lead", tileById("1-1"));
+    west = placeTile(west, "west", tileById("1-6"));
+    west = placeTile(west, "west", tileById("4-6"));
+    const westLayout = layoutBoard(west, { width: 200, height: 640 });
+    const stem = westLayout.tiles.find((tile) => tile.tileId === "1-6")!;
+    const turn = westLayout.tiles.find((tile) => tile.tileId === "4-6")!;
+    expect(stem.direction).toBe("west");
+    expect(turn.direction).toBe("north");
+    expect(stem.a).toBe(6);
+    expect(turn.b).toBe(6);
+    expect(turn.x).toBeCloseTo(stem.x, 5);
+    expect(turn.x + turn.w).toBeCloseTo(stem.x + TILE_SHORT, 5);
+    expect(stem.y - (turn.y + turn.h)).toBeCloseTo(TILE_GAP, 5);
+
+    let east = placeTile(empty, "lead", tileById("2-2"));
+    east = placeTile(east, "east", tileById("2-6"));
+    east = placeTile(east, "east", tileById("4-6"));
+    const eastLayout = layoutBoard(east, { width: 200, height: 640 });
+    const eastStem = eastLayout.tiles.find((tile) => tile.tileId === "2-6")!;
+    const eastTurn = eastLayout.tiles.find((tile) => tile.tileId === "4-6")!;
+    expect(eastStem.direction).toBe("east");
+    expect(eastTurn.direction).toBe("south");
+    expect(eastStem.b).toBe(6);
+    expect(eastTurn.a).toBe(6);
+    expect(eastTurn.x + eastTurn.w).toBeCloseTo(eastStem.x + eastStem.w, 5);
+    expect(eastTurn.x).toBeCloseTo(eastStem.x + eastStem.w - TILE_SHORT, 5);
+    expect(eastTurn.y - (eastStem.y + eastStem.h)).toBeCloseTo(TILE_GAP, 5);
+
+    const limits = [
+      undefined,
+      { width: 200, height: 640 },
+      { width: 288, height: 672 },
+      { width: 220, height: 640 },
+      { width: 344, height: 720 },
+      { width: 504, height: 428 },
+      { width: 520, height: 440 },
+      { width: 640, height: 400 },
+    ] as const;
+    let corners = 0;
+    for (const players of [2, 3, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 6; seed += 1) {
+          for (const board of playHand(players, mode, seed + 40)) {
+            for (const limit of limits) {
+              const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+              corners += assertCornerHalves(board, layout, `corner ${players} ${mode} ${seed}`);
+              expect(layoutOverlaps(layout), `overlap ${players} ${mode} ${seed}`).toBe(false);
+            }
+          }
+        }
+      }
+    }
+    expect(corners).toBeGreaterThan(20);
   });
 
   it("snakes a long arm across the felt instead of piling into one corner", () => {
