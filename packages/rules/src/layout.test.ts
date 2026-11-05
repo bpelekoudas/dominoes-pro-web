@@ -560,9 +560,10 @@ describe("board layout", () => {
     const after = straightLayout.tiles.find((tile) => tile.tileId === "2-3")!;
     expect(double.direction).toBe("east");
     expect(double.orientation).toBe("vertical");
-    // The stem is two tiles on a phone, so the next tile turns down the right lane, centred on the double.
-    expect(after.direction).toBe("south");
-    expect(after.x + after.w / 2).toBeCloseTo(double.x + double.w / 2, 5);
+    // The lane is still ahead and the next tile fits, so it stays on the stem, centred on the double.
+    expect(after.direction).toBe("east");
+    expect(after.y + after.h / 2).toBeCloseTo(double.y + double.h / 2, 5);
+    expect(after.x - (double.x + double.w)).toBeCloseTo(TILE_GAP, 5);
     assertLaidOut(straight, "mid-chain double", true);
 
     // The double would fall past the right edge, so the chain turns on the
@@ -642,6 +643,47 @@ describe("board layout", () => {
       }
     }
     expect(corners).toBeGreaterThan(20);
+  });
+
+  it("runs a side arm out to its lane before the first turn when space allows", () => {
+    const laneOf = (arm: "west" | "east", width: number) => {
+      const half = width / 2;
+      const sign = arm === "west" ? -1 : 1;
+      const clear = half - TILE_LONG / 2;
+      const inner = TILE_LONG / 2 + TILE_GAP + TILE_LONG / 2;
+      return sign * Math.max(inner, clear);
+    };
+    const outerCenter = (tile: PlacedTile, arm: "west" | "east") =>
+      arm === "east" ? tile.x + tile.w - TILE_SHORT / 2 : tile.x + TILE_SHORT / 2;
+    const limits = [
+      { width: PHONE_WIDTH, height: PHONE_HEIGHT },
+      { width: 360, height: 780 },
+      { width: 416, height: 900 },
+    ];
+    const outward = ["6-6", "5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-2", "2-4", "4-6", "3-6", "1-3", "1-4", "0-4"].map((id) => tileById(id));
+    for (const limit of limits) {
+      for (const arm of ["west", "east"] as const) {
+        const board = boardFromChain(outward, arm);
+        const layout = layoutBoard(board, limit);
+        const placed = board.arms[arm].map(
+          (tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!,
+        );
+        const turn = placed.findIndex((tile, index) => index > 0 && tile.direction !== arm);
+        expect(turn, `${arm} ${limit.width} turns`).toBeGreaterThan(0);
+        const stem = placed[turn - 1]!;
+        const lane = laneOf(arm, limit.width);
+        const center = outerCenter(stem, arm);
+        const laneDir = arm === "west" ? "north" : "south";
+        expect(placed[turn]!.direction, `${arm} turns clockwise`).toBe(laneDir);
+        // The corner sits on the stem's outer half, at the lane or one tile short of it
+        // when the next tile's double would leave the felt.
+        const shortfall = arm === "east" ? lane - center : center - lane;
+        expect(Math.abs(shortfall), `${arm} ${limit.width} reaches ${center.toFixed(0)} vs lane ${lane.toFixed(0)}`).toBeLessThanOrEqual(TILE_LONG / 2 + TILE_GAP);
+        expect(Math.abs(center), `${arm} leaves the centre line`).toBeGreaterThan(limit.width / 4);
+        assertCornerHalves(board, layout, `${arm} lane ${limit.width}`);
+        expect(layoutOverlaps(layout), `${arm} ${limit.width}`).toBe(false);
+      }
+    }
   });
 
   it("snakes a long arm across the felt instead of piling into one corner", () => {
@@ -833,11 +875,11 @@ describe("board layout", () => {
     const twoFive = layout.tiles.find((tile) => tile.tileId === "2-5")!;
     expect(spinner.orientation).toBe("vertical");
     expect(five.orientation).toBe("vertical");
-    expect(twoFive.orientation).toBe("vertical");
     expect(five.direction).toBe("east");
-    expect(twoFive.direction).toBe("south");
-    expect(twoFive.y - (five.y + five.h)).toBe(TILE_GAP);
-    expect(twoFive.x + twoFive.w / 2).toBeCloseTo(five.x + five.w / 2, 5);
+    expect(twoFive.direction).toBe("east");
+    expect(twoFive.orientation).toBe("horizontal");
+    expect(twoFive.x - (five.x + five.w)).toBe(TILE_GAP);
+    expect(twoFive.y + twoFive.h / 2).toBeCloseTo(five.y + five.h / 2, 5);
     expect(boxesOverlap(five, twoFive)).toBe(false);
     expect(boxesOverlap(spinner, layout.tiles.find((tile) => tile.tileId === "5-6")!)).toBe(false);
     assertLaidOut(board, "crosswise double", false);

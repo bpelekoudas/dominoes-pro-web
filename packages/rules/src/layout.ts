@@ -499,10 +499,34 @@ function portraitOwns(box: LayoutBox, arm: ArmId): boolean {
   return box.x >= -edge - 0.5 && box.x + box.w <= edge + 0.5;
 }
 
+/** Centre of the outer half, where the corner column will sit. */
+function outerHalfCenter(box: LayoutBox, arm: "west" | "east"): number {
+  return arm === "east" ? box.x + box.w - TILE_SHORT / 2 : box.x + TILE_SHORT / 2;
+}
+
+/** The stem has arrived when its corner would sit on the side lane. */
+function stemReachedLane(box: LayoutBox, arm: "west" | "east"): boolean {
+  const lane = portraitLaneX(arm);
+  const center = outerHalfCenter(box, arm);
+  return arm === "east" ? center >= lane - 0.5 : center <= lane + 0.5;
+}
+
 /**
- * Tall felt. North and south run the centre column. West and east take one
- * or two tiles out, then one corner and the outer third. A later turn goes
- * outward along the edge, never back toward the spinner.
+ * A crosswise double on the corner of `stem` stays on the felt.
+ * That is the badge clearance: the lane itself is already inset by half a long side.
+ */
+function columnDoubleFits(stem: LayoutBox, arm: "west" | "east"): boolean {
+  const center = outerHalfCenter(stem, arm);
+  const outer = arm === "east" ? center + TILE_LONG / 2 : center - TILE_LONG / 2;
+  // Tiles step by a long side, so the column can land a few pixels past the
+  // lane. Half a short side still clears the seat badges.
+  return Math.abs(outer) <= activeLimit.width / 2 + TILE_SHORT / 2;
+}
+
+/**
+ * Tall felt. North and south run the centre column. West and east travel
+ * out to their side lane, then turn. A later turn goes outward along the
+ * edge, never back toward the spinner.
  */
 function portraitSnakeStep(
   tile: OrientedTile,
@@ -528,12 +552,15 @@ function portraitSnakeStep(
   }
 
   if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
+    // A double stays crosswise on the stem. It never makes the corner.
     if (double) return kept(arm, 0, cursor.run + 1);
-    const lane = portraitLaneX(arm);
-    const covers = cursor.box.x <= lane && lane <= cursor.box.x + cursor.box.w;
     const stem = straightBox(cursor.box, arm, false);
-    // One or two tiles out, then the corner once this tile covers the lane.
-    if (!covers && cursor.run < 2 && free(stem) && insideActive(stem)) {
+    const centreIn = Math.abs(stem.x + stem.w / 2) <= activeLimit.width / 2 + 0.5
+      && Math.abs(stem.y + stem.h / 2) <= activeLimit.height / 2 + 0.5;
+    // Keep travelling out until the stem reaches the side lane. Stop early
+    // only when the next tile, or a crosswise double on its corner, would
+    // leave the felt.
+    if (!stemReachedLane(cursor.box, arm) && free(stem) && centreIn && columnDoubleFits(stem, arm)) {
       return kept(arm, 0, cursor.run + 1);
     }
     const parentDouble = cursor.box.h > cursor.box.w;
