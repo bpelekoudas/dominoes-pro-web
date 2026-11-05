@@ -215,7 +215,10 @@ export function Table({
         return solved.limits;
       });
       const zoom = solved.scale;
-      const shift = chainViewShift(layout.tiles, zoom, boardShift(room));
+      const shift = chainViewShift(layout.tiles, zoom, boardShift(room), {
+        w: Math.max(1, felt.w - room.left - room.right),
+        h: Math.max(1, felt.h - room.top - room.bottom),
+      });
       const none = { top: 0, right: 0, bottom: 0, left: 0 };
       setClip((current) => (sameInsets(current, none) ? current : none));
       held.current = { hand: handKey, scale: zoom };

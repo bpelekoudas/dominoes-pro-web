@@ -474,13 +474,14 @@ function portraitFold(
  */
 function portraitLaneX(arm: ArmId): number {
   if (arm === "north" || arm === "south") return 0;
-  const half = activeLimit.width / 2;
   const sign = arm === "west" ? -1 : 1;
-  // Just inside the badge line: a crosswise double's outer edge meets the
-  // clear zone. On a phone that lands near a sixth of the felt.
-  const clear = half - TILE_LONG / 2;
+  const half = activeLimit.width / 2;
+  // 1/6 and 5/6, and also just inside the felt edge when the felt is wide
+  // enough for the arm to keep going. Never closer than a double past the spinner.
+  const sixth = activeLimit.width / 3;
+  const nearEdge = half - TILE_SHORT;
   const inner = TILE_LONG / 2 + TILE_GAP + TILE_LONG / 2;
-  return sign * Math.max(inner, clear);
+  return sign * Math.max(inner, sixth, nearEdge);
 }
 
 /** True when `dir` does not walk the tile back toward the spinner. */
@@ -520,7 +521,7 @@ function columnDoubleFits(stem: LayoutBox, arm: "west" | "east"): boolean {
   const outer = arm === "east" ? center + TILE_LONG / 2 : center - TILE_LONG / 2;
   // Tiles step by a long side, so the column can land a few pixels past the
   // lane. Half a short side still clears the seat badges.
-  return Math.abs(outer) <= activeLimit.width / 2 + TILE_SHORT / 2;
+  return Math.abs(outer) <= activeLimit.width / 2 + TILE_LONG / 2 + TILE_SHORT;
 }
 
 /**
@@ -555,12 +556,10 @@ function portraitSnakeStep(
     // A double stays crosswise on the stem. It never makes the corner.
     if (double) return kept(arm, 0, cursor.run + 1);
     const stem = straightBox(cursor.box, arm, false);
-    const centreIn = Math.abs(stem.x + stem.w / 2) <= activeLimit.width / 2 + 0.5
-      && Math.abs(stem.y + stem.h / 2) <= activeLimit.height / 2 + 0.5;
-    // Keep travelling out until the stem reaches the side lane. Stop early
-    // only when the next tile, or a crosswise double on its corner, would
-    // leave the felt.
-    if (!stemReachedLane(cursor.box, arm) && free(stem) && centreIn && columnDoubleFits(stem, arm)) {
+    // Keep travelling out until this tile's corner sits on the side lane.
+    // The next tile has to stay on the felt, and a crosswise double on its
+    // corner has to as well.
+    if (!stemReachedLane(cursor.box, arm) && free(stem) && insideActive(stem) && columnDoubleFits(stem, arm)) {
       return kept(arm, 0, cursor.run + 1);
     }
     const parentDouble = cursor.box.h > cursor.box.w;

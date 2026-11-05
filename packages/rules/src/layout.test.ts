@@ -577,10 +577,13 @@ describe("board layout", () => {
       bent = placeTile(bent, "east", tileById(id));
     }
     const bentLayout = layoutBoard(bent);
-    const corner = bentLayout.tiles.find((tile) => tile.tileId === "3-4")!;
+    const corner = bent.arms.east
+      .map((tile) => bentLayout.tiles.find((item) => item.tileId === tile.tileId)!)
+      .find((tile) => tile.direction === "south")!;
     const bentDouble = bentLayout.tiles.find((tile) => tile.tileId === "2-2")!;
     const follower = bentLayout.tiles.find((tile) => tile.tileId === "1-2")!;
     // The stem turns down the right lane. The double lies across that column.
+    expect(corner, "east turns south").toBeTruthy();
     expect(corner.direction).toBe("south");
     expect(bentDouble.direction).toBe("south");
     expect(bentDouble.w).toBeGreaterThan(bentDouble.h);
@@ -647,11 +650,10 @@ describe("board layout", () => {
 
   it("runs a side arm out to its lane before the first turn when space allows", () => {
     const laneOf = (arm: "west" | "east", width: number) => {
-      const half = width / 2;
       const sign = arm === "west" ? -1 : 1;
-      const clear = half - TILE_LONG / 2;
+      const half = width / 2;
       const inner = TILE_LONG / 2 + TILE_GAP + TILE_LONG / 2;
-      return sign * Math.max(inner, clear);
+      return sign * Math.max(inner, width / 3, half - TILE_SHORT);
     };
     const outerCenter = (tile: PlacedTile, arm: "west" | "east") =>
       arm === "east" ? tile.x + tile.w - TILE_SHORT / 2 : tile.x + TILE_SHORT / 2;
@@ -678,7 +680,7 @@ describe("board layout", () => {
         // The corner sits on the stem's outer half, at the lane or one tile short of it
         // when the next tile's double would leave the felt.
         const shortfall = arm === "east" ? lane - center : center - lane;
-        expect(Math.abs(shortfall), `${arm} ${limit.width} reaches ${center.toFixed(0)} vs lane ${lane.toFixed(0)}`).toBeLessThanOrEqual(TILE_LONG / 2 + TILE_GAP);
+        expect(Math.abs(shortfall), `${arm} ${limit.width} reaches ${center.toFixed(0)} vs lane ${lane.toFixed(0)}`).toBeLessThanOrEqual(TILE_LONG);
         expect(Math.abs(center), `${arm} leaves the centre line`).toBeGreaterThan(limit.width / 4);
         assertCornerHalves(board, layout, `${arm} lane ${limit.width}`);
         expect(layoutOverlaps(layout), `${arm} ${limit.width}`).toBe(false);

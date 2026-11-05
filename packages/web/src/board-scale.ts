@@ -109,8 +109,13 @@ export function feltScale(input: {
   // enough for the side lanes to sit on the badge line, and tall enough that
   // a column turns when it reaches the seat instead of growing past it.
   const layoutScale = Math.min(readable, (screen >= 720 ? 40 : 30) / TILE_SHORT);
+  // A long column shrinks the picture below this layout size, which pulled
+  // the side lanes back toward the centre. On a tall felt, lay the width
+  // out roomier so an arm can still reach the 5/6 line before it turns.
+  const portraitFelt = input.felt.h >= input.felt.w * 1.35;
+  const widthScale = portraitFelt ? Math.min(layoutScale, 15 / TILE_SHORT) : layoutScale;
   const limits = {
-    width: Math.max(TILE_LONG * 3, roomW / layoutScale),
+    width: Math.max(TILE_LONG * 3, roomW / widthScale),
     height: Math.max(TILE_LONG * 2, roomH / layoutScale),
   };
   // Fit the chain's own box, not a spinner-centred square. A long column
@@ -231,11 +236,23 @@ export function chainViewShift(
   tiles: readonly LayoutBox[],
   scale: number,
   insetShift: { x: number; y: number },
+  room?: { w: number; h: number },
 ): { x: number; y: number } {
   const box = chainBounds(tiles, 0);
-  const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  return { x: insetShift.x - cx * scale, y: insetShift.y - cy * scale };
+  // Keep the spinner on the horizontal centre. Nudge only when a tile would
+  // cross the badge line, so a long side arm stays out by the badge instead
+  // of being pulled back to the middle of the chain's box.
+  let x = insetShift.x;
+  if (room && room.w > 0) {
+    const half = room.w / 2;
+    const left = box.x * scale + x;
+    const right = (box.x + box.w) * scale + x;
+    if (right > half) x -= right - half;
+    const shiftedLeft = box.x * scale + x;
+    if (shiftedLeft < -half) x += -half - shiftedLeft;
+  }
+  return { x, y: insetShift.y - cy * scale };
 }
 
 export function scaleForAxis(bounds: FeltSize, felt: FeltSize, insets: AxisInsets): number {
