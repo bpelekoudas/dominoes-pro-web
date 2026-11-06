@@ -7,8 +7,10 @@
  * with the tile. The diameter is one number, used for both width and height,
  * so a pip stays a circle when the half is not square.
  */
-export const PIP_PITCH = 0.22;
-export const PIP_DIAMETER = 0.14;
+/** Centre-to-centre, as a fraction of the half. A 6 then reaches near both edges. */
+export const PIP_PITCH = 0.3;
+/** Diameter as a fraction of the half's shorter side. Matches 16cqmin in the CSS. */
+export const PIP_DIAMETER = 0.16;
 export const PIP_RADIUS = PIP_DIAMETER / 2;
 
 export type PipRotation = 0 | 90 | 180 | 270;

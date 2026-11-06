@@ -43,7 +43,8 @@ describe("pip positions", () => {
     expect(PIP_DIAMETER).toBe(PIP_RADIUS * 2);
     expect(PIP_DIAMETER).toBeLessThan(PIP_PITCH);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.half i \{[^}]*width:\s*14cqmin;\s*height:\s*14cqmin;/);
+    expect(css).toMatch(/\.half i \{[^}]*width:\s*16cqmin;\s*height:\s*16cqmin;/);
+    expect(css).not.toMatch(/\.hand-tile \.half i \{[^}]*var\(--hand-tile/);
     let checked = 0;
     for (const tile of allTiles()) {
       for (const rotation of ROTATIONS) {
@@ -83,5 +84,40 @@ describe("pip positions", () => {
       expect(wide).toBeCloseTo(PIP_PITCH * 2, 5);
       expect(narrow).toBeCloseTo(PIP_PITCH, 5);
     }
+  });
+
+  it("measures each pip of a 6 and a 3 as a fraction of the half", () => {
+    // The old 0.22 pitch left a 6's outer pip at 0.28, a tight cluster in the middle.
+    expect(0.5 - PIP_PITCH).toBeLessThan(0.22);
+    for (const rotation of [0, 90] as const) {
+      for (const value of [6, 3]) {
+        const dots = pipCenters(value, rotation);
+        expect(dots, `${value} @${rotation}`).toHaveLength(value);
+        for (const dot of dots) {
+          expect(dot.x, `${value} @${rotation} x`).toBeGreaterThan(0);
+          expect(dot.x, `${value} @${rotation} x`).toBeLessThan(1);
+          expect(dot.y, `${value} @${rotation} y`).toBeGreaterThan(0);
+          expect(dot.y, `${value} @${rotation} y`).toBeLessThan(1);
+          const onGrid = pipCenters(value, 0).some((upright) => {
+            const turned = rotatePip(upright, rotation);
+            return Math.abs(turned.x - dot.x) < 1e-6 && Math.abs(turned.y - dot.y) < 1e-6;
+          });
+          expect(onGrid, `${value} @${rotation} ${dot.x},${dot.y}`).toBe(true);
+        }
+        const span = Math.max(
+          Math.max(...dots.map((dot) => dot.x)) - Math.min(...dots.map((dot) => dot.x)),
+          Math.max(...dots.map((dot) => dot.y)) - Math.min(...dots.map((dot) => dot.y)),
+        );
+        const reach = value === 6 ? PIP_PITCH * 2 : PIP_PITCH;
+        expect(span, `${value} @${rotation} span`).toBeCloseTo(reach, 5);
+      }
+    }
+    const six = pipCenters(6, 0);
+    const top = Math.min(...six.map((dot) => dot.y));
+    const bottom = Math.max(...six.map((dot) => dot.y));
+    expect(top).toBeCloseTo(0.5 - PIP_PITCH, 5);
+    expect(bottom).toBeCloseTo(0.5 + PIP_PITCH, 5);
+    expect(top).toBeLessThan(0.22);
+    expect(1 - bottom).toBeLessThan(0.22);
   });
 });
