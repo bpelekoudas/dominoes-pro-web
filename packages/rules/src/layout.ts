@@ -178,7 +178,10 @@ interface SnakeCursor {
 
 /** A tall felt splits into a center column and two side lanes. A wide felt keeps the cross. */
 function isPortrait(): boolean {
-  return activeLimit.height >= activeLimit.width * 1.35;
+  // A fold opened flat is only a little taller than it is wide. It still
+  // has a long vertical arm to fold. Landscape (wider than tall) keeps the
+  // wide snake.
+  return activeLimit.height >= activeLimit.width * 1.05;
 }
 
 function portraitSide(arm: ArmId): boolean {
@@ -528,8 +531,88 @@ function columnDoubleFits(stem: LayoutBox, arm: "west" | "east"): boolean {
 }
 
 /**
- * Tall felt. North and south run the centre column. West and east travel
- * out to their side lane, then turn. A later turn goes outward along the
+ * A long centre arm used to run off the felt in one line. The camera fits
+ * that line into half the table, so the tiles shrink and the other half
+ * stays empty. The arm now fills one column, steps into the open side, and
+ * comes back, so the chain stays inside the felt at a readable size.
+ * South steps west. North steps east. One tile makes each step.
+ */
+function centerColumnStep(
+  tile: OrientedTile,
+  cursor: SnakeCursor,
+  arm: "north" | "south",
+  upcoming: readonly OrientedTile[],
+  placed: readonly LayoutBox[],
+  fromCenter: boolean,
+): StepResult {
+  const double = isDoubleTile(tile);
+  const outward: LayoutDir = arm;
+  const back = opposite(outward);
+  const side: LayoutDir = arm === "south" ? "west" : "east";
+  const free = (box: LayoutBox) => !overlapsPlaced(box, placed) && !boxesOverlap(box, cursor.box);
+  const park = (box: LayoutBox, dir: LayoutDir, row: number, run: number, line = cursor.line): StepResult => ({
+    box,
+    dir,
+    row,
+    line,
+    run,
+    opening: false,
+    fromDouble: false,
+    column: false,
+  });
+  if (fromCenter) {
+    const box = straightBox(cursor.box, outward, double);
+    return park(box, outward, 0, 1, 0);
+  }
+  const crossesHome = (box: LayoutBox) =>
+    arm === "south" ? box.y < -TILE_GAP : box.y + box.h > TILE_GAP;
+  const onColumn = cursor.dir === outward || cursor.dir === back;
+  if (onColumn) {
+    // A double stays on this column, crosswise and centred. It never makes the step.
+    const aligned = (dir: LayoutDir, isDouble: boolean) => {
+      const raw = straightBox(cursor.box, dir, isDouble);
+      if (cursor.row === 0) return raw;
+      return { ...raw, x: cursor.line - raw.w / 2 };
+    };
+    if (double) {
+      const box = aligned(cursor.dir, true);
+      return park(box, cursor.dir, cursor.row, cursor.run + 1);
+    }
+    const next = aligned(cursor.dir, false);
+    const follower = upcoming[1] && isDoubleTile(upcoming[1])
+      ? { ...straightBox(next, cursor.dir, true), ...(cursor.row === 0 ? {} : { x: cursor.line - TILE_LONG / 2 }) }
+      : null;
+    const leaving = cursor.dir === outward
+      ? !insideActive(next) || !free(next)
+      : crossesHome(next) || !insideActive(next) || !free(next);
+    const followerLeaves = follower != null && (cursor.dir === outward
+      ? !insideActive(follower) || !free(follower)
+      : crossesHome(follower) || !insideActive(follower) || !free(follower));
+    if (!leaving && !followerLeaves && free(next) && insideActive(next)) {
+      return park(next, cursor.dir, cursor.row, cursor.run + 1);
+    }
+    const turn = bendBox(cursor.box, cursor.dir, side, false);
+    if (free(turn) && insideActive(turn)) return park(turn, side, cursor.row + 1, 1, turn.x + turn.w / 2);
+    if (free(next)) return park(next, cursor.dir, cursor.row, cursor.run + 1);
+    // The open side is already taken. Keep the line; do not cover a tile.
+    return park(next, cursor.dir, cursor.row, cursor.run + 1);
+  }
+  // A double on the step stays crosswise on that step. The ordinary tile opens the next column.
+  if (double) {
+    const box = straightBox(cursor.box, side, true);
+    return park(box, side, cursor.row, cursor.run + 1, box.y + box.h / 2);
+  }
+  const nextDir: LayoutDir = cursor.row % 2 === 1 ? back : outward;
+  const box = bendBox(cursor.box, cursor.dir, nextDir, false);
+  if (free(box) && insideActive(box)) return park(box, nextDir, cursor.row, 1, box.x + box.w / 2);
+  const stuck = straightBox(cursor.box, side, double);
+  return park(stuck, side, cursor.row, cursor.run + 1);
+}
+
+/**
+ * Tall felt. North and south run the centre column, then snake into the
+ * open side instead of growing one line off the felt. West and east travel
+ * out at least two tiles, then turn. A later turn goes outward along the
  * edge, never back toward the spinner.
  */
 function portraitSnakeStep(
@@ -555,6 +638,22 @@ function portraitSnakeStep(
     return { box, dir: arm, row: 0, line: portraitLaneX(arm), run: 1, opening: false, fromDouble: false, column: false };
   }
 
+  if (arm === "north" || arm === "south") {
+    const side = arm === "south" ? "west" : "east";
+    const sideTaken = placed.some((box) => {
+      const cy = box.y + box.h / 2;
+      if (Math.abs(cy) > TILE_LONG) return false;
+      const cx = box.x + box.w / 2;
+      if (Math.abs(cx - cursor.line) < TILE_LONG) return false;
+      return side === "west" ? cx < -TILE_SHORT : cx > TILE_SHORT;
+    });
+    if (!sideTaken) {
+      const snaked = centerColumnStep(tile, cursor, arm, upcoming, placed, fromCenter);
+      const hits = overlapsPlaced(snaked.box, placed) || boxesOverlap(snaked.box, cursor.box);
+      if (!hits) return snaked;
+    }
+  }
+
   if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
     // A double stays crosswise on the stem. It never makes the corner, and it
     // does not count as one of the two full tiles the arm has to lay first.
@@ -562,11 +661,11 @@ function portraitSnakeStep(
     const stem = straightBox(cursor.box, arm, false);
     // Two full tiles go out before the first turn. If that reaches past the
     // felt, the picture zooms out. Turning early is what left a one-tile stub.
+    // Two full tiles, then turn. Running on toward the badge line makes a
+    // long stem, and the column that follows it has nowhere to fold, so the
+    // picture shrinks to fit one line.
     const needLength = cursor.full < 2;
-    const room = !stemReachedLane(cursor.box, arm) && free(stem) && insideActive(stem) && columnDoubleFits(stem, arm);
-    if (free(stem) && (needLength || room)) {
-      return kept(arm, 0, cursor.run + 1);
-    }
+    if (needLength && free(stem)) return kept(arm, 0, cursor.run + 1);
     const parentDouble = cursor.box.h > cursor.box.w;
     const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : bendBox(cursor.box, arm, laneDir, false);
     if (free(corner)) {
@@ -585,6 +684,111 @@ function portraitSnakeStep(
   }
 
   const dir = cursor.dir;
+  // A long side arm used to run off the felt in one column. The camera then
+  // fitted that whole line into half the table, so the tiles shrank and the
+  // other half stayed empty. After the opening two tiles, a long column turns
+  // outward and comes back on the open side of the lane.
+  if ((arm === "west" || arm === "east") && cursor.row >= 1) {
+    const back: LayoutDir = opposite(laneDir);
+    const inward: LayoutDir = arm === "east" ? "west" : "east";
+    const park = (box: LayoutBox, way: LayoutDir, row: number, run: number, line: number): StepResult => ({
+      box, dir: way, row, line, run, opening: false, fromDouble: false, column: false,
+    });
+    // The lane already sits on the badge line. The open felt beside it is
+    // one column further out. A short side of slack lets that column turn
+    // around without crossing the centre, where the other arms will land.
+    const slack = TILE_SHORT;
+    const insideSlack = (box: LayoutBox) =>
+      box.x >= -activeLimit.width / 2 - slack
+      && box.x + box.w <= activeLimit.width / 2 + slack
+      && box.y >= -activeLimit.height / 2 - slack
+      && box.y + box.h <= activeLimit.height / 2 + slack;
+    const onHome = (box: LayoutBox) => {
+      const side = arm === "east"
+        ? box.x >= TILE_LONG / 2 - 0.5
+        : box.x + box.w <= -TILE_LONG / 2 + 0.5;
+      return side && clearOfCentre(box);
+    };
+    // On a wide felt the centre column above and below the spinner belongs to
+    // north and south, which are laid out afterwards. Stay out of that strip.
+    const clearOfCentre = (box: LayoutBox) => {
+      if (isPortrait()) return true;
+      // North lays out after the side arms and steps across the top.
+      // A side column that climbs into that band lands on it.
+      return box.y >= -TILE_LONG;
+    };
+    const open = (box: LayoutBox) => free(box) && onHome(box) && insideSlack(box) && clearOfCentre(box);
+    if (dir === laneDir || dir === back) {
+      if (double) {
+        const box = straightBox(cursor.box, dir, true);
+        if (free(box) && onHome(box)) return kept(dir, cursor.row, cursor.run + 1);
+      } else {
+        const next = straightBox(cursor.box, dir, false);
+        const follower = upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(next, dir, true) : null;
+        const followerOk = follower == null || open(follower);
+        const trapped = (box: LayoutBox) => {
+          const further = straightBox(box, dir, false);
+          if (open(further)) return false;
+          return ![edgeDir, inward].some((way) => open(bendBox(box, dir, way, false)));
+        };
+        if (open(next) && followerOk && !trapped(next)) return kept(dir, cursor.row, cursor.run + 1);
+        const columnDir: LayoutDir = (cursor.row + 1) % 2 === 0 ? back : laneDir;
+        for (const way of [edgeDir, inward] as const) {
+          const turn = bendBox(cursor.box, dir, way, false);
+          if (!open(turn)) continue;
+          const column = bendBox(turn, way, columnDir, false);
+          const turnOk = open(turn) || (way === edgeDir && !free(next) && free(turn) && onHome(turn));
+          const follows = upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(turn, way, true) : null;
+          if (follows && (!free(follows) || !onHome(follows))) continue;
+          if (!turnOk || !free(column) || !onHome(column)) continue;
+          if (way === inward) {
+            const simulated: LayoutBox[] = [];
+            let probe = column;
+            const need = Math.max(0, upcoming.length - 1);
+            while (simulated.length < need && onHome(probe) && insideSlack(probe) && !overlapsPlaced(probe, placed) && !simulated.some((box) => boxesOverlap(probe, box))) {
+              simulated.push(probe);
+              probe = straightBox(probe, columnDir, false);
+            }
+            if (simulated.length < need) {
+              const from = simulated[simulated.length - 1] ?? turn;
+              const sideOpen = [edgeDir, inward].some((sideWay) => {
+                const side = bendBox(from, columnDir, sideWay, false);
+                return onHome(side) && !overlapsPlaced(side, placed) && !simulated.some((box) => boxesOverlap(side, box));
+              });
+              if (!sideOpen) continue;
+            }
+          }
+          return park(turn, way, cursor.row + 1, 1, turn.y + turn.h / 2);
+        }
+        if (free(next) && onHome(next)) return kept(dir, cursor.row, cursor.run + 1);
+      }
+    } else if (dir === edgeDir || dir === inward) {
+      if (double) {
+        const box = straightBox(cursor.box, dir, true);
+        if (free(box) && onHome(box)) return kept(dir, cursor.row, cursor.run + 1);
+      } else {
+        const nextDir: LayoutDir = cursor.row % 2 === 0 ? back : laneDir;
+        const box = bendBox(cursor.box, dir, nextDir, false);
+        if (free(box) && onHome(box)) return park(box, nextDir, cursor.row, 1, box.x + box.w / 2);
+        const ahead = straightBox(cursor.box, dir, false);
+        const doubled = upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(ahead, dir, true) : null;
+        if (open(ahead) && (doubled == null || (free(doubled) && onHome(doubled)))) return kept(dir, cursor.row, cursor.run + 1);
+      }
+    }
+    const ahead = straightBox(cursor.box, dir, double);
+    const doubled = !double && upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(ahead, dir, true) : null;
+    const doubleOk = doubled == null || (free(doubled) && onHome(doubled));
+    if (free(ahead) && onHome(ahead) && doubleOk) return kept(dir, cursor.row, cursor.run + 1);
+    for (const way of [edgeDir, inward, laneDir, back] as const) {
+      if (way === dir) continue;
+      const step = bendBox(cursor.box, dir, way, double);
+      const stepDouble = !double && upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(step, way, true) : null;
+      if (!free(step) || !onHome(step)) continue;
+      if (stepDouble && (!free(stepDouble) || !onHome(stepDouble))) continue;
+      return park(step, way, cursor.row + 1, 1, step.x + step.w / 2);
+    }
+    if (free(ahead) && onHome(ahead)) return kept(dir, cursor.row, cursor.run + 1);
+  }
   const straight = straightBox(cursor.box, dir, double);
   const follower = !double && upcoming[1] && isDoubleTile(upcoming[1]) ? straightBox(straight, dir, true) : null;
   const followerOk = !follower || (free(follower) && insideActive(follower) && portraitOwns(follower, arm));
@@ -617,6 +821,22 @@ function portraitSnakeStep(
       return { box: outward, dir: laneDir, row: cursor.row, line: cursor.line, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
   }
+  if ((arm === "west" || arm === "east") && cursor.row >= 1 && (overlapsPlaced(straight, placed) || boxesOverlap(straight, cursor.box))) {
+    const home = (box: LayoutBox) => arm === "east" ? box.x >= TILE_LONG / 2 - 0.5 : box.x + box.w <= -TILE_LONG / 2 + 0.5;
+    for (const way of ["east", "west", "north", "south"] as const) {
+      if (way === dir) continue;
+      const step = bendBox(cursor.box, dir, way, double);
+      if (!home(step) || overlapsPlaced(step, placed) || boxesOverlap(step, cursor.box)) continue;
+      return { box: step, dir: way, row: cursor.row + 1, line: step.x + step.w / 2, run: 1, opening: false, fromDouble: false, column: false };
+    }
+  }
+  if ((arm === "west" || arm === "east") && (overlapsPlaced(straight, placed) || boxesOverlap(straight, cursor.box))) {
+    for (const way of [laneDir, edgeDir, opposite(laneDir), opposite(edgeDir)] as const) {
+      const away = way === dir ? straight : bendBox(cursor.box, dir, way, double);
+      if (overlapsPlaced(away, placed) || boxesOverlap(away, cursor.box)) continue;
+      return { box: away, dir: way, row: cursor.row + (way === dir ? 0 : 1), line: away.x + away.w / 2, run: cursor.run + 1, opening: false, fromDouble: false, column: false };
+    }
+  }
   return kept(dir, cursor.row, cursor.run + 1);
 }
 
@@ -629,7 +849,8 @@ function snakeStep(
   placed: readonly LayoutBox[],
   fromCenter: boolean,
 ): StepResult {
-  if (isPortrait()) return portraitSnakeStep(tile, cursor, arm, center, upcoming, placed, fromCenter);
+  const foldSide = isPortrait() || arm === "west" || arm === "east";
+  if (foldSide) return portraitSnakeStep(tile, cursor, arm, center, upcoming, placed, fromCenter);
   const double = isDoubleTile(tile);
   const clear = (box: LayoutBox, dir: LayoutDir, tight: boolean) =>
     !overlapsPlaced(box, placed)
@@ -747,7 +968,7 @@ function snakeStep(
   // Wide felts too: a side arm lays two full tiles before it may turn.
   if (
     !double
-    && (arm === "west" || arm === "east")
+    && ((arm as ArmId) === "west" || (arm as ArmId) === "east")
     && cursor.row === 0
     && cursor.dir === arm
     && cursor.full < 2
@@ -902,8 +1123,8 @@ function snakeStep(
       if (overlapsPlaced(alt, placed) || boxesOverlap(alt, cursor.box)) continue;
       if (arm === "north" && alt.y + alt.h > center.y - TILE_GAP) continue;
       if (arm === "south" && alt.y < center.y + center.h + TILE_GAP) continue;
-      if (arm === "west" && alt.x + alt.w > -laneInner()) continue;
-      if (arm === "east" && alt.x < laneInner()) continue;
+      if ((arm as ArmId) === "west" && alt.x + alt.w > -laneInner()) continue;
+      if ((arm as ArmId) === "east" && alt.x < laneInner()) continue;
       return { box: alt, dir: way, row: cursor.row, line: acrossCenter(alt, arm), run: cursor.run + 1, opening: false, fromDouble: false, column: false };
     }
   }
@@ -921,7 +1142,7 @@ function snakeStep(
       opening = false;
     } else {
       nextDir = arm;
-      nextLine = arm === "west" ? box.x + TILE_SHORT / 2 : box.x + box.w - TILE_SHORT / 2;
+      nextLine = (arm as ArmId) === "west" ? box.x + TILE_SHORT / 2 : box.x + box.w - TILE_SHORT / 2;
       opening = true;
     }
   } else if (isPortrait()) {

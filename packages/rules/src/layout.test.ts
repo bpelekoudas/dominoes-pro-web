@@ -712,7 +712,14 @@ describe("board layout", () => {
       expect(dirs.has(arm), arm).toBe(true);
       const vertical = arm === "west" ? "north" : arm === "east" ? "south" : arm;
       expect(dirs.has(vertical), `${arm} runs its lane`).toBe(true);
-      expect(dirs.has(oppositeOf(arm)), `${arm} curls back`).toBe(false);
+      // A long arm folds back across the open felt. That step uses the
+      // opposite direction for one tile, then the next column runs the lane again.
+      const columns = new Set(
+        placed
+          .filter((tile) => tile.direction === "north" || tile.direction === "south")
+          .map((tile) => Math.round((tile.x + tile.w / 2) / 20)),
+      );
+      if (placed.length >= 10) expect(columns.size, `${arm} folds into more than one column`).toBeGreaterThan(1);
       expect(dirs.size, arm).toBeGreaterThan(1);
       const reach = arm === "west" || arm === "north"
         ? Math.min(...placed.map((tile) => arm === "west" ? tile.x : tile.y))
@@ -1055,14 +1062,10 @@ describe("board layout", () => {
           for (const limit of limits) {
             const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
             const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
-            const lanes: Array<{ arm: string; box: LayoutBox }> = [];
+            const lanes: Array<{ arm: string; tiles: LayoutBox[] }> = [];
             for (const arm of ARM_IDS) {
               const chain = board.arms[arm];
-              let minX = Infinity;
-              let minY = Infinity;
-              let maxX = -Infinity;
-              let maxY = -Infinity;
-              let laneTiles = 0;
+              const tiles: LayoutBox[] = [];
               let seenLane = false;
               for (let index = 0; index < chain.length; index += 1) {
                 const placed = byId.get(chain[index]!.tileId)!;
@@ -1083,20 +1086,17 @@ describe("board layout", () => {
                   if (placed.direction === laneDir) seenLane = true;
                   if (!seenLane) continue;
                 }
-                laneTiles += 1;
-                minX = Math.min(minX, placed.x);
-                minY = Math.min(minY, placed.y);
-                maxX = Math.max(maxX, placed.x + placed.w);
-                maxY = Math.max(maxY, placed.y + placed.h);
+                tiles.push(placed);
               }
-              if (laneTiles > 0) lanes.push({ arm, box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY } });
+              if (tiles.length > 0) lanes.push({ arm, tiles });
             }
             for (let i = 0; i < lanes.length; i += 1) {
               for (let j = i + 1; j < lanes.length; j += 1) {
-                expect(
-                  boxesOverlap(lanes[i]!.box, lanes[j]!.box),
-                  `${lanes[i]!.arm} lane meets ${lanes[j]!.arm}`,
-                ).toBe(false);
+                for (const a of lanes[i]!.tiles) {
+                  for (const b of lanes[j]!.tiles) {
+                    expect(boxesOverlap(a, b), `${lanes[i]!.arm} tile meets ${lanes[j]!.arm}`).toBe(false);
+                  }
+                }
               }
             }
           }

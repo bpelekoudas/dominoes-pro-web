@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { emptyBoard, placeTile, type BoardState } from "../../rules/src/board.js";
+import { emptyBoard, openEnds, placeTile, type BoardState } from "../../rules/src/board.js";
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } from "../../rules/src/engine.js";
 import { boxesOverlap, FIT_MARGIN, layoutBoard, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
-import { tileById } from "../../rules/src/tiles.js";
+import { allTiles, tileById } from "../../rules/src/tiles.js";
 import {
   boardShift,
   CAMERA_EDGE,
@@ -709,6 +709,62 @@ describe("board scale", () => {
           }
         }
       }
+    }
+  });
+
+  it("folds a lopsided two-player line so the tiles stay readable", () => {
+    // The live board ran this shape as one vertical line, so the camera fit
+    // that line into half the felt and the tiles shrank to a few pixels.
+    const remaining = allTiles().filter((tile) => tile.id !== "6-6");
+    const path = [tileById("6-6")];
+    let open = 6;
+    while (path.length < 19) {
+      const index = remaining.findIndex((tile) => tile.low === open || tile.high === open);
+      const tile = remaining.splice(index, 1)[0]!;
+      path.push(tile);
+      open = tile.low === open ? tile.high : tile.low;
+    }
+    let board = placeTile(emptyBoard(), "lead", path[0]!);
+    for (const tile of path.slice(1)) {
+      const ends = openEnds(board).map((end) => end.id);
+      board = placeTile(board, ends.includes("east") ? "east" : ends[0]!, tile);
+    }
+    const tables = [
+      { name: "412", felt: { w: 412, h: 915 }, minPx: 24 },
+      { name: "473", felt: { w: 473, h: 1024 }, minPx: 24 },
+      { name: "cover", felt: { w: 344, h: 882 }, minPx: 16 },
+      { name: "inner", felt: { w: 751, h: 832 }, minPx: 20 },
+    ];
+    for (const table of tables) {
+      const zones = seatZones(table.felt, 2);
+      zones.push({ left: 0, top: table.felt.h - 160, right: table.felt.w, bottom: table.felt.h });
+      const insets = fitInsets(table.felt, zones);
+      const view = feltScale({
+        board,
+        felt: table.felt,
+        screenWidth: table.felt.w,
+        zones,
+        previous: null,
+        newHand: true,
+      });
+      const layout = layoutBoard(board, view.limits);
+      const pan = boardShift(insets);
+      expect(contained(layout.tiles, table.felt, insets, pan, view.scale, 2), `${table.name} contained`).toBe(true);
+      expect(view.scale * TILE_SHORT, `${table.name} tile`).toBeGreaterThanOrEqual(table.minPx);
+      for (let i = 0; i < layout.tiles.length; i += 1) {
+        for (let j = i + 1; j < layout.tiles.length; j += 1) {
+          expect(boxesOverlap(layout.tiles[i]!, layout.tiles[j]!), `${table.name} overlap`).toBe(false);
+        }
+      }
+      const columns = new Set(
+        layout.tiles
+          .filter((tile) => tile.arm === "east" && (tile.direction === "north" || tile.direction === "south"))
+          .map((tile) => Math.round((tile.x + tile.w / 2) / 20)),
+      );
+      expect(columns.size, `${table.name} folds`).toBeGreaterThan(1);
+      const stem = layout.tiles.filter((tile) => tile.arm === "east");
+      const turn = stem.findIndex((tile) => tile.direction !== "east");
+      expect(turn, `${table.name} two tiles out first`).toBeGreaterThanOrEqual(2);
     }
   });
 
