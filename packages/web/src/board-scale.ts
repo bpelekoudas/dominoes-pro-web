@@ -81,10 +81,9 @@ function withAir(insets: AxisInsets, felt: FeltSize, air: number): AxisInsets {
 
 /**
  * Tile size and the felt the arms run out to are the same decision.
- * The region is the on-screen felt, minus badges and hands, measured in
- * board pixels at the current scale. Arms run to that edge. The picture
- * eases out only when the chain still does not fit after that, and only
- * outward.
+ * The region is the on-screen felt with a small margin, measured in board
+ * pixels at the size the hand is already showing. Arms run to that edge.
+ * The picture eases out only when the chain would cross it, and only outward.
  */
 export function feltScale(input: {
   board: BoardState;
@@ -98,34 +97,44 @@ export function feltScale(input: {
 }): { scale: number; limits: { width: number; height: number } } {
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
-  const readablePx = input.readablePx ?? (screen >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX);
-  const readable = Math.min(open, readablePx / TILE_SHORT);
-  const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
-  // Side lanes use the full gap between the seat badges. The extra air is
-  // vertical, so a column turns before the top seat and the bottom rule.
-  const roomW = Math.max(TILE_LONG * 2, input.felt.w - insets.left - insets.right);
-  const roomH = Math.max(TILE_LONG * 2, input.felt.h - insets.top - insets.bottom - CHAIN_CLEAR);
-  // Lay the snake out once, into the felt at 30px on a phone. That is wide
-  // enough for the side lanes to sit on the badge line, and tall enough that
-  // a column turns when it reaches the seat instead of growing past it.
-  const layoutScale = Math.min(readable, (screen >= 720 ? 40 : 30) / TILE_SHORT);
-  // The design edge is the badge line. A wider layout puts tiles past the
-  // seats, and sliding the picture to catch them pushes the other side off.
-  const limits = {
-    width: Math.max(TILE_LONG * 3, roomW / layoutScale),
-    height: Math.max(TILE_LONG * 2, roomH / layoutScale),
-  };
-  const scale = containScale({
-    tiles: layoutBoard(input.board, limits).tiles,
-    felt: input.felt,
-    screenWidth: screen,
-    reserve: input.reserve,
-    zones: input.zones,
-    previous: input.previous,
-    newHand: input.newHand,
-    readablePx,
+  const room = safeRoom(input.felt, withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR));
+  // The hand opens at the large size. The snake turns at the edge of the felt
+  // at THAT size. Laying it out at 30px spread a short chain across the whole
+  // table, and the camera then shrank to fit the empty spread.
+  const held = !input.newHand && input.previous != null && Number.isFinite(input.previous) ? Math.min(input.previous, open) : open;
+  const limitsFor = (scale: number) => ({
+    width: Math.max(TILE_LONG * 2, room.w / Math.max(0.2, scale)),
+    height: Math.max(TILE_LONG * 2, room.h / Math.max(0.2, scale)),
   });
+  const limits = limitsFor(held);
+  const tiles = layoutBoard(input.board, limits).tiles;
+  // Hold the opening size while this fold still sits inside the felt.
+  // Zoom out only by the amount the new tile would otherwise stick out.
+  let scale = Math.min(held, fitInRoom(tiles, room));
+  if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
+    scale = Math.min(input.previous, scale);
+  }
   return { scale, limits };
+}
+
+/**
+ * The playing surface, with a small margin. Badges sit on the felt; they
+ * must not shrink the picture before a tile reaches this edge.
+ */
+export function safeRoom(felt: FeltSize, _insets: AxisInsets): FeltSize {
+  const marginX = Math.max(20, felt.w * 0.04);
+  const marginY = Math.max(20, felt.h * 0.04);
+  return {
+    w: Math.max(1, felt.w - marginX * 2),
+    h: Math.max(1, felt.h - marginY * 2),
+  };
+}
+
+function fitInRoom(tiles: readonly LayoutBox[], room: FeltSize): number {
+  const box = chainBounds(tiles, 0);
+  const fitW = room.w / Math.max(1, box.w);
+  const fitH = room.h / Math.max(1, box.h);
+  return Math.min(Number.isFinite(fitW) && fitW > 0 ? fitW : 1, Number.isFinite(fitH) && fitH > 0 ? fitH : 1);
 }
 
 /**

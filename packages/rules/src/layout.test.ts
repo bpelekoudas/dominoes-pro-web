@@ -590,7 +590,7 @@ describe("board layout", () => {
     west = placeTile(west, "west", tileById("1-6"));
     west = placeTile(west, "west", tileById("4-6"));
     west = placeTile(west, "west", tileById("0-4"));
-    const westLayout = layoutBoard(west, { width: 200, height: 640 });
+    const westLayout = layoutBoard(west, { width: 420, height: 640 });
     const first = westLayout.tiles.find((tile) => tile.tileId === "1-6")!;
     const stem = westLayout.tiles.find((tile) => tile.tileId === "4-6")!;
     const turn = westLayout.tiles.find((tile) => tile.tileId === "0-4")!;
@@ -607,7 +607,7 @@ describe("board layout", () => {
     east = placeTile(east, "east", tileById("2-6"));
     east = placeTile(east, "east", tileById("4-6"));
     east = placeTile(east, "east", tileById("4-5"));
-    const eastLayout = layoutBoard(east, { width: 200, height: 640 });
+    const eastLayout = layoutBoard(east, { width: 420, height: 640 });
     const eastFirst = eastLayout.tiles.find((tile) => tile.tileId === "2-6")!;
     const eastStem = eastLayout.tiles.find((tile) => tile.tileId === "4-6")!;
     const eastTurn = eastLayout.tiles.find((tile) => tile.tileId === "4-5")!;
@@ -1118,7 +1118,7 @@ describe("board layout", () => {
       const ends = openEnds(board).map((end) => end.id);
       board = placeTile(board, ends.includes("east") ? "east" : ends[0]!, tile);
     }
-    for (const limit of [undefined, { width: 475, height: 791 }, { width: 394, height: 751 }] as const) {
+    for (const limit of [undefined, { width: 475, height: 791 }, { width: 450, height: 751 }] as const) {
       const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
       const chain = [
         layout.tiles.find((tile) => tile.tileId === board.center!.tileId)!,

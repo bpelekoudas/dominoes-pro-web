@@ -987,18 +987,14 @@ function portraitSnakeStep(
     // does not count as one of the two full tiles the arm has to lay first.
     if (double) return kept(arm, 0, cursor.run + 1);
     const stem = straightBox(cursor.box, arm, false);
-    // Two full tiles go out before the first turn. If that reaches past the
-    // felt, the picture zooms out. Turning early is what left a one-tile stub.
-    // Two full tiles, then turn. Running on toward the badge line makes a
-    // long stem, and the column that follows it has nowhere to fold, so the
-    // picture shrinks to fit one line.
-    // Run straight to the edge. Two tiles is the minimum, not the turn.
-    // Turning after two tiles left the rest of the felt empty.
-    const needLength = cursor.full < 2;
-    if (free(stem) && (needLength || insideActive(stem))) return kept(arm, 0, cursor.run + 1);
+    // Run straight while the next tile still lands inside the felt. Turn at
+    // the edge when that turn keeps a half-tile gap. Only run past the edge
+    // when the turn itself would crowd another tile.
     const parentDouble = cursor.box.h > cursor.box.w;
     const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : bendBox(cursor.box, arm, laneDir, false);
-    if (free(corner)) {
+    const cornerOk = free(corner) && laneClear(corner, cursor.box, placed);
+    if (free(stem) && (insideActive(stem) || (cursor.full < 2 && !cornerOk))) return kept(arm, 0, cursor.run + 1);
+    if (cornerOk) {
       return {
         box: corner,
         dir: laneDir,
@@ -1216,7 +1212,7 @@ function snakeStep(
     && cursor.full < 2
   ) {
     const stem = straightBox(cursor.box, arm, false);
-    if (!overlapsPlaced(stem, placed) && !boxesOverlap(stem, cursor.box)) {
+    if (!overlapsPlaced(stem, placed) && !boxesOverlap(stem, cursor.box) && insideActive(stem)) {
       return {
         box: stem,
         dir: arm,
@@ -1473,21 +1469,25 @@ function candidateSteps(parent: LayoutBox, dir: LayoutDir, isDouble: boolean): A
 }
 
 /** Keep the proposed cell when it is free. Otherwise take the next join that is. */
+function adopt(proposed: StepResult, step: { box: LayoutBox; way: LayoutDir }): StepResult {
+  const turned = step.way !== proposed.dir;
+  return {
+    ...proposed,
+    box: step.box,
+    dir: step.way,
+    row: proposed.row + (turned ? 1 : 0),
+    run: turned ? 1 : Math.max(1, proposed.run),
+    line: axisLine(step.box, step.way),
+    opening: false,
+    fromDouble: false,
+  };
+}
+
 function clearStep(proposed: StepResult, parent: LayoutBox, isDouble: boolean, blockers: readonly LayoutBox[]): StepResult {
   if (!stepHits(proposed.box, parent, blockers)) return proposed;
   for (const step of candidateSteps(parent, proposed.dir, isDouble)) {
     if (stepHits(step.box, parent, blockers)) continue;
-    const turned = step.way !== proposed.dir;
-    return {
-      ...proposed,
-      box: step.box,
-      dir: step.way,
-      row: proposed.row + (turned ? 1 : 0),
-      run: turned ? 1 : Math.max(1, proposed.run),
-      line: axisLine(step.box, step.way),
-      opening: false,
-      fromDouble: false,
-    };
+    return adopt(proposed, step);
   }
   return proposed;
 }

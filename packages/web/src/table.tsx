@@ -10,7 +10,6 @@ import {
   CAMERA_EASE_MS,
   cameraSettlesOn,
   chainViewShift,
-  containScale,
   feltScale,
   fitInsets,
   READABLE_PHONE_PX,
@@ -194,9 +193,13 @@ export function Table({
         newHand: previous == null,
         readablePx,
       });
-      // One layout for the whole hand. A later badge must not redraw tiles
-      // that are already on the felt; the scale is what makes room.
-      if (!limitHold.current || limitHold.current.hand !== handKey) {
+      // Badges jitter by a pixel and must not refold the snake. A zoom-out
+      // grows the design felt, and that growth is the one change that sticks.
+      const grew =
+        limitHold.current?.hand === handKey &&
+        (solved.limits.width > limitHold.current.limits.width + 4 ||
+          solved.limits.height > limitHold.current.limits.height + 4);
+      if (!limitHold.current || limitHold.current.hand !== handKey || grew) {
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
@@ -210,16 +213,11 @@ export function Table({
         }
         return handLimits;
       });
-      const zoom = containScale({
-        tiles: layout.tiles,
-        felt,
-        screenWidth,
-        reserve: nextReserve,
-        zones,
-        previous,
-        newHand: previous == null,
-        readablePx,
-      });
+      // feltScale already held the opening size and zoomed only if this
+      // chain would cross the felt. The layout on screen may still be the
+      // previous fold until the new limits commit; use the scale that matches
+      // the limits we just chose.
+      const zoom = solved.scale;
       const nextShift = chainViewShift(layout.tiles, zoom, boardShift(room), felt);
       const tileIds = layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
