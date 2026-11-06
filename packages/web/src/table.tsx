@@ -7,7 +7,7 @@ import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
-  chainViewShift,
+  containScale,
   feltScale,
   fitInsets,
   READABLE_PHONE_PX,
@@ -154,6 +154,7 @@ export function Table({
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
+  const limitHold = useRef<{ hand: string; limits: { width: number; height: number } } | null>(null);
   const frozen = useRef(false);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
@@ -204,21 +205,33 @@ export function Table({
         newHand: previous == null,
         readablePx,
       });
+      // One layout for the whole hand. A later badge must not redraw tiles
+      // that are already on the felt; the scale is what makes room.
+      if (!limitHold.current || limitHold.current.hand !== handKey) {
+        limitHold.current = { hand: handKey, limits: solved.limits };
+      }
+      const handLimits = limitHold.current.limits;
       setLimits((current) => {
         if (
           current &&
-          Math.abs(current.width - solved.limits.width) < 8 &&
-          Math.abs(current.height - solved.limits.height) < 8
+          Math.abs(current.width - handLimits.width) < 1 &&
+          Math.abs(current.height - handLimits.height) < 1
         ) {
           return current;
         }
-        return solved.limits;
+        return handLimits;
       });
-      const zoom = solved.scale;
-      const shift = chainViewShift(layout.tiles, zoom, boardShift(room), {
-        w: Math.max(1, felt.w - room.left - room.right),
-        h: Math.max(1, felt.h - room.top - room.bottom),
+      const zoom = containScale({
+        tiles: layout.tiles,
+        felt,
+        screenWidth,
+        reserve: nextReserve,
+        zones,
+        previous,
+        newHand: previous == null,
+        readablePx,
       });
+      const shift = boardShift(room);
       const none = { top: 0, right: 0, bottom: 0, left: 0 };
       setClip((current) => (sameInsets(current, none) ? current : none));
       held.current = { hand: handKey, scale: zoom };

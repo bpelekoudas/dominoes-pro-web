@@ -831,14 +831,11 @@ input {
   transform-origin: top left;
   transition: none;
 }
-.table-scroll[data-camera="armed"] .board-scaler {
-  transition:
-    width 480ms cubic-bezier(0.22, 0.8, 0.28, 1),
-    height 480ms cubic-bezier(0.22, 0.8, 0.28, 1),
-    transform 480ms cubic-bezier(0.22, 0.8, 0.28, 1);
-}
+.table-scroll[data-camera="armed"] .board-scaler,
 .table-scroll[data-camera="armed"] .board-stage {
-  transition: transform 480ms cubic-bezier(0.22, 0.8, 0.28, 1);
+  /* The fit is applied in the same frame. An ease would paint the new
+     chain at the old, too-large scale and clip it on the way down. */
+  transition: none;
 }
 .table-scroll[data-cam-user="drag"] .board-scaler,
 .table-scroll[data-cam-user="drag"] .board-stage {

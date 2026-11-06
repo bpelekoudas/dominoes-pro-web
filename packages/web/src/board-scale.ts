@@ -109,24 +109,63 @@ export function feltScale(input: {
   // enough for the side lanes to sit on the badge line, and tall enough that
   // a column turns when it reaches the seat instead of growing past it.
   const layoutScale = Math.min(readable, (screen >= 720 ? 40 : 30) / TILE_SHORT);
-  // A long column shrinks the picture below this layout size, which pulled
-  // the side lanes back toward the centre. On a tall felt, lay the width
-  // out roomier so an arm can still reach the 5/6 line before it turns.
-  const portraitFelt = input.felt.h >= input.felt.w * 1.35;
-  const widthScale = portraitFelt ? Math.min(layoutScale, 15 / TILE_SHORT) : layoutScale;
+  // The design edge is the badge line. A wider layout puts tiles past the
+  // seats, and sliding the picture to catch them pushes the other side off.
   const limits = {
-    width: Math.max(TILE_LONG * 3, roomW / widthScale),
+    width: Math.max(TILE_LONG * 3, roomW / layoutScale),
     height: Math.max(TILE_LONG * 2, roomH / layoutScale),
   };
-  // Fit the chain's own box, not a spinner-centred square. A long column
-  // on one side then does not force the empty side to shrink the picture.
-  const span = chainBounds(layoutBoard(input.board, limits).tiles, 0);
-  const fit = Math.min(roomW / Math.max(1, span.w), roomH / Math.max(1, span.h));
-  let scale = Math.min(open, Number.isFinite(fit) && fit > 0 ? fit : open);
+  const scale = containScale({
+    tiles: layoutBoard(input.board, limits).tiles,
+    felt: input.felt,
+    screenWidth: screen,
+    reserve: input.reserve,
+    zones: input.zones,
+    previous: input.previous,
+    newHand: input.newHand,
+    readablePx,
+  });
+  return { scale, limits };
+}
+
+/**
+ * How far the chain reaches from the spinner, in design pixels.
+ * The picture stays on the spinner, so each side has to fit in half the safe felt.
+ */
+export function spinnerReach(tiles: readonly LayoutBox[]): { halfW: number; halfH: number } {
+  let halfW = 1;
+  let halfH = 1;
+  for (const tile of tiles) {
+    halfW = Math.max(halfW, Math.abs(tile.x), Math.abs(tile.x + tile.w));
+    halfH = Math.max(halfH, Math.abs(tile.y), Math.abs(tile.y + tile.h));
+  }
+  return { halfW, halfH };
+}
+
+/** Scale that keeps every tile, and its gold ring, inside the safe felt. Only shrinks during a hand. */
+export function containScale(input: {
+  tiles: readonly LayoutBox[];
+  felt: FeltSize;
+  screenWidth: number;
+  reserve?: AxisInsets;
+  zones?: readonly ZoneRect[];
+  previous: number | null;
+  newHand: boolean;
+  readablePx?: number;
+}): number {
+  const screen = Math.max(1, input.screenWidth);
+  const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
+  const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
+  const roomW = Math.max(TILE_LONG, input.felt.w - insets.left - insets.right);
+  const roomH = Math.max(TILE_LONG, input.felt.h - insets.top - insets.bottom - CHAIN_CLEAR);
+  const { halfW, halfH } = spinnerReach(input.tiles);
+  const fitW = Math.max(1, roomW / 2 - TILE_RING_PAD) / halfW;
+  const fitH = Math.max(1, roomH / 2 - TILE_RING_PAD) / halfH;
+  let scale = Math.min(open, Number.isFinite(fitW) && fitW > 0 ? fitW : open, Number.isFinite(fitH) && fitH > 0 ? fitH : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
     scale = Math.min(input.previous, scale);
   }
-  return { scale, limits };
+  return scale;
 }
 
 /**
@@ -194,6 +233,8 @@ export const CAMERA_EASE_MS = 240;
 export const BADGE_GAP = 10;
 /** Extra air inside the clear zone. The chain shrinks before it touches a seat or the felt edge. */
 const CHAIN_CLEAR = 16;
+/** Screen pixels kept around a tile so the gold ring stays on the felt. */
+export const TILE_RING_PAD = 6;
 
 export interface AxisInsets {
   top: number;
@@ -228,31 +269,16 @@ export function boardShift(insets: AxisInsets): { x: number; y: number } {
 }
 
 /**
- * Put the chain's box in the safe centre. The spinner stays the coordinate
- * origin, so tiles do not slide inside the stage; the whole picture eases
- * once to this shift.
+ * The spinner stays put. Asymmetric chrome (a deeper header than a footer)
+ * shifts the safe centre once. The chain growing does not slide the board.
  */
 export function chainViewShift(
-  tiles: readonly LayoutBox[],
-  scale: number,
+  _tiles: readonly LayoutBox[],
+  _scale: number,
   insetShift: { x: number; y: number },
-  room?: { w: number; h: number },
+  _room?: { w: number; h: number },
 ): { x: number; y: number } {
-  const box = chainBounds(tiles, 0);
-  const cy = box.y + box.h / 2;
-  // Keep the spinner on the horizontal centre. Nudge only when a tile would
-  // cross the badge line, so a long side arm stays out by the badge instead
-  // of being pulled back to the middle of the chain's box.
-  let x = insetShift.x;
-  if (room && room.w > 0) {
-    const half = room.w / 2;
-    const left = box.x * scale + x;
-    const right = (box.x + box.w) * scale + x;
-    if (right > half) x -= right - half;
-    const shiftedLeft = box.x * scale + x;
-    if (shiftedLeft < -half) x += -half - shiftedLeft;
-  }
-  return { x, y: insetShift.y - cy * scale };
+  return { x: insetShift.x, y: insetShift.y };
 }
 
 export function scaleForAxis(bounds: FeltSize, felt: FeltSize, insets: AxisInsets): number {

@@ -1,13 +1,17 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { emptyBoard, placeTile, type BoardState } from "../../rules/src/board.js";
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } from "../../rules/src/engine.js";
-import { boxesOverlap, FIT_MARGIN, layoutBoard, TILE_SHORT } from "../../rules/src/layout.js";
+import { boxesOverlap, FIT_MARGIN, layoutBoard, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import { tileById } from "../../rules/src/tiles.js";
 import {
   boardShift,
   CAMERA_EDGE,
   cameraScale,
+  chainViewShift,
+  containScale,
+  feltScale,
   centeredChain,
   chainBounds,
   clearanceInsets,
@@ -517,6 +521,112 @@ describe("board scale", () => {
     expect(checked).toBeGreaterThan(40);
   }, 40_000);
 
+  it("keeps every tile on the felt at every turn, without sliding the board", () => {
+    const tables = [
+      { name: "473", felt: { w: 473, h: 1024 } },
+      { name: "412", felt: { w: 412, h: 915 } },
+      { name: "cover", felt: { w: 344, h: 882 } },
+      { name: "inner", felt: { w: 751, h: 832 } },
+    ];
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/data-camera="armed"\] \.board-scaler[\s\S]{0,240}transition:\s*none/);
+    let turns = 0;
+    let smallest = Number.POSITIVE_INFINITY;
+    for (const table of tables) {
+      for (const seed of [1, 4, 9]) {
+        let previous: number | null = null;
+        let shift: { x: number; y: number } | null = null;
+        for (const board of playHands(4, seed)) {
+          const zones = seatZones(table.felt, 4);
+          const insets = fitInsets(table.felt, zones);
+          const view = feltScale({
+            board,
+            felt: table.felt,
+            screenWidth: table.felt.w,
+            zones,
+            previous,
+            newHand: previous == null,
+          });
+          const layout = layoutBoard(board, view.limits);
+          const pan = chainViewShift(layout.tiles, view.scale, boardShift(insets), {
+            w: table.felt.w,
+            h: table.felt.h,
+          });
+          if (shift) expect(pan).toEqual(shift);
+          shift = pan;
+          const ring = 2;
+          for (const tile of layout.tiles) {
+            const left = table.felt.w / 2 + pan.x + tile.x * view.scale;
+            const top = table.felt.h / 2 + pan.y + tile.y * view.scale;
+            const right = left + tile.w * view.scale;
+            const bottom = top + tile.h * view.scale;
+            expect(left, `${table.name} ${tile.tileId} left`).toBeGreaterThanOrEqual(insets.left + ring - 0.5);
+            expect(top, `${table.name} ${tile.tileId} top`).toBeGreaterThanOrEqual(insets.top + ring - 0.5);
+            expect(right, `${table.name} ${tile.tileId} right`).toBeLessThanOrEqual(table.felt.w - insets.right - ring + 0.5);
+            expect(bottom, `${table.name} ${tile.tileId} bottom`).toBeLessThanOrEqual(table.felt.h - insets.bottom - ring + 0.5);
+          }
+          if (previous != null) {
+            expect(view.scale).toBeLessThanOrEqual(previous + 1e-9);
+            // A frame between the old scale and the fit would paint the new
+            // chain too large. The camera publishes the fit immediately.
+            if (!contained(layout.tiles, table.felt, insets, pan, previous, ring)) {
+              const mid = previous + (view.scale - previous) * 0.5;
+              expect(mid).toBeGreaterThan(view.scale);
+              expect(contained(layout.tiles, table.felt, insets, pan, view.scale, ring)).toBe(true);
+            } else {
+              for (const step of [0.25, 0.5, 0.75, 1]) {
+                const frame = previous + (view.scale - previous) * step;
+                expect(
+                  contained(layout.tiles, table.felt, insets, pan, frame, ring),
+                  `${table.name} frame ${step}`,
+                ).toBe(true);
+              }
+            }
+          }
+          smallest = Math.min(smallest, view.scale * TILE_SHORT);
+          previous = view.scale;
+          turns += 1;
+        }
+        const fresh = feltScale({
+          board: playHands(4, seed).at(-1)!,
+          felt: table.felt,
+          screenWidth: table.felt.w,
+          zones: seatZones(table.felt, 4),
+          previous: null,
+          newHand: true,
+        });
+        if (previous != null) expect(fresh.scale).toBeGreaterThanOrEqual(previous - 1e-9);
+      }
+    }
+    expect(turns).toBeGreaterThan(40);
+    expect(smallest).toBeGreaterThan(8);
+    expect(smallest).toBeLessThan(TILE_LONG);
+  }, 40_000);
+
+  it("holds a lopsided arm inside the felt on a phone and a fold", () => {
+    let board = emptyBoard();
+    const ids = ["6-6", "5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-2", "2-4", "4-6", "3-6", "1-3", "1-4", "0-4"];
+    board = placeTile(board, "lead", tileById(ids[0]!));
+    for (const id of ids.slice(1)) board = placeTile(board, "east", tileById(id));
+    for (const felt of [{ w: 412, h: 915 }, { w: 344, h: 882 }, { w: 473, h: 1024 }, { w: 751, h: 832 }]) {
+      const zones = seatZones(felt, 4);
+      const insets = fitInsets(felt, zones);
+      const view = feltScale({ board, felt, screenWidth: felt.w, zones, previous: null, newHand: true });
+      const pan = boardShift(insets);
+      const layout = layoutBoard(board, view.limits);
+      expect(contained(layout.tiles, felt, insets, pan, view.scale, 2), `${felt.w}x${felt.h}`).toBe(true);
+      const again = containScale({
+        tiles: layout.tiles,
+        felt,
+        screenWidth: felt.w,
+        zones,
+        previous: view.scale,
+        newHand: false,
+      });
+      expect(again).toBeLessThanOrEqual(view.scale + 1e-9);
+    }
+  });
+
   it("keeps a settled 4-seat chain off the badges while the camera ease can still cross one", () => {
     const tables = [
       { name: "phone", felt: { w: 390, h: 644 }, screen: 390 },
@@ -659,6 +769,26 @@ function layoutForBoard(
   return layoutBoard(board, {
     width: Math.max(160, ((felt.w - room.left - room.right) * TILE_SHORT) / readable),
     height: Math.max(160, ((felt.h - room.top - room.bottom) * TILE_SHORT) / readable),
+  });
+}
+
+function contained(
+  tiles: readonly { x: number; y: number; w: number; h: number }[],
+  felt: { w: number; h: number },
+  insets: { top: number; right: number; bottom: number; left: number },
+  pan: { x: number; y: number },
+  scale: number,
+  ring: number,
+): boolean {
+  return tiles.every((tile) => {
+    const left = felt.w / 2 + pan.x + tile.x * scale;
+    const top = felt.h / 2 + pan.y + tile.y * scale;
+    const right = left + tile.w * scale;
+    const bottom = top + tile.h * scale;
+    return left >= insets.left + ring - 0.5
+      && top >= insets.top + ring - 0.5
+      && right <= felt.w - insets.right - ring + 0.5
+      && bottom <= felt.h - insets.bottom - ring + 0.5;
   });
 }
 
