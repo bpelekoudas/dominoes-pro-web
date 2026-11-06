@@ -772,14 +772,15 @@ function sideLaneStep(
       // x and only has to stay inside the felt vertically.
       const sameColumn = Math.abs(next.x - cursor.box.x) < 1 && Math.abs(next.w - cursor.box.w) < 1;
       const roomy = separated(next) && followerOk && (insideActive(next) || (sameColumn && withinHeight));
-      const cap = Math.max(4, Math.floor(activeLimit.height / (TILE_LONG + TILE_GAP) / 2));
       const after = straightBox(next, cursor.dir, false);
       const afterOk = separated(after) || (["west", "east"] as const).some((way) => separated(bendBox(next, cursor.dir, way, false)));
       const nextHasExit = (["north", "south", "east", "west"] as const).some((way) => {
         const step = straightBox(next, way, false);
         return !overlapsPlaced(step, placed) && !boxesOverlap(step, next) && !boxesOverlap(step, cursor.box);
       });
-      const keepRunning = roomy && afterOk && nextHasExit && laterOk && (cursor.run < cap || upcoming.length <= 2);
+      // Run the column to the edge of the felt. A half-height cap turned
+      // early and folded the arm into a maze.
+      const keepRunning = roomy && afterOk && nextHasExit && laterOk;
       if (keepRunning) return park(next, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
       // Cross toward the emptier half. One tile starts the bridge.
       const cx = cursor.box.x + cursor.box.w / 2;
@@ -965,8 +966,10 @@ function portraitSnakeStep(
     // Two full tiles, then turn. Running on toward the badge line makes a
     // long stem, and the column that follows it has nowhere to fold, so the
     // picture shrinks to fit one line.
+    // Run straight to the edge. Two tiles is the minimum, not the turn.
+    // Turning after two tiles left the rest of the felt empty.
     const needLength = cursor.full < 2;
-    if (needLength && free(stem)) return kept(arm, 0, cursor.run + 1);
+    if (free(stem) && (needLength || insideActive(stem))) return kept(arm, 0, cursor.run + 1);
     const parentDouble = cursor.box.h > cursor.box.w;
     const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : bendBox(cursor.box, arm, laneDir, false);
     if (free(corner)) {

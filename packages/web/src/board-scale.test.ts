@@ -9,6 +9,7 @@ import {
   boardShift,
   CAMERA_EDGE,
   cameraScale,
+  cameraSettlesOn,
   chainViewShift,
   containScale,
   feltScale,
@@ -291,6 +292,46 @@ describe("board scale", () => {
     expect(east).toBeCloseTo(west, 5);
   });
 
+  it("recenters the chain after a tile lands and stays still while choosing", () => {
+    expect(cameraSettlesOn(["6-6", "6-5"], ["6-6", "6-5"])).toBe(false);
+    expect(cameraSettlesOn(["6-6"], ["6-6", "6-5"])).toBe(true);
+    expect(cameraSettlesOn([], ["6-6"])).toBe(true);
+    const felt = { w: 412, h: 915 };
+    const zones = [
+      { left: 16, top: 0, right: felt.w - 16, bottom: 48 },
+      { left: 0, top: felt.h - 160, right: felt.w, bottom: felt.h },
+    ];
+    const insets = fitInsets(felt, zones);
+    const oneSided = [
+      { x: -18, y: -36, w: 36, h: 72 },
+      { x: 20, y: -18, w: 72, h: 36 },
+      { x: 94, y: -18, w: 72, h: 36 },
+      { x: 168, y: -18, w: 72, h: 36 },
+      { x: 206, y: 20, w: 36, h: 72 },
+      { x: 206, y: 94, w: 36, h: 72 },
+    ];
+    const scale = containScale({
+      tiles: oneSided,
+      felt,
+      screenWidth: felt.w,
+      zones,
+      previous: null,
+      newHand: true,
+    });
+    const pan = chainViewShift(oneSided, scale, boardShift(insets));
+    const box = chainBounds(oneSided, 0);
+    const safeCx = insets.left + (felt.w - insets.left - insets.right) / 2;
+    const safeCy = insets.top + (felt.h - insets.top - insets.bottom) / 2;
+    const chainCx = felt.w / 2 + pan.x + (box.x + box.w / 2) * scale;
+    const chainCy = felt.h / 2 + pan.y + (box.y + box.h / 2) * scale;
+    expect(Math.abs(chainCx - safeCx)).toBeLessThan(4);
+    expect(Math.abs(chainCy - safeCy)).toBeLessThan(4);
+    const again = chainViewShift(oneSided, scale, boardShift(insets));
+    expect(again).toEqual(pan);
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/--camera-ease:\s*480ms/);
+  });
+
   it("fits a tall chain under a top badge and clear of the side racks", () => {
     const felt = { w: 920, h: 700 };
     const bounds = { w: 220, h: 640 };
@@ -538,7 +579,6 @@ describe("board scale", () => {
     for (const table of tables) {
       for (const seed of [1, 4, 9]) {
         let previous: number | null = null;
-        let shift: { x: number; y: number } | null = null;
         for (const board of playHands(4, seed)) {
           const zones = seatZones(table.felt, 4);
           const insets = fitInsets(table.felt, zones);
@@ -555,8 +595,13 @@ describe("board scale", () => {
             w: table.felt.w,
             h: table.felt.h,
           });
-          if (shift) expect(pan).toEqual(shift);
-          shift = pan;
+          const box = chainBounds(layout.tiles, 0);
+          const safeCx = insets.left + (table.felt.w - insets.left - insets.right) / 2;
+          const safeCy = insets.top + (table.felt.h - insets.top - insets.bottom) / 2;
+          const chainCx = table.felt.w / 2 + pan.x + (box.x + box.w / 2) * view.scale;
+          const chainCy = table.felt.h / 2 + pan.y + (box.y + box.h / 2) * view.scale;
+          expect(Math.abs(chainCx - safeCx), `${table.name} centred x`).toBeLessThan(4);
+          expect(Math.abs(chainCy - safeCy), `${table.name} centred y`).toBeLessThan(4);
           const ring = 2;
           for (const tile of layout.tiles) {
             const left = table.felt.w / 2 + pan.x + tile.x * view.scale;
@@ -610,7 +655,6 @@ describe("board scale", () => {
     const felt = { w: 412, h: 915 };
     const zones = seatZones(felt, 4);
     const insets = fitInsets(felt, zones);
-    const pan = boardShift(insets);
     const before = [
       { x: -18, y: -36, w: 36, h: 72 },
       { x: -18, y: 38, w: 36, h: 400 },
@@ -619,21 +663,23 @@ describe("board scale", () => {
     const after = [...before, added];
     const previous = containScale({ tiles: before, felt, screenWidth: felt.w, zones, previous: null, newHand: true });
     const next = containScale({ tiles: after, felt, screenWidth: felt.w, zones, previous, newHand: false });
+    const panBefore = chainViewShift(before, previous, boardShift(insets));
+    const panAfter = chainViewShift(after, next, boardShift(insets));
     expect(next).toBeLessThan(previous);
-    expect(contained(before, felt, insets, pan, previous, 2)).toBe(true);
-    expect(contained(after, felt, insets, pan, previous, 2)).toBe(false);
+    expect(contained(before, felt, insets, panBefore, previous, 2)).toBe(true);
+    expect(contained(after, felt, insets, panBefore, previous, 2)).toBe(false);
     const samples = zoomSamples(previous, next, 4);
     expect(samples[samples.length - 1]).toBeCloseTo(next, 8);
     for (let index = 1; index < samples.length; index += 1) {
       expect(samples[index]!).toBeLessThan(samples[index - 1]!);
     }
     const early = previous + (next - previous) * 0.05;
-    expect(contained(before, felt, insets, pan, early, 2), "tiles already down stay inside").toBe(true);
-    expect(contained(after, felt, insets, pan, early, 2), "the new tile is still outside early in the ease").toBe(false);
+    expect(contained(before, felt, insets, panBefore, early, 2), "tiles already down stay inside").toBe(true);
+    expect(contained(after, felt, insets, panBefore, early, 2), "the new tile is still outside early in the ease").toBe(false);
     for (const frame of samples) {
-      expect(contained(before, felt, insets, pan, frame, 2), `old tiles at ${frame}`).toBe(true);
+      expect(contained(before, felt, insets, chainViewShift(before, frame, boardShift(insets)), frame, 2), `old tiles at ${frame}`).toBe(true);
     }
-    expect(contained(after, felt, insets, pan, next, 2)).toBe(true);
+    expect(contained(after, felt, insets, panAfter, next, 2)).toBe(true);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
     expect(css).toMatch(/is-camera-hold \{\s*visibility:\s*hidden/);
   });
@@ -647,8 +693,8 @@ describe("board scale", () => {
       const zones = seatZones(felt, 4);
       const insets = fitInsets(felt, zones);
       const view = feltScale({ board, felt, screenWidth: felt.w, zones, previous: null, newHand: true });
-      const pan = boardShift(insets);
       const layout = layoutBoard(board, view.limits);
+      const pan = chainViewShift(layout.tiles, view.scale, boardShift(insets));
       expect(contained(layout.tiles, felt, insets, pan, view.scale, 2), `${felt.w}x${felt.h}`).toBe(true);
       const again = containScale({
         tiles: layout.tiles,
@@ -690,7 +736,7 @@ describe("board scale", () => {
           newHand: true,
         });
         const layout = layoutBoard(chain, view.limits);
-        const pan = boardShift(insets);
+        const pan = chainViewShift(layout.tiles, view.scale, boardShift(insets));
         expect(contained(layout.tiles, table.felt, insets, pan, view.scale, 2), `${table.name} ${label}`).toBe(true);
         for (const arm of ["west", "east"] as const) {
           const tiles = layout.tiles.filter((tile) => tile.arm === arm);
@@ -748,7 +794,7 @@ describe("board scale", () => {
         newHand: true,
       });
       const layout = layoutBoard(board, view.limits);
-      const pan = boardShift(insets);
+      const pan = chainViewShift(layout.tiles, view.scale, boardShift(insets));
       expect(contained(layout.tiles, table.felt, insets, pan, view.scale, 2), `${table.name} contained`).toBe(true);
       expect(view.scale * TILE_SHORT, `${table.name} tile`).toBeGreaterThanOrEqual(table.minPx);
       for (let i = 0; i < layout.tiles.length; i += 1) {
@@ -892,7 +938,10 @@ describe("board scale", () => {
               });
               const layout = layoutBoard(board, view.limits);
               expect(layoutOverlaps(layout), `${label} ${felt.name}`).toBe(false);
-              expect(contained(layout.tiles, felt, insets, boardShift(insets), view.scale, 2), `${label} ${felt.name} felt`).toBe(true);
+              expect(
+                contained(layout.tiles, felt, insets, chainViewShift(layout.tiles, view.scale, boardShift(insets)), view.scale, 2),
+                `${label} ${felt.name} felt`,
+              ).toBe(true);
             }
           }
         }

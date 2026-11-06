@@ -158,9 +158,11 @@ export function containScale(input: {
   const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
   const roomW = Math.max(TILE_LONG, input.felt.w - insets.left - insets.right);
   const roomH = Math.max(TILE_LONG, input.felt.h - insets.top - insets.bottom - CHAIN_CLEAR);
-  const { halfW, halfH } = spinnerReach(input.tiles);
-  const fitW = Math.max(1, roomW / 2 - TILE_RING_PAD) / halfW;
-  const fitH = Math.max(1, roomH / 2 - TILE_RING_PAD) / halfH;
+  // Fit the chain's own box into the whole safe felt. The spinner used to
+  // claim the centre, so a one-sided chain was squeezed into half the felt.
+  const box = chainBounds(input.tiles, 0);
+  const fitW = Math.max(1, roomW - TILE_RING_PAD * 2) / Math.max(1, box.w);
+  const fitH = Math.max(1, roomH - TILE_RING_PAD * 2) / Math.max(1, box.h);
   let scale = Math.min(open, Number.isFinite(fitW) && fitW > 0 ? fitW : open, Number.isFinite(fitH) && fitH > 0 ? fitH : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
     scale = Math.min(input.previous, scale);
@@ -281,16 +283,27 @@ export function zoomSamples(from: number, to: number, steps = 4): number[] {
 }
 
 /**
- * The spinner stays put. Asymmetric chrome (a deeper header than a footer)
- * shifts the safe centre once. The chain growing does not slide the board.
+ * Put the chain's own box on the safe centre of the felt. A one-sided arm
+ * used to sit high, with empty felt below, because the spinner stayed put.
+ * `insetShift` is the chrome offset (a deeper header than a footer).
  */
 export function chainViewShift(
-  _tiles: readonly LayoutBox[],
-  _scale: number,
+  tiles: readonly LayoutBox[],
+  scale: number,
   insetShift: { x: number; y: number },
   _room?: { w: number; h: number },
 ): { x: number; y: number } {
-  return { x: insetShift.x, y: insetShift.y };
+  const box = chainBounds(tiles, 0);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return { x: insetShift.x - cx * scale, y: insetShift.y - cy * scale };
+}
+
+/** True only when a tile has landed or a hand has started. Choosing does not count. */
+export function cameraSettlesOn(previousIds: readonly string[], nextIds: readonly string[]): boolean {
+  if (previousIds.length !== nextIds.length) return true;
+  const seen = new Set(previousIds);
+  return nextIds.some((id) => !seen.has(id));
 }
 
 export function scaleForAxis(bounds: FeltSize, felt: FeltSize, insets: AxisInsets): number {
