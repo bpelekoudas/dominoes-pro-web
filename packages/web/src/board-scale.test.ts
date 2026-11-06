@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { emptyBoard, openEnds, placeTile, type BoardState } from "../../rules/src/board.js";
+import { ARM_IDS, emptyBoard, openEnds, placeTile, type BoardState } from "../../rules/src/board.js";
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } from "../../rules/src/engine.js";
-import { boxesOverlap, FIT_MARGIN, layoutBoard, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
+import { boxesOverlap, FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_GAP, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import { allTiles, tileById } from "../../rules/src/tiles.js";
 import {
@@ -811,6 +811,93 @@ describe("board scale", () => {
     expect(settled).toBeGreaterThan(400);
     // The soak waits for this ease. The settled frame above is the one that has to stay clear.
     expect(crossed).toBeGreaterThan(0);
+  }, 40_000);
+
+  it("keeps fuzzed hands clear, joined, and on the felt", () => {
+    const felts = [
+      { name: "phone", w: 412, h: 915 },
+      { name: "cover", w: 344, h: 882 },
+      { name: "inner", w: 751, h: 832 },
+    ];
+    const tight = [undefined, { width: 220, height: 640 }, { width: 344, height: 720 }] as const;
+    const edgeBetween = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => {
+      const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      const gapX = Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w), 0);
+      const gapY = Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h), 0);
+      if (gapY === 0 && gapX > 0) return { gap: gapX, along: yOverlap };
+      if (gapX === 0 && gapY > 0) return { gap: gapY, along: xOverlap };
+      return { gap: Math.hypot(gapX, gapY), along: 0 };
+    };
+    for (const seats of [2, 3, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 8; seed += 1) {
+          const bytes = Buffer.alloc(32);
+          bytes.writeUInt32BE(seed + 1, 0);
+          bytes.writeUInt32BE(0x4c4159, 4);
+          let match = beginHand(
+            createMatch([...HAND_PLAYERS[seats]], { boneyardMode: mode, seriesLength: 3, targetScore: 500 }),
+            shuffleWithSeed(bytes),
+          );
+          const label = `${seats} ${mode} ${seed}`;
+          for (let guard = 0; guard < 400 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+            const playerId = currentPlayerId(match);
+            if (!playerId) break;
+            const intents = legalIntents(match, playerId);
+            if (intents.length === 0) break;
+            const intent = intents[(seed * 7 + guard * 3) % intents.length]!;
+            const result = applyIntent(match, playerId, intent);
+            expect(result.ok, `${label} ${result.error}`).toBe(true);
+            match = result.match;
+            if (intent.type !== "play" || !match.hand) continue;
+            const board = match.hand.board;
+            for (const limit of tight) {
+              const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+              expect(layoutOverlaps(layout), `${label} overlap`).toBe(false);
+              for (let i = 0; i < layout.tiles.length; i += 1) {
+                for (let j = i + 1; j < layout.tiles.length; j += 1) {
+                  const left = layout.tiles[i]!;
+                  const right = layout.tiles[j]!;
+                  if (left.arm && right.arm && left.arm !== right.arm) {
+                    expect(boxesOverlap(left, right), `${label} ${left.arm} hits ${right.arm}`).toBe(false);
+                  }
+                }
+              }
+              const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+              const center = byId.get(board.center!.tileId);
+              for (const arm of ARM_IDS) {
+                let parent = center;
+                for (const tile of board.arms[arm]) {
+                  const placed = byId.get(tile.tileId);
+                  expect(placed && parent, `${label} ${tile.tileId}`).toBeTruthy();
+                  if (!placed || !parent) continue;
+                  const edge = edgeBetween(parent, placed);
+                  expect(Math.abs(edge.gap - TILE_GAP), `${label} ${parent.tileId}>${tile.tileId}`).toBeLessThan(0.5);
+                  expect(edge.along, `${label} along`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+                  parent = placed;
+                }
+              }
+            }
+            for (const felt of felts) {
+              const zones = seatZones(felt, seats);
+              zones.push({ left: 0, top: felt.h - 160, right: felt.w, bottom: felt.h });
+              const insets = fitInsets(felt, zones);
+              const view = feltScale({
+                board,
+                felt,
+                screenWidth: felt.w,
+                zones,
+                previous: null,
+                newHand: guard < 2,
+              });
+              const layout = layoutBoard(board, view.limits);
+              expect(layoutOverlaps(layout), `${label} ${felt.name}`).toBe(false);
+              expect(contained(layout.tiles, felt, insets, boardShift(insets), view.scale, 2), `${label} ${felt.name} felt`).toBe(true);
+            }
+          }
+        }
+      }
+    }
   }, 40_000);
 });
 

@@ -702,29 +702,34 @@ function sideLaneStep(
     && !boxesOverlap(item, cursor.box)
     && !blocksOtherStem(item)
     && laneClear(item, cursor.box, placed);
-  // A double stays on the run it is already on, centred. Turning it into the
-  // gap between two columns is what boxed the open end.
+  // A double stays on the run it is already on, centred. If that cell is
+  // taken, turn only onto a side where the next tile also fits. The first
+  // clear side can be a pocket, and the tile after the double is then drawn
+  // through the column beside it.
+  const successorFits = (step: LayoutBox, way: LayoutDir) => {
+    if (!upcoming[1]) return canContinue(step);
+    const next = straightBox(step, way, isDoubleTile(upcoming[1]));
+    return !overlapsPlaced(next, placed) && !boxesOverlap(next, step) && !boxesOverlap(next, cursor.box);
+  };
   if (double) {
     const raw = straightBox(cursor.box, cursor.dir, true);
     const box = onColumn ? { ...raw, x: cursor.line - raw.w / 2 } : raw;
-    if (legalDouble(box) && (upcoming.length > 1 || canContinue(box))) {
+    if (legalDouble(box) && successorFits(box, cursor.dir) && (upcoming.length > 1 || canContinue(box))) {
       return park(box, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
     }
-    for (const way of ["west", "east", "north", "south"] as const) {
-      if (way === cursor.dir) continue;
-      const step = straightBox(cursor.box, way, true);
+    const clearDoubles = (["west", "east", "north", "south"] as const).flatMap((way) => {
+      const step = way === cursor.dir ? box : straightBox(cursor.box, way, true);
+      if (overlapsPlaced(step, placed) || boxesOverlap(step, cursor.box) || blocksOtherStem(step)) return [];
       const stepCx = step.x + step.w / 2;
-      const pitched = !onColumn || Math.abs(stepCx - cursor.line) >= LANE_PITCH - 0.5;
-      if (!legalDouble(step) || !pitched || !canContinue(step)) continue;
-      return park(step, way, cursor.row + 1, 1, onColumn ? cursor.line : stepCx);
-    }
-    if (!overlapsPlaced(box, placed) && !boxesOverlap(box, cursor.box) && !blocksOtherStem(box)) {
-      return park(box, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
-    }
-    for (const way of ["west", "east", "north", "south"] as const) {
-      const step = straightBox(cursor.box, way, true);
-      if (overlapsPlaced(step, placed) || boxesOverlap(step, cursor.box) || blocksOtherStem(step)) continue;
-      return park(step, way, cursor.row + 1, 1, step.x + step.w / 2);
+      const pitched = way === cursor.dir || !onColumn || Math.abs(stepCx - cursor.line) >= LANE_PITCH - 0.5;
+      return [{ step, way, pitched }];
+    });
+    const choice = clearDoubles.find((item) => item.pitched && successorFits(item.step, item.way) && canContinue(item.step))
+      ?? clearDoubles.find((item) => successorFits(item.step, item.way))
+      ?? clearDoubles[0];
+    if (choice) {
+      const same = choice.way === cursor.dir;
+      return park(choice.step, choice.way, cursor.row + (same ? 0 : 1), same ? cursor.run + 1 : 1, same ? cursor.line : choice.step.x + choice.step.w / 2);
     }
     return park(box, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
   }
@@ -893,9 +898,10 @@ function sideLaneStep(
     ? { box: fallback, way: cursor.dir }
     : undefined;
   const openOption = straightFirst
-    ?? options.find((item) => separated(item.box) && canContinue(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way))
-    ?? options.find((item) => clearOf(item.box) && canContinue(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way))
-    ?? options.find((item) => clearOf(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way))
+    ?? options.find((item) => separated(item.box) && canContinue(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way) && successorFits(item.box, item.way))
+    ?? options.find((item) => clearOf(item.box) && canContinue(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way) && successorFits(item.box, item.way))
+    ?? options.find((item) => clearOf(item.box) && followFits(item.box, item.way) && hasFuture(item.box, item.way) && successorFits(item.box, item.way))
+    ?? options.find((item) => clearOf(item.box) && successorFits(item.box, item.way))
     ?? options.find((item) => clearOf(item.box) && canContinue(item.box) && hasFuture(item.box, item.way))
     ?? options.find((item) => clearOf(item.box) && item.way === cursor.dir)
     ?? options.find((item) => clearOf(item.box));

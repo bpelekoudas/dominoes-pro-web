@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ARM_IDS, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
 import {
@@ -1155,5 +1158,35 @@ describe("board layout", () => {
     expect(layout.fit.y).toBeLessThanOrEqual(minY - FIT_MARGIN + 0.5);
     expect(layout.fit.x + layout.fit.w).toBeGreaterThanOrEqual(maxX + FIT_MARGIN - 0.5);
     expect(layout.fit.y + layout.fit.h).toBeGreaterThanOrEqual(maxY + FIT_MARGIN - 0.5);
+  });
+
+  it("does not cover a tile on the soaked 3-seat draw-one hand", () => {
+    const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "soak-m2-overlap.json");
+    const log = JSON.parse(readFileSync(file, "utf8")) as {
+      players: Array<{ id: string; name: string }>;
+      config: { boneyardMode: "draw_one"; seriesLength: 3; targetScore: number };
+      hands: Array<{
+        seed: string;
+        actions: Array<{ playerId: string; intent: { type: "play"; tileId: string; endId: string } | { type: "draw" } }>;
+      }>;
+    };
+    let match = createMatch(log.players, log.config);
+    const limits = [undefined, { width: 220, height: 640 }, { width: 344, height: 720 }] as const;
+    for (const hand of log.hands) {
+      match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+      let play = 0;
+      for (const action of hand.actions) {
+        const result = applyIntent(match, action.playerId, action.intent);
+        expect(result.ok, result.error).toBe(true);
+        match = result.match;
+        if (action.intent.type !== "play" || !match.hand) continue;
+        play += 1;
+        for (const limit of limits) {
+          const layout = limit ? layoutBoard(match.hand.board, limit) : layoutBoard(match.hand.board);
+          expect(layoutOverlaps(layout), `hand play ${play} ${limit ? limit.width : "phone"}`).toBe(false);
+          assertJoined(match.hand.board, layout, `soak ${play}`);
+        }
+      }
+    }
   });
 });
