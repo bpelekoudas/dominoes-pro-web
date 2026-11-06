@@ -1189,4 +1189,38 @@ describe("board layout", () => {
       }
     }
   });
+
+  it("does not cover a tile on the soaked 4-seat draw-until match", () => {
+    const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "soak-1bf3069-m3.json");
+    const log = JSON.parse(readFileSync(file, "utf8")) as {
+      players: Array<{ id: string; name: string }>;
+      config: { boneyardMode: "draw_until"; seriesLength: 5; targetScore: number };
+      hands: Array<{
+        gameNumber: number;
+        handNumber: number;
+        seed: string;
+        actions: Array<{ playerId: string; intent: { type: "play"; tileId: string; endId: string } | { type: "draw" } | { type: "knock" } }>;
+      }>;
+    };
+    let match = createMatch(log.players, log.config);
+    const limits = [undefined, { width: 220, height: 640 }, { width: 344, height: 720 }] as const;
+    for (const hand of log.hands) {
+      match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+      let play = 0;
+      for (const action of hand.actions) {
+        const result = applyIntent(match, action.playerId, action.intent);
+        expect(result.ok, `${hand.gameNumber}.${hand.handNumber} ${result.error}`).toBe(true);
+        match = result.match;
+        if (action.intent.type !== "play" || !match.hand) continue;
+        play += 1;
+        for (const limit of limits) {
+          const layout = limit ? layoutBoard(match.hand.board, limit) : layoutBoard(match.hand.board);
+          expect(
+            layoutOverlaps(layout),
+            `g${hand.gameNumber} h${hand.handNumber} play ${play} ${action.intent.tileId} ${limit ? limit.width : "phone"}`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
 });

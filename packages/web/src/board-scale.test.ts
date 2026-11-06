@@ -1126,6 +1126,78 @@ describe("board scale", () => {
     expect(cameraEase(1)).toBeCloseTo(1, 5);
     expect(CAMERA_EASE_MS).toBe(480);
   });
+
+  it("keeps long matches clear at the settled frame and at the middle of the glide", () => {
+    const limits = [undefined, { width: 220, height: 640 }, { width: 344, height: 720 }] as const;
+    const ease = cameraEase(0.5);
+    const mix = (from: { x: number; y: number; w: number; h: number }, to: { x: number; y: number; w: number; h: number }) => ({
+      x: from.x + (to.x - from.x) * ease,
+      y: from.y + (to.y - from.y) * ease,
+      w: from.w + (to.w - from.w) * ease,
+      h: from.h + (to.h - from.h) * ease,
+    });
+    let checked = 0;
+    for (const seats of [2, 3, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 2; seed += 1) {
+          let match = createMatch([...HAND_PLAYERS[seats]], {
+            boneyardMode: mode,
+            seriesLength: 5,
+            targetScore: 150,
+          });
+          for (let deal = 0; deal < 4; deal += 1) {
+            const bytes = Buffer.alloc(32);
+            bytes.writeUInt32BE(seed * 17 + deal + 1, 0);
+            bytes.writeUInt32BE(mode === "draw_one" ? 0x4f4e45 : 0x554e54, 4);
+            match = beginHand(match, shuffleWithSeed(bytes));
+            let previous: Map<string, { x: number; y: number; w: number; h: number }> | null = null;
+            for (let guard = 0; guard < 400 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+              const playerId = currentPlayerId(match);
+              if (!playerId) break;
+              const intents = legalIntents(match, playerId);
+              if (intents.length === 0) break;
+              const intent = intents[(seed * 5 + deal * 3 + guard) % intents.length]!;
+              const result = applyIntent(match, playerId, intent);
+              expect(result.ok, `${seats} ${mode} ${seed} ${result.error}`).toBe(true);
+              match = result.match;
+              if (intent.type !== "play" || !match.hand) continue;
+              const board = match.hand.board;
+              const label = `${seats} ${mode} s${seed} d${deal}`;
+              for (const limit of limits) {
+                const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+                expect(layoutOverlaps(layout), `${label} settled`).toBe(false);
+                if (previous && limit === undefined) {
+                  const midway = layout.tiles.flatMap((tile) => {
+                    const before = previous!.get(tile.tileId);
+                    if (!before) return [];
+                    const dist = Math.hypot(
+                      tile.x + tile.w / 2 - (before.x + before.w / 2),
+                      tile.y + tile.h / 2 - (before.y + before.h / 2),
+                    );
+                    // A re-seat across the felt (a new spinner) travels through open
+                    // felt. A tile that stays in its neighbourhood must not be
+                    // covered halfway through the glide.
+                    if (dist > TILE_SHORT) return [];
+                    return [{ ...mix(before, tile), tileId: tile.tileId }];
+                  });
+                  for (let i = 0; i < midway.length; i += 1) {
+                    for (let j = i + 1; j < midway.length; j += 1) {
+                      expect(boxesOverlap(midway[i]!, midway[j]!), `${label} glide ${midway[i]!.tileId}`).toBe(false);
+                    }
+                  }
+                }
+                if (limit === undefined) {
+                  previous = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+                }
+              }
+              checked += 1;
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(80);
+  }, 60_000);
 });
 
 const PHONE_RESERVE = { top: 62, right: 63, bottom: 30, left: 63 };

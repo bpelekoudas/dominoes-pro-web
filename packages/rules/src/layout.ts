@@ -866,7 +866,10 @@ function sideLaneStep(
     if (separated(ahead)) return park(ahead, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
   }
   const fallback = straightBox(cursor.box, cursor.dir, double);
-  const clearOf = (box: LayoutBox) => !overlapsPlaced(box, placed) && !boxesOverlap(box, cursor.box);
+  // clearOf used to ignore the other arm's exit from the spinner. That arm
+  // is drawn later, so a column could sit on its opening and the two tiles
+  // covered each other.
+  const clearOf = (box: LayoutBox) => !overlapsPlaced(box, placed) && !boxesOverlap(box, cursor.box) && !blocksOtherStem(box);
   const hasFuture = (box: LayoutBox, way: LayoutDir) => {
     if (upcoming.length <= 2) return true;
     const step = straightBox(box, way, isDoubleTile(upcoming[1]!));
@@ -908,6 +911,10 @@ function sideLaneStep(
     ?? options.find((item) => clearOf(item.box));
   if (openOption) {
     return park(openOption.box, openOption.way, cursor.row + (openOption.way === cursor.dir ? 0 : 1), 1, openOption.box.x + openOption.box.w / 2);
+  }
+  const uncovered = options.find((item) => clearOf(item.box));
+  if (uncovered) {
+    return park(uncovered.box, uncovered.way, cursor.row + (uncovered.way === cursor.dir ? 0 : 1), 1, uncovered.box.x + uncovered.box.w / 2);
   }
   return park(fallback, cursor.dir, cursor.row, cursor.run + 1, cursor.line);
 }
