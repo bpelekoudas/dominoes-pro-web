@@ -6,6 +6,7 @@ import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, 
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { scorePopupText } from "./feel/score-delta.js";
 import { playUhOh, unlockSound } from "./sound.js";
+import { faceRotation, PipHalf } from "./pips.js";
 
 const SHAKE_MS = 400;
 const TOTAL_MS = BIG_MOMENT_MS;
@@ -221,16 +222,6 @@ export function MomentLayer({
   );
 }
 
-const PIPS: Record<number, number[]> = {
-  0: [],
-  1: [5],
-  2: [1, 9],
-  3: [1, 5, 9],
-  4: [1, 3, 7, 9],
-  5: [1, 3, 5, 7, 9],
-  6: [1, 3, 4, 6, 7, 9],
-};
-
 function Face({
   a,
   b,
@@ -242,19 +233,12 @@ function Face({
   orientation: "horizontal" | "vertical";
   spinner?: boolean;
 }) {
+  const rotation = faceRotation(orientation);
   return (
     <span className={`domino ${orientation}${spinner ? " spinner" : ""}`}>
-      <span className="half" aria-hidden="true">
-        {(PIPS[a] ?? []).map((pos) => (
-          <i key={pos} data-pos={pos} />
-        ))}
-      </span>
+      <PipHalf value={a} rotation={rotation} />
       <span className="domino-split" />
-      <span className="half" aria-hidden="true">
-        {(PIPS[b] ?? []).map((pos) => (
-          <i key={pos} data-pos={pos} />
-        ))}
-      </span>
+      <PipHalf value={b} rotation={rotation} />
     </span>
   );
 }

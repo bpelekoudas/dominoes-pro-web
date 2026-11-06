@@ -662,6 +662,56 @@ describe("board scale", () => {
     }
   });
 
+  it("lays at least two full tiles on both side arms before the first turn", () => {
+    const tables = [
+      { name: "473", felt: { w: 473, h: 1024 } },
+      { name: "412", felt: { w: 412, h: 915 } },
+      { name: "cover", felt: { w: 344, h: 882 } },
+      { name: "inner", felt: { w: 751, h: 832 } },
+    ];
+    let board = emptyBoard();
+    board = placeTile(board, "lead", tileById("6-6"));
+    for (const id of ["5-6", "4-5", "3-4", "2-3", "1-2", "0-1", "0-2"]) board = placeTile(board, "west", tileById(id));
+    for (const id of ["4-6", "2-4", "2-5", "1-5", "1-3", "0-3", "0-4"]) board = placeTile(board, "east", tileById(id));
+    let doubled = emptyBoard();
+    doubled = placeTile(doubled, "lead", tileById("5-5"));
+    for (const id of ["0-5", "0-0", "0-1", "1-2", "2-3", "3-4", "4-6"]) doubled = placeTile(doubled, "west", tileById(id));
+    for (const id of ["5-6", "1-6", "1-4", "2-4", "2-6", "3-6", "3-5"]) doubled = placeTile(doubled, "east", tileById(id));
+    for (const table of tables) {
+      for (const [label, chain] of [["plain", board], ["double", doubled]] as const) {
+        const zones = seatZones(table.felt, 3);
+        const insets = fitInsets(table.felt, zones);
+        const view = feltScale({
+          board: chain,
+          felt: table.felt,
+          screenWidth: table.felt.w,
+          zones,
+          previous: null,
+          newHand: true,
+        });
+        const layout = layoutBoard(chain, view.limits);
+        const pan = boardShift(insets);
+        expect(contained(layout.tiles, table.felt, insets, pan, view.scale, 2), `${table.name} ${label}`).toBe(true);
+        for (const arm of ["west", "east"] as const) {
+          const tiles = layout.tiles.filter((tile) => tile.arm === arm);
+          const turn = tiles.findIndex((tile) => tile.direction !== arm);
+          expect(turn, `${table.name} ${label} ${arm} turns`).toBeGreaterThanOrEqual(2);
+          const stem = tiles.slice(0, turn);
+          const full = stem.filter((tile) => tile.w > tile.h);
+          expect(full.length, `${table.name} ${label} ${arm} full tiles`).toBeGreaterThanOrEqual(2);
+          for (const tile of full) {
+            const width = tile.w * view.scale;
+            const height = tile.h * view.scale;
+            expect(width, `${table.name} ${tile.tileId} rendered width`).toBeGreaterThan(height);
+            const left = table.felt.w / 2 + pan.x + tile.x * view.scale;
+            const right = left + width;
+            expect(right - left, `${table.name} ${tile.tileId} on screen`).toBeCloseTo(width, 5);
+          }
+        }
+      }
+    }
+  });
+
   it("keeps a settled 4-seat chain off the badges while the camera ease can still cross one", () => {
     const tables = [
       { name: "phone", felt: { w: 390, h: 644 }, screen: 390 },

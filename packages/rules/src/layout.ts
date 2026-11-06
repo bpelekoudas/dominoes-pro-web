@@ -22,7 +22,8 @@ import { ARM_IDS, openEnds } from "./board.js";
  * makes one corner, always the same way (west turns up, north turns
  * right, east turns down, south turns left). It does not turn back
  * toward the spinner. On a tall phone the side arms make that corner
- * after one or two tiles and then run their third of the felt. A corner
+ * only after at least two full tiles have gone straight out, then run
+ * their third of the felt. A corner
  * is one ordinary tile. A double stays on the straight run, crosswise
  * and centred, and the tiles on either side meet it at its middle.
  */
@@ -167,6 +168,8 @@ interface SnakeCursor {
   run: number;
   /** The tile just placed is the corner. The next tile opens the next row. */
   opening: boolean;
+  /** Full-length tiles already laid straight out from the spinner on this arm. */
+  full: number;
   /** A double was just centred on the corner's end. The next tile runs back from its middle. */
   fromDouble: boolean;
   /** The run is continuing off that double, perpendicular to the arm's rows. */
@@ -553,13 +556,15 @@ function portraitSnakeStep(
   }
 
   if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
-    // A double stays crosswise on the stem. It never makes the corner.
+    // A double stays crosswise on the stem. It never makes the corner, and it
+    // does not count as one of the two full tiles the arm has to lay first.
     if (double) return kept(arm, 0, cursor.run + 1);
     const stem = straightBox(cursor.box, arm, false);
-    // Keep travelling out until this tile's corner sits on the side lane.
-    // The next tile has to stay on the felt, and a crosswise double on its
-    // corner has to as well.
-    if (!stemReachedLane(cursor.box, arm) && free(stem) && insideActive(stem) && columnDoubleFits(stem, arm)) {
+    // Two full tiles go out before the first turn. If that reaches past the
+    // felt, the picture zooms out. Turning early is what left a one-tile stub.
+    const needLength = cursor.full < 2;
+    const room = !stemReachedLane(cursor.box, arm) && free(stem) && insideActive(stem) && columnDoubleFits(stem, arm);
+    if (free(stem) && (needLength || room)) {
       return kept(arm, 0, cursor.run + 1);
     }
     const parentDouble = cursor.box.h > cursor.box.w;
@@ -739,6 +744,28 @@ function snakeStep(
     };
   }
   const dir = cursor.dir;
+  // Wide felts too: a side arm lays two full tiles before it may turn.
+  if (
+    !double
+    && (arm === "west" || arm === "east")
+    && cursor.row === 0
+    && cursor.dir === arm
+    && cursor.full < 2
+  ) {
+    const stem = straightBox(cursor.box, arm, false);
+    if (!overlapsPlaced(stem, placed) && !boxesOverlap(stem, cursor.box)) {
+      return {
+        box: stem,
+        dir: arm,
+        row: 0,
+        line: acrossCenter(stem, arm),
+        run: cursor.run + 1,
+        opening: false,
+        fromDouble: false,
+        column: false,
+      };
+    }
+  }
   // A double never makes the corner. It stays crosswise on this row.
   if (straightFits(cursor.box, dir, double, upcoming, arm, cursor.row, cursor.line, cursor.run, center, placed)) {
     const box = straightBox(cursor.box, dir, double);
@@ -952,7 +979,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
     if (!first) continue;
     const opening = snakeStep(
       first,
-      { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false },
+      { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false, full: 0 },
       arm,
       center,
       chain,
@@ -971,6 +998,7 @@ function layoutBoardNow(board: BoardState): BoardLayout {
       opening: opening.opening,
       fromDouble: opening.fromDouble,
       column: opening.column,
+      full: opening.row === 0 && opening.dir === arm && !isDoubleTile(first) ? 1 : 0,
     };
     for (let index = 1; index < chain.length; index += 1) {
       const tile = chain[index]!;
@@ -987,6 +1015,9 @@ function layoutBoardNow(board: BoardState): BoardLayout {
         opening: choice.opening,
         fromDouble: choice.fromDouble,
         column: choice.column,
+        full: cursor.row === 0 && choice.row === 0 && choice.dir === arm && !isDoubleTile(tile)
+          ? cursor.full + 1
+          : cursor.full,
       };
     }
     cursors.set(arm, cursor);

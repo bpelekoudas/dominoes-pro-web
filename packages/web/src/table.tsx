@@ -33,18 +33,9 @@ import {
   GHOST_HEIGHT,
   GHOST_WIDTH,
 } from "./drop.js";
+import { faceRotation, PipHalf } from "./pips.js";
 
 const NO_SLOTS: Array<LayoutBox & { id: string }> = [];
-
-const PIPS: Record<number, number[]> = {
-  0: [],
-  1: [5],
-  2: [1, 9],
-  3: [1, 5, 9],
-  4: [1, 3, 7, 9],
-  5: [1, 3, 5, 7, 9],
-  6: [1, 3, 4, 6, 7, 9],
-};
 
 export function Domino({
   a,
@@ -59,26 +50,16 @@ export function Domino({
   spinner?: boolean;
   faceDown?: boolean;
 }) {
+  const rotation = faceRotation(orientation);
   return (
     <span className={`domino ${orientation}${spinner ? " spinner" : ""}${faceDown ? " face-down" : ""}`}>
       {faceDown ? null : (
         <>
-          <Half value={a} />
+          <PipHalf value={a} rotation={rotation} />
           <span className="domino-split" />
-          <Half value={b} />
+          <PipHalf value={b} rotation={rotation} />
         </>
       )}
-    </span>
-  );
-}
-
-function Half({ value }: { value: number }) {
-  return (
-    <span className="half" aria-hidden="true">
-      {(PIPS[value] ?? []).map((pos) => (
-        <i key={pos} data-pos={pos} />
-      ))}
-      <b className="pip-num">{value}</b>
     </span>
   );
 }
