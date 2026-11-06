@@ -1,13 +1,14 @@
-/* Shell only. Hashed bundles can be kept. The page, API, and socket always come from the network. */
-const CACHE = "uhoh-shell-v1";
+/* Shell only. The cache name carries the build, so every deploy is a new worker. */
+const CACHE = "uhoh-shell-__BUILD_SHA__";
+const SHELL = "uhoh-shell-";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .keys()
       .then((keys) => {
-        // A cache from an older visit means this install is a deploy, not the first one.
-        self.__hadShell = keys.includes(CACHE);
+        // Any earlier shell means this install is a deploy, not the first visit.
+        self.__previous = keys.filter((key) => key.startsWith(SHELL) && key !== CACHE);
         return caches.open(CACHE);
       })
       .then(() => self.skipWaiting()),
@@ -21,23 +22,38 @@ self.addEventListener("message", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     (async () => {
-      const keys = await caches.keys();
-      await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)));
-      await self.clients.claim();
-      if (!self.__hadShell) return;
-      // An open phone is still running the previous bundle. Reload it onto this one
-      // only when the new page can be fetched, so a dead network keeps the offline shell.
+      const previous = Array.isArray(self.__previous) ? self.__previous : [];
       let fresh = null;
-      try {
-        fresh = await fetch("/index.html", { cache: "no-store" });
-      } catch {
-        fresh = null;
+      if (previous.length > 0) {
+        try {
+          fresh = await fetch("/index.html", { cache: "no-store" });
+        } catch {
+          fresh = null;
+        }
       }
-      if (!fresh?.ok) return;
       const cache = await caches.open(CACHE);
-      await cache.put("/index.html", fresh.clone());
-      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      await Promise.all(windows.map((client) => (client.navigate ? client.navigate(client.url) : Promise.resolve())));
+      if (fresh?.ok) {
+        await cache.put("/index.html", fresh.clone());
+        // The new page names new files. Drop the previous build's hashed assets.
+        await Promise.all(previous.map((key) => caches.delete(key)));
+        await self.clients.claim();
+        const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        await Promise.all(windows.map((client) => (client.navigate ? client.navigate(client.url) : Promise.resolve())));
+        return;
+      }
+      if (previous.length > 0) {
+        // The new page could not be fetched. Keep the shell this phone already has.
+        for (const key of previous) {
+          const old = await caches.open(key);
+          const requests = await old.keys();
+          for (const request of requests) {
+            const hit = await old.match(request);
+            if (hit) await cache.put(request, hit);
+          }
+          await caches.delete(key);
+        }
+      }
+      await self.clients.claim();
     })(),
   );
 });

@@ -11,7 +11,9 @@ import {
   cameraSettlesOn,
   chainViewShift,
   feltScale,
-  fitInsets,
+  frameInsets,
+  nextFeltSize,
+  tilesRelocating,
   READABLE_PHONE_PX,
   READABLE_WIDE_PX,
   handOverPlacement,
@@ -136,7 +138,10 @@ export function Table({
   const shownScale = scale * nudge.zoom;
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
-  const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
+  const feltLock = useRef<{ hand: string; w: number; h: number; table: string } | null>(null);
+  const placedBoxes = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map());
+  const [relocating, setRelocating] = useState<ReadonlySet<string>>(new Set());
+  const relocateTimer = useRef(0);
   const limitHold = useRef<{ hand: string; limits: { width: number; height: number } } | null>(null);
   const anchorHold = useRef<{ hand: string; shift: { x: number; y: number } } | null>(null);
   const settledTiles = useRef<{ hand: string; ids: string[] }>({ hand: "", ids: [] });
@@ -152,6 +157,22 @@ export function Table({
   const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
 
   useLayoutEffect(() => {
+    placedBoxes.current = new Map();
+    setRelocating(new Set());
+    window.clearTimeout(relocateTimer.current);
+  }, [handKey]);
+
+  useLayoutEffect(() => {
+    if (!layout) return;
+    const hidden = tilesRelocating(placedBoxes.current, layout.tiles);
+    placedBoxes.current = new Map(layout.tiles.map((tile) => [tile.tileId, { x: tile.x, y: tile.y, w: tile.w, h: tile.h }]));
+    if (hidden.length === 0) return;
+    setRelocating(new Set(hidden));
+    window.clearTimeout(relocateTimer.current);
+    relocateTimer.current = window.setTimeout(() => setRelocating(new Set()), CAMERA_EASE_MS);
+  }, [layout]);
+
+  useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || !layout || !frame) return;
     const measure = () => {
@@ -165,22 +186,21 @@ export function Table({
       // A later hint, banner, or sheet must not zoom it. A real resize
       // changes the width and takes a fresh measurement.
       const locked = feltLock.current;
-      const resized = !locked || locked.hand !== handKey || Math.abs(width - locked.w) >= 32;
-      if (locked?.hand === handKey && Math.abs(width - locked.w) < 32) {
-        width = locked.w;
-        height = locked.h;
-      } else {
-        feltLock.current = { hand: handKey, w: width, h: height };
-      }
+      const tableId = view.tableId ?? "";
+      const nextFelt = nextFeltSize(locked, handKey, width, height, tableId);
+      const resized = nextFelt.resized;
+      width = nextFelt.w;
+      height = nextFelt.h;
+      if (resized) feltLock.current = { hand: handKey, w: width, h: height, table: tableId };
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
       const zones = measureZones(viewport);
       const felt = { w: width, h: height };
+      const frameEdge = frameInsets(view.tableId, felt);
       const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
       const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
-      const room = fitInsets(felt, zones, nextReserve);
-      // The region is this felt at the current tile size. Arms run out to
-      // that edge. Zoom out only when the chain still does not fit.
+      // The chain fits the frame of the table on screen. Zoom out only when
+      // a tile would cross that line.
       if (!board?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
       const solved = feltScale({
@@ -192,6 +212,8 @@ export function Table({
         previous,
         newHand: previous == null,
         readablePx,
+        tableId: view.tableId,
+        frame: frameEdge,
       });
       // Badges jitter by a pixel and must not refold the snake. A zoom-out
       // grows the design felt, and that growth is the one change that sticks.
@@ -199,7 +221,7 @@ export function Table({
         limitHold.current?.hand === handKey &&
         (solved.limits.width > limitHold.current.limits.width + 4 ||
           solved.limits.height > limitHold.current.limits.height + 4);
-      if (!limitHold.current || limitHold.current.hand !== handKey || grew) {
+      if (!limitHold.current || limitHold.current.hand !== handKey || grew || resized) {
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
@@ -218,7 +240,9 @@ export function Table({
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
       const zoom = solved.scale;
-      const nextShift = chainViewShift(layout.tiles, zoom, boardShift(room), felt);
+      const centered = chainViewShift(layout.tiles, zoom);
+      const frameShift = boardShift(frameEdge);
+      const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
       const tileIds = layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
       // Choosing, dragging, and a highlight do not move the picture.
@@ -260,7 +284,7 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch]);
+  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId]);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -415,7 +439,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) ? " is-relocating" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}

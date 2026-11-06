@@ -31,6 +31,7 @@ import { useHandCelebration, WinPreview, WinScoreContext, WinShow, winPreviewReq
 import { WinnerPopLayer } from "./winner-pop-layer";
 import { GamePips } from "./game-pips";
 import { gameTallyText } from "./game-tally.js";
+import { BUILD_SHA } from "./build-sha";
 
 interface ChatLine {
   id: number;
@@ -603,6 +604,9 @@ export function Game({
             {view.roomCode}
           </button>
         ) : null}
+        <span className="build-sha" data-build={BUILD_SHA}>
+          {BUILD_SHA}
+        </span>
         <p className="series-line" data-series-target={view.winsNeeded}>
           {playing ? (
             <>

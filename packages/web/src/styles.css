@@ -267,6 +267,19 @@ input {
   background: #e31e26;
 }
 .play-code { min-height: 44px; margin: 0; padding: 0 8px; font-size: 0.78rem; }
+.build-sha {
+  flex: none;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+.account-sheet .build-sha {
+  margin-top: 18px;
+  text-align: center;
+}
 @media (max-width: 360px) {
   .playbar { gap: 2px; padding-left: 2px; padding-right: 0; }
   .icon-button { width: 36px; height: 36px; min-height: 36px; }
@@ -835,6 +848,7 @@ input {
   --camera-ease: 480ms;
 }
 .board-tile.is-camera-hold { visibility: hidden; }
+.board-tile.is-relocating { visibility: hidden; }
 .table-scroll[data-camera="armed"][data-zoom="ease"] .board-scaler {
   transition:
     width var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),

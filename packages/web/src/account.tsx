@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CATALOG } from "../../rules/src/catalog.js";
+import { BUILD_SHA } from "./build-sha";
 import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
 import { AvatarFace, AvatarPicker } from "./avatars";
 import { readRememberedAge, rememberAge } from "./home-model";
@@ -579,6 +580,9 @@ export function AccountLayer({ account }: { account: AccountController }) {
             Sign out
           </button>
         ) : null}
+        <p className="build-sha" data-build={BUILD_SHA}>
+          {BUILD_SHA}
+        </p>
       </section>
     </>
   );

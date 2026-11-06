@@ -94,10 +94,14 @@ export function feltScale(input: {
   previous: number | null;
   newHand: boolean;
   readablePx?: number;
+  /** The table on screen. Its inner frame is the edge the chain fits to. */
+  tableId?: string | null;
+  frame?: AxisInsets;
 }): { scale: number; limits: { width: number; height: number } } {
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
-  const room = safeRoom(input.felt, withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR));
+  const frame = input.frame ?? frameInsets(input.tableId, input.felt);
+  const room = safeRoom(input.felt, frame);
   // The hand opens at the large size. The snake turns at the edge of the felt
   // at THAT size. Laying it out at 30px spread a short chain across the whole
   // table, and the camera then shrank to fit the empty spread.
@@ -118,16 +122,73 @@ export function feltScale(input: {
 }
 
 /**
- * The playing surface, with a small margin. Badges sit on the felt; they
- * must not shrink the picture before a tile reaches this edge.
+ * The playing surface inside the frame. Badges sit on the felt; they must
+ * not shrink the picture before a tile reaches this edge.
  */
-export function safeRoom(felt: FeltSize, _insets: AxisInsets): FeltSize {
-  const marginX = Math.max(20, felt.w * 0.04);
-  const marginY = Math.max(20, felt.h * 0.04);
+export function safeRoom(felt: FeltSize, frame: AxisInsets): FeltSize {
   return {
-    w: Math.max(1, felt.w - marginX * 2),
-    h: Math.max(1, felt.h - marginY * 2),
+    w: Math.max(1, felt.w - frame.left - frame.right),
+    h: Math.max(1, felt.h - frame.top - frame.bottom),
   };
+}
+
+/** A table with no measured frame keeps a small margin inside the felt. */
+export function defaultFeltMargin(felt: FeltSize): AxisInsets {
+  const x = Math.max(20, felt.w * 0.04);
+  const y = Math.max(20, felt.h * 0.04);
+  return { top: y, right: x, bottom: y, left: x };
+}
+
+/**
+ * Inner edge of the line drawn on the table art, in that image's pixels.
+ * `right` and `bottom` are the first pixel past the opening.
+ */
+const TABLE_FRAMES: Record<string, { w: number; h: number; left: number; top: number; right: number; bottom: number }> = {
+  // Charcoal slate. The copper stroke is the playing surface, not the art edge.
+  "TBL-013": { w: 720, h: 1280, left: 102, top: 158, right: 616, bottom: 1116 },
+};
+
+/**
+ * Where that line lands on the felt. The art is painted with background-size:
+ * cover, so a tall phone crops the top and bottom and the inset changes.
+ */
+export function frameInsets(tableId: string | null | undefined, felt: FeltSize): AxisInsets {
+  const art = tableId ? TABLE_FRAMES[tableId] : undefined;
+  if (!art || felt.w < 1 || felt.h < 1) return defaultFeltMargin(felt);
+  const scale = Math.max(felt.w / art.w, felt.h / art.h);
+  const cropX = (art.w * scale - felt.w) / 2;
+  const cropY = (art.h * scale - felt.h) / 2;
+  const left = art.left * scale - cropX;
+  const top = art.top * scale - cropY;
+  const right = felt.w - (art.right * scale - cropX);
+  const bottom = felt.h - (art.bottom * scale - cropY);
+  const clamp = (value: number, limit: number) => Math.min(Math.max(0, value), Math.max(0, limit));
+  return {
+    left: clamp(left, felt.w / 2 - 1),
+    top: clamp(top, felt.h / 2 - 1),
+    right: clamp(right, felt.w / 2 - 1),
+    bottom: clamp(bottom, felt.h / 2 - 1),
+  };
+}
+
+/** A real resize, including the Chrome toolbar, takes a new measurement. A one-pixel jitter does not. */
+export const FELT_WIDTH_LOCK = 32;
+export const FELT_HEIGHT_REFIT = 48;
+
+export function nextFeltSize(
+  locked: { hand: string; w: number; h: number; table: string } | null,
+  hand: string,
+  width: number,
+  height: number,
+  table: string,
+): { w: number; h: number; resized: boolean } {
+  if (!locked || locked.hand !== hand || locked.table !== table) {
+    return { w: width, h: height, resized: true };
+  }
+  const widthMoved = Math.abs(width - locked.w) >= FELT_WIDTH_LOCK;
+  const heightMoved = Math.abs(height - locked.h) >= FELT_HEIGHT_REFIT;
+  if (!widthMoved && !heightMoved) return { w: locked.w, h: locked.h, resized: false };
+  return { w: width, h: height, resized: true };
 }
 
 function fitInRoom(tiles: readonly LayoutBox[], room: FeltSize): number {
@@ -380,6 +441,26 @@ export function chainViewShift(
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   return { x: -cx * scale, y: -cy * scale };
+}
+
+/**
+ * A tile that jumps across the felt, or turns, is not drawn while the picture
+ * eases. Sliding it would pass through whatever is in the way. It reappears
+ * on its new cell when the glide ends.
+ */
+export function tilesRelocating(
+  previous: ReadonlyMap<string, { x: number; y: number; w: number; h: number }>,
+  next: readonly { tileId: string; x: number; y: number; w: number; h: number }[],
+): string[] {
+  const hidden: string[] = [];
+  for (const tile of next) {
+    const old = previous.get(tile.tileId);
+    if (!old) continue;
+    const moved = Math.hypot(tile.x - old.x, tile.y - old.y) > TILE_SHORT;
+    const turned = old.w !== tile.w || old.h !== tile.h;
+    if (moved || turned) hidden.push(tile.tileId);
+  }
+  return hidden;
 }
 
 /** True only when a tile has landed or a hand has started. Choosing does not count. */

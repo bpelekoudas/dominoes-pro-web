@@ -19,7 +19,10 @@ import {
   feltInnerRect,
   renderedTileRect,
   feltScale,
+  frameInsets,
+  nextFeltSize,
   safeRoom,
+  tilesRelocating,
   zoomSamples,
   centeredChain,
   chainBounds,
@@ -1380,7 +1383,6 @@ describe("opening zoom", () => {
       { name: "viewport", w: 412, h: 891 },
       { name: "cover", w: 344, h: 674 },
     ];
-    const margin = { top: 16, right: 16, bottom: 16, left: 16 };
     let plays = 0;
     for (const seats of [2, 3, 4] as const) {
       for (const mode of ["draw_one", "draw_until"] as const) {
@@ -1420,7 +1422,7 @@ describe("opening zoom", () => {
                 expect(view.scale, `${felt.name} opens large`).toBeCloseTo(open, 5);
               }
               if (previous != null && view.scale < previous - 1e-4) {
-                const room = safeRoom(felt, margin);
+                const room = safeRoom(felt, frameInsets(null, felt));
                 const laid = layoutBoard(cursor.hand.board, { width: room.w / previous, height: room.h / previous });
                 const box = chainBounds(laid.tiles, 0);
                 expect(
@@ -1467,6 +1469,103 @@ describe("opening zoom", () => {
   }, 60_000);
 });
 
+describe("charcoal frame", () => {
+  it("fits the chain inside the copper line at the S26 and the narrower phone, rails included", () => {
+    const scenes = [
+      { name: "412x891", felt: { w: 412, h: 683 } },
+      { name: "384x832", felt: { w: 384, h: 624 } },
+    ];
+    for (const scene of scenes) {
+      const frame = frameInsets("TBL-013", scene.felt);
+      expect(frame.left, `${scene.name} copper`).toBeGreaterThan(40);
+      expect(frame.top, `${scene.name} copper`).toBeGreaterThan(40);
+      let board = placeTile(emptyBoard(), "lead", tileById("6-6"));
+      for (const [end, id] of [
+        ["east", "5-6"],
+        ["west", "4-6"],
+        ["north", "3-6"],
+        ["south", "2-6"],
+        ["east", "4-5"],
+        ["west", "3-4"],
+        ["north", "2-3"],
+        ["south", "1-2"],
+      ] as const) {
+        board = placeTile(board, end, tileById(id));
+      }
+      const zones = seatZones(scene.felt, 4);
+      const open = feltScale({
+        board,
+        felt: scene.felt,
+        screenWidth: scene.felt.w,
+        zones,
+        previous: null,
+        newHand: true,
+        tableId: "TBL-013",
+      });
+      expect(open.scale * TILE_SHORT, `${scene.name} nine tiles`).toBeCloseTo(0.135 * scene.felt.w, 1);
+      const layout = layoutBoard(board, open.limits);
+      const shift = chainViewShift(layout.tiles, open.scale);
+      const pan = { x: shift.x + boardShift(frame).x, y: shift.y + boardShift(frame).y };
+      for (const tile of layout.tiles) {
+        const rect = renderedTileRect(scene.felt, tile, open.scale, pan);
+        expect(rect.left, tile.tileId).toBeGreaterThanOrEqual(frame.left - 1);
+        expect(rect.top, tile.tileId).toBeGreaterThanOrEqual(frame.top - 1);
+        expect(rect.right, tile.tileId).toBeLessThanOrEqual(scene.felt.w - frame.right + 1);
+        expect(rect.bottom, tile.tileId).toBeLessThanOrEqual(scene.felt.h - frame.bottom + 1);
+      }
+    }
+  });
+
+  it("refits when the Chrome toolbar shortens the felt and does not zoom back in", () => {
+    const hand = "1:1";
+    const table = "TBL-013";
+    expect(nextFeltSize({ hand, w: 412, h: 683, table }, hand, 412, 684, table).resized).toBe(false);
+    const toolbar = nextFeltSize({ hand, w: 412, h: 683, table }, hand, 412, 612, table);
+    expect(toolbar).toEqual({ w: 412, h: 612, resized: true });
+    const felt = { w: 412, h: 683 };
+    const short = { w: 412, h: 612 };
+    let board = placeTile(emptyBoard(), "lead", tileById("6-6"));
+    board = placeTile(board, "east", tileById("5-6"));
+    board = placeTile(board, "west", tileById("4-6"));
+    const zones = seatZones(felt, 4);
+    const first = feltScale({
+      board,
+      felt,
+      screenWidth: 412,
+      zones,
+      previous: null,
+      newHand: true,
+      tableId: table,
+    });
+    const after = feltScale({
+      board,
+      felt: short,
+      screenWidth: 412,
+      zones: seatZones(short, 4),
+      previous: first.scale,
+      newHand: false,
+      tableId: table,
+    });
+    expect(tilesRelocating(new Map([["6-6", { x: 0, y: 0, w: 36, h: 72 }]]), [{ tileId: "6-6", x: 2, y: 0, w: 36, h: 72 }])).toEqual([]);
+    expect(
+      tilesRelocating(new Map([["1-5", { x: 0, y: 0, w: 72, h: 36 }]]), [{ tileId: "1-5", x: 300, y: 0, w: 72, h: 36 }]),
+    ).toEqual(["1-5"]);
+    expect(readFileSync(new URL("./styles.css", import.meta.url), "utf8")).toMatch(
+      /\.board-tile\.is-relocating\s*\{\s*visibility:\s*hidden/,
+    );
+    expect(after.scale).toBeCloseTo(first.scale, 5);
+    const frame = frameInsets(table, short);
+    const layout = layoutBoard(board, after.limits);
+    const shift = chainViewShift(layout.tiles, after.scale);
+    const pan = { x: shift.x + boardShift(frame).x, y: shift.y + boardShift(frame).y };
+    for (const tile of layout.tiles) {
+      const rect = renderedTileRect(short, tile, after.scale, pan);
+      expect(rect.top).toBeGreaterThanOrEqual(frame.top - 1);
+      expect(rect.bottom).toBeLessThanOrEqual(short.h - frame.bottom + 1);
+    }
+  });
+});
+
 describe("layout guarantee", () => {
   it("keeps 500 full matches from covering a tile or leaving the felt", () => {
     const felts = [
@@ -1486,6 +1585,7 @@ describe("layout guarantee", () => {
     let matches = 0;
     let boards = 0;
     let midpoints = 0;
+    let coverChecks = 0;
     for (const [seats, mode] of combos) {
       for (let seed = 1; seed <= 84; seed += 1) {
         matches += 1;
@@ -1546,26 +1646,21 @@ describe("layout guarantee", () => {
                   x: prior.shift.x + (shift.x - prior.shift.x) * eased,
                   y: prior.shift.y + (shift.y - prior.shift.y) * eased,
                 };
-                const midway: Array<{ box: { x: number; y: number; w: number; h: number }; moved: number; turned: boolean }> = [];
+                const hidden = new Set(tilesRelocating(prior.tiles, layout.tiles));
+                const midway: Array<{ id: string; box: { x: number; y: number; w: number; h: number }; moved: number }> = [];
                 for (const tile of layout.tiles) {
                   const old = prior.tiles.get(tile.tileId);
                   if (!old) continue;
                   const moved = Math.hypot(tile.x - old.x, tile.y - old.y);
-                  const turned = old.w !== tile.w || old.h !== tile.h;
                   const box = {
                     x: old.x + (tile.x - old.x) * eased,
                     y: old.y + (tile.y - old.y) * eased,
-                    // A double that stays put keeps its face. Interpolating
-                    // width and height turns that face into a square and
-                    // covers the neighbour for one frame. The face we test
-                    // is the one already on the felt.
                     w: old.w,
                     h: old.h,
                   };
-                  midway.push({ box, moved, turned });
-                  // A column that refolds travels through open felt. A tile that
-                  // stays put must still be on the felt halfway through the ease.
-                  if (moved <= TILE_SHORT) {
+                  midway.push({ id: tile.tileId, box, moved });
+                  // A tile that stays put must still be on the felt halfway through the ease.
+                  if (!hidden.has(tile.tileId)) {
                     const rect = renderedTileRect(felt, box, scale, pan);
                     if (rect.left < -18 || rect.top < -18 || rect.right > felt.w + 18 || rect.bottom > felt.h + 18) {
                       throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} midpoint outside the felt`);
@@ -1576,12 +1671,13 @@ describe("layout guarantee", () => {
                   for (let j = i + 1; j < midway.length; j += 1) {
                     const left = midway[i]!;
                     const right = midway[j]!;
-                    // A refold longer than one tile travels through open felt.
-                    // A tile that stays within a short side of where it was must
-                    // not be covered halfway through the ease.
-                    if (left.moved > TILE_SHORT || right.moved > TILE_SHORT || left.turned || right.turned) continue;
+                    // A jump or a turn is not painted during the glide, so it
+                    // cannot land on another tile on the way. The tiles that
+                    // stay on screen must not cover each other at the midpoint.
+                    if (hidden.has(left.id) || hidden.has(right.id)) continue;
+                    coverChecks += 1;
                     if (boxesOverlap(left.box, right.box)) {
-                      throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} midpoint overlap`);
+                      throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} midpoint overlap ${left.id} ${right.id}`);
                     }
                   }
                 }
@@ -1597,9 +1693,10 @@ describe("layout guarantee", () => {
       }
     }
     // Printed in the vitest log so the run can report the sample.
-    console.log(`fuzz matches=${matches} boards=${boards} midpoints=${midpoints}`);
+    console.log(`fuzz matches=${matches} boards=${boards} midpoints=${midpoints} coverChecks=${coverChecks}`);
     expect(matches).toBeGreaterThanOrEqual(500);
     expect(boards).toBeGreaterThan(matches);
     expect(midpoints).toBeGreaterThan(0);
+    expect(coverChecks).toBeGreaterThan(0);
   }, 180_000);
 });
