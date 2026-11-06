@@ -837,12 +837,19 @@ input {
 .board-tile.is-camera-hold { visibility: hidden; }
 .table-scroll[data-camera="armed"][data-zoom="ease"] .board-scaler {
   transition:
-    width var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1),
-    height var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1),
-    transform var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1);
+    width var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
+    height var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
+    transform var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
 }
 .table-scroll[data-camera="armed"][data-zoom="ease"] .board-stage {
-  transition: transform var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1);
+  transition: transform var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
+}
+.table-scroll[data-camera="armed"][data-zoom="ease"] .board-tile {
+  transition:
+    left var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
+    top var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
+    width var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
+    height var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
 }
 .table-scroll[data-cam-user="drag"] .board-scaler,
 .table-scroll[data-cam-user="drag"] .board-stage {
@@ -1932,7 +1939,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .hand-tile, .hand-tile.playable, .hand-tile.selected { transform: none; }
-  .board-scaler, .board-stage, .table-scroll[data-camera="armed"] .board-scaler, .table-scroll[data-camera="armed"] .board-stage,
+  .board-scaler, .board-stage, .board-tile, .table-scroll[data-camera="armed"] .board-scaler, .table-scroll[data-camera="armed"] .board-stage, .table-scroll[data-camera="armed"] .board-tile,
   .drag-ghost.spring, .score-pop, .bone-pile.pulse, .arrive-tile { animation: none; transition: none; }
   .control-token, .draw-flight { transition: none; animation: none; }
   .seat-notice { animation: none; opacity: 1; }

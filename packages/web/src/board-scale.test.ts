@@ -10,8 +10,12 @@ import {
   CAMERA_EDGE,
   cameraScale,
   cameraSettlesOn,
+  CAMERA_EASE_MS,
+  cameraEase,
   chainViewShift,
   containScale,
+  glidePoses,
+  poseAt,
   feltInnerRect,
   renderedTileRect,
   feltScale,
@@ -1033,6 +1037,94 @@ describe("board scale", () => {
       }
     }
     expect(plays).toBeGreaterThan(40);
+  });
+
+  it("eases each play in small steps, including a retarget mid-glide", () => {
+    const log = JSON.parse(
+      readFileSync(new URL("../../rules/src/fixtures/soak-m2-overlap.json", import.meta.url), "utf8"),
+    ) as {
+      players: Array<{ id: string; name: string }>;
+      config: { boneyardMode: "draw_one"; seriesLength: 3; targetScore: number };
+      hands: Array<{
+        handNumber: number;
+        seed: string;
+        actions: Array<{ playerId: string; intent: { type: string; tileId?: string; endId?: string } }>;
+      }>;
+    };
+    const felt = { w: 412, h: 915 };
+    const zones = seatZones(felt, 3);
+    zones.push({ left: 0, top: felt.h - 150, right: felt.w, bottom: felt.h });
+    let match = createMatch(log.players, log.config);
+    let previousScale: number | null = null;
+    let previousPose: { scale: number; x: number; y: number } | null = null;
+    const assertGlide = (from: { scale: number; x: number; y: number }, to: { scale: number; x: number; y: number }, label: string) => {
+      const samples = glidePoses(from, to);
+      expect(samples.length, label).toBeGreaterThanOrEqual(16);
+      expect(samples[0]!.scale).toBeCloseTo(from.scale, 6);
+      expect(samples[samples.length - 1]!.scale).toBeCloseTo(to.scale, 6);
+      const span = {
+        scale: Math.abs(to.scale - from.scale),
+        x: Math.abs(to.x - from.x),
+        y: Math.abs(to.y - from.y),
+      };
+      for (let i = 1; i < samples.length; i += 1) {
+        const step = {
+          scale: Math.abs(samples[i]!.scale - samples[i - 1]!.scale),
+          x: Math.abs(samples[i]!.x - samples[i - 1]!.x),
+          y: Math.abs(samples[i]!.y - samples[i - 1]!.y),
+        };
+        if (span.scale > 1e-4) expect(step.scale, `${label} scale`).toBeLessThanOrEqual(span.scale * 0.1 + 1e-9);
+        if (span.x > 0.5) expect(step.x, `${label} pan x`).toBeLessThanOrEqual(span.x * 0.1 + 1e-6);
+        if (span.y > 0.5) expect(step.y, `${label} pan y`).toBeLessThanOrEqual(span.y * 0.1 + 1e-6);
+      }
+    };
+    for (const hand of log.hands) {
+      match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+      if (hand.handNumber !== 5) {
+        for (const action of hand.actions) {
+          const result = applyIntent(match, action.playerId, action.intent as never);
+          match = result.match;
+        }
+        previousScale = null;
+        previousPose = null;
+        continue;
+      }
+      for (const action of hand.actions) {
+        const result = applyIntent(match, action.playerId, action.intent as never);
+        match = result.match;
+        if (action.intent.type !== "play" || !match.hand) continue;
+        const board = match.hand.board;
+        const view = feltScale({
+          board,
+          felt,
+          screenWidth: felt.w,
+          zones,
+          previous: previousScale,
+          newHand: previousScale == null,
+        });
+        const layout = layoutBoard(board, view.limits);
+        const scale = containScale({
+          tiles: layout.tiles,
+          felt,
+          screenWidth: felt.w,
+          zones,
+          previous: previousScale,
+          newHand: previousScale == null,
+        });
+        const shift = chainViewShift(layout.tiles, scale);
+        const pose = { scale, x: shift.x, y: shift.y };
+        if (previousPose) {
+          assertGlide(previousPose, pose, String(action.intent.tileId));
+          const mid = poseAt(previousPose, pose, 0.4);
+          assertGlide(mid, { scale: pose.scale * 0.94, x: pose.x + 10, y: pose.y - 6 }, `${action.intent.tileId} retarget`);
+        }
+        previousScale = scale;
+        previousPose = pose;
+      }
+    }
+    expect(cameraEase(0)).toBeCloseTo(0, 5);
+    expect(cameraEase(1)).toBeCloseTo(1, 5);
+    expect(CAMERA_EASE_MS).toBe(480);
   });
 });
 

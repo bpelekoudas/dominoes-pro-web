@@ -236,8 +236,50 @@ export const CAMERA_COMFORT = 72;
  * long chain is at the floor.
  */
 export const CAMERA_EDGE = 30;
-/** Ease-out on the felt. No overshoot. Matches the board-scaler transition. */
+/** One glide after a tile lands. Long enough for about 14 frames at 30fps. */
 export const CAMERA_EASE_MS = 480;
+
+export interface CameraPose {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * Matches `--camera-ease` in styles.css: cubic-bezier(0.41, 0.19, 0.59, 0.81).
+ * At 30fps across 480ms no sample moves more than about a tenth of the trip.
+ */
+export function cameraEase(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  const bez = (u: number, a: number, b: number) => 3 * (1 - u) * (1 - u) * u * a + 3 * (1 - u) * u * u * b + u * u * u;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (bez(mid, 0.41, 0.59) < x) lo = mid;
+    else hi = mid;
+  }
+  return bez((lo + hi) / 2, 0.19, 0.81);
+}
+
+export function poseAt(from: CameraPose, to: CameraPose, t: number): CameraPose {
+  const e = cameraEase(t);
+  return {
+    scale: from.scale + (to.scale - from.scale) * e,
+    x: from.x + (to.x - from.x) * e,
+    y: from.y + (to.y - from.y) * e,
+  };
+}
+
+/** Inclusive samples from `from` at t=0 through `to` at t=1, one per frame. */
+export function glidePoses(from: CameraPose, to: CameraPose, fps = 30, ms = CAMERA_EASE_MS): CameraPose[] {
+  const steps = Math.max(1, Math.ceil((ms / 1000) * fps));
+  const poses: CameraPose[] = [];
+  for (let frame = 0; frame <= steps; frame += 1) {
+    poses.push(poseAt(from, to, frame / steps));
+  }
+  return poses;
+}
 
 /** Air between a tile and a seat badge, rack, header, or the bottom bar. */
 export const BADGE_GAP = 10;
