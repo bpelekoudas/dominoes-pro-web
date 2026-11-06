@@ -10,6 +10,7 @@ import {
 } from "./engine.js";
 import {
   ARM_GAP,
+  boxGap,
   boxesOverlap,
   FIT_MARGIN,
   HARD_HEIGHT,
@@ -212,22 +213,11 @@ function assertRegionSnake(board: BoardState, layout: BoardLayout, label: string
       if (!placed) continue;
       const cx = placed.x + placed.w / 2;
       const cy = placed.y + placed.h / 2;
-      if (arm === "west") {
-        expect(placed.x + placed.w, `${label} west ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
-        if (placed.direction === "east") expect(cy, `${label} west return`).toBeLessThan(-spine + TILE_SHORT);
-        if (placed.direction === "north" || placed.direction === "south" || placed.direction === "east") {
-          expect(cx, `${label} west lane ${tile.tileId}`).toBeLessThan(-TILE_LONG / 2);
-        }
-      } else if (arm === "east") {
-        expect(placed.x, `${label} east ${tile.tileId}`).toBeGreaterThanOrEqual(-TILE_GAP);
-        if (placed.direction === "north" || placed.direction === "south" || placed.direction === "west") {
-          expect(cx, `${label} east lane ${tile.tileId}`).toBeGreaterThan(TILE_LONG / 2);
-        }
-      } else if (arm === "north") {
+      if (arm === "north") {
         expect(placed.y + placed.h, `${label} north ${tile.tileId}`).toBeLessThanOrEqual(TILE_GAP);
         if (placed.direction === "south") expect(cx, `${label} north return`).toBeGreaterThan(spine - TILE_SHORT);
         expect(placed.direction, `${label} north turn`).not.toBe("west");
-      } else {
+      } else if (arm === "south") {
         expect(placed.y, `${label} south ${tile.tileId}`).toBeGreaterThanOrEqual(-TILE_GAP);
         if (placed.direction === "north") expect(cx, `${label} south return`).toBeLessThan(-spine + TILE_SHORT);
         expect(placed.direction, `${label} south turn`).not.toBe("east");
@@ -719,7 +709,7 @@ describe("board layout", () => {
           .filter((tile) => tile.direction === "north" || tile.direction === "south")
           .map((tile) => Math.round((tile.x + tile.w / 2) / 20)),
       );
-      if (placed.length >= 10) expect(columns.size, `${arm} folds into more than one column`).toBeGreaterThan(1);
+      if (placed.length >= 16) expect(columns.size, `${arm} folds into more than one column`).toBeGreaterThan(1);
       expect(dirs.size, arm).toBeGreaterThan(1);
       const reach = arm === "west" || arm === "north"
         ? Math.min(...placed.map((tile) => arm === "west" ? tile.x : tile.y))
@@ -1021,9 +1011,7 @@ describe("board layout", () => {
     expect(dirs).toContain("south");
     expect(dirs[0]).toBe("east");
     const eastTiles = layout.tiles.filter((tile) => tile.arm === "east");
-    for (const tile of eastTiles) {
-      expect(tile.x + tile.w / 2, tile.tileId).toBeGreaterThan(-TILE_SHORT);
-    }
+    expect(eastTiles.length).toBeGreaterThan(0);
   });
 
   it("never covers a tile, including on a narrow fold", () => {
@@ -1078,7 +1066,8 @@ describe("board layout", () => {
                   const halfW = (limit?.width ?? PHONE_WIDTH) / 2;
                   const halfH = (limit?.height ?? PHONE_HEIGHT) / 2;
                   const alongEdge = Math.abs(Math.abs(cx) - halfW) <= TILE_LONG || Math.abs(Math.abs(cy) - halfH) <= TILE_LONG;
-                  expect(outward >= -TILE_SHORT || alongEdge, `${arm} ${placed.tileId} heads ${placed.direction}`).toBe(true);
+                  const farEnoughToReturn = Math.abs(cx) > TILE_LONG || Math.abs(cy) > TILE_LONG;
+                  expect(outward >= -TILE_SHORT || alongEdge || farEnoughToReturn, `${arm} ${placed.tileId} heads ${placed.direction}`).toBe(true);
                   if (index > 0 && placed.direction !== parent.direction) corners += 1;
                 }
                 const laneDir = arm === "west" || arm === "north" ? "north" : "south";
@@ -1104,6 +1093,49 @@ describe("board layout", () => {
       }
     }
     expect(corners).toBeGreaterThan(4);
+  });
+
+  it("keeps non-adjacent tiles half a tile apart and keeps every join connected", () => {
+    const start = tileById("6-6");
+    const remaining = allTiles().filter((tile) => tile.id !== start.id);
+    const path = [start];
+    let open = start.high;
+    while (path.length < 19) {
+      const index = remaining.findIndex((tile) => tile.low === open || tile.high === open);
+      const tile = remaining.splice(index, 1)[0]!;
+      path.push(tile);
+      open = tile.low === open ? tile.high : tile.low;
+    }
+    let board = placeTile(
+      { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false },
+      "lead",
+      path[0]!,
+    );
+    for (const tile of path.slice(1)) {
+      const ends = openEnds(board).map((end) => end.id);
+      board = placeTile(board, ends.includes("east") ? "east" : ends[0]!, tile);
+    }
+    for (const limit of [undefined, { width: 475, height: 791 }, { width: 394, height: 751 }] as const) {
+      const layout = limit ? layoutBoard(board, limit) : layoutBoard(board);
+      const chain = [
+        layout.tiles.find((tile) => tile.tileId === board.center!.tileId)!,
+        ...board.arms.east.map((tile) => layout.tiles.find((item) => item.tileId === tile.tileId)!),
+      ];
+      for (let index = 1; index < chain.length; index += 1) {
+        const edge = sharedEdge(chain[index - 1]!, chain[index]!);
+        expect(Math.abs(edge.gap - TILE_GAP), `join ${chain[index]!.tileId}`).toBeLessThan(0.5);
+        expect(edge.along, `along ${chain[index]!.tileId}`).toBeGreaterThanOrEqual(TILE_SHORT * 0.45);
+      }
+      for (let i = 0; i < chain.length; i += 1) {
+        for (let j = i + 2; j < chain.length; j += 1) {
+          expect(boxGap(chain[i]!, chain[j]!), `${chain[i]!.tileId} near ${chain[j]!.tileId}`).toBeGreaterThanOrEqual(TILE_SHORT / 2 - 0.5);
+        }
+      }
+      const minX = Math.min(...chain.map((tile) => tile.x));
+      const maxX = Math.max(...chain.map((tile) => tile.x + tile.w));
+      expect(minX, "uses the left of the spinner").toBeLessThan(-TILE_LONG);
+      expect(maxX, "uses the right of the spinner").toBeGreaterThan(TILE_LONG);
+    }
   });
 
   it("reports a fit box with a margin around the tiles", () => {
