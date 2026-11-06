@@ -156,13 +156,21 @@ export function containScale(input: {
   const screen = Math.max(1, input.screenWidth);
   const open = (OPEN_TILE_FRAC * screen) / TILE_SHORT;
   const insets = withAir(fitInsets(input.felt, input.zones ?? [], input.reserve), input.felt, ZOOM_AIR);
-  const roomW = Math.max(TILE_LONG, input.felt.w - insets.left - insets.right);
-  const roomH = Math.max(TILE_LONG, input.felt.h - insets.top - insets.bottom - CHAIN_CLEAR);
-  // Fit the chain's own box into the whole safe felt. The spinner used to
-  // claim the centre, so a one-sided chain was squeezed into half the felt.
+  // The chain is centred on the felt, so the tighter edge applies to both
+  // sides. A deep hand tray must not shove the picture up into the frame.
+  const marginX = Math.max(FELT_FRAME, input.felt.w * FELT_INNER);
+  const marginY = Math.max(FELT_FRAME, input.felt.h * FELT_INNER);
+  const left = Math.max(insets.left, marginX);
+  const right = Math.max(insets.right, marginX);
+  const top = Math.max(insets.top, marginY);
+  const bottom = Math.max(insets.bottom, marginY);
+  const halfW = Math.max(TILE_SHORT, Math.min(input.felt.w / 2 - left, input.felt.w / 2 - right));
+  const halfH = Math.max(TILE_SHORT, Math.min(input.felt.h / 2 - top, input.felt.h / 2 - bottom));
+  const roomW = Math.max(1, halfW * 2 - TILE_RING_PAD * 2);
+  const roomH = Math.max(1, halfH * 2 - TILE_RING_PAD * 2);
   const box = chainBounds(input.tiles, 0);
-  const fitW = Math.max(1, roomW - TILE_RING_PAD * 2) / Math.max(1, box.w);
-  const fitH = Math.max(1, roomH - TILE_RING_PAD * 2) / Math.max(1, box.h);
+  const fitW = roomW / Math.max(1, box.w);
+  const fitH = roomH / Math.max(1, box.h);
   let scale = Math.min(open, Number.isFinite(fitW) && fitW > 0 ? fitW : open, Number.isFinite(fitH) && fitH > 0 ? fitH : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
     scale = Math.min(input.previous, scale);
@@ -282,21 +290,45 @@ export function zoomSamples(from: number, to: number, steps = 4): number[] {
   return samples;
 }
 
+/** Inner felt, clear of the wooden frame. The chain is centred on the felt itself. */
+export const FELT_INNER = 0.05;
+export const FELT_FRAME = 18;
+
+export function feltInnerRect(felt: FeltSize): { left: number; top: number; right: number; bottom: number } {
+  const mx = Math.max(FELT_FRAME, felt.w * FELT_INNER);
+  const my = Math.max(FELT_FRAME, felt.h * FELT_INNER);
+  return { left: mx, top: my, right: felt.w - mx, bottom: felt.h - my };
+}
+
 /**
- * Put the chain's own box on the safe centre of the felt. A one-sided arm
- * used to sit high, with empty felt below, because the spinner stayed put.
- * `insetShift` is the chrome offset (a deeper header than a footer).
+ * Screen rect of a tile after the settled camera. The felt's top-left is the origin.
+ * This is the same transform the board paints: felt centre, plus the pan, plus the design point.
+ */
+export function renderedTileRect(
+  felt: FeltSize,
+  tile: LayoutBox,
+  scale: number,
+  shift: { x: number; y: number },
+): { left: number; top: number; right: number; bottom: number } {
+  const left = felt.w / 2 + shift.x + tile.x * scale;
+  const top = felt.h / 2 + shift.y + tile.y * scale;
+  return { left, top, right: left + tile.w * scale, bottom: top + tile.h * scale };
+}
+
+/**
+ * Put the chain's own box on the centre of the felt. Chrome insets shrink the
+ * picture so it still clears them; they do not slide the chain off centre.
  */
 export function chainViewShift(
   tiles: readonly LayoutBox[],
   scale: number,
-  insetShift: { x: number; y: number },
+  _insetShift?: { x: number; y: number },
   _room?: { w: number; h: number },
 ): { x: number; y: number } {
   const box = chainBounds(tiles, 0);
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
-  return { x: insetShift.x - cx * scale, y: insetShift.y - cy * scale };
+  return { x: -cx * scale, y: -cy * scale };
 }
 
 /** True only when a tile has landed or a hand has started. Choosing does not count. */

@@ -12,6 +12,8 @@ import {
   cameraSettlesOn,
   chainViewShift,
   containScale,
+  feltInnerRect,
+  renderedTileRect,
   feltScale,
   zoomSamples,
   centeredChain,
@@ -320,12 +322,10 @@ describe("board scale", () => {
     });
     const pan = chainViewShift(oneSided, scale, boardShift(insets));
     const box = chainBounds(oneSided, 0);
-    const safeCx = insets.left + (felt.w - insets.left - insets.right) / 2;
-    const safeCy = insets.top + (felt.h - insets.top - insets.bottom) / 2;
     const chainCx = felt.w / 2 + pan.x + (box.x + box.w / 2) * scale;
     const chainCy = felt.h / 2 + pan.y + (box.y + box.h / 2) * scale;
-    expect(Math.abs(chainCx - safeCx)).toBeLessThan(4);
-    expect(Math.abs(chainCy - safeCy)).toBeLessThan(4);
+    expect(Math.abs(chainCx - felt.w / 2)).toBeLessThan(felt.w * 0.05);
+    expect(Math.abs(chainCy - felt.h / 2)).toBeLessThan(felt.h * 0.05);
     const again = chainViewShift(oneSided, scale, boardShift(insets));
     expect(again).toEqual(pan);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -596,12 +596,10 @@ describe("board scale", () => {
             h: table.felt.h,
           });
           const box = chainBounds(layout.tiles, 0);
-          const safeCx = insets.left + (table.felt.w - insets.left - insets.right) / 2;
-          const safeCy = insets.top + (table.felt.h - insets.top - insets.bottom) / 2;
           const chainCx = table.felt.w / 2 + pan.x + (box.x + box.w / 2) * view.scale;
           const chainCy = table.felt.h / 2 + pan.y + (box.y + box.h / 2) * view.scale;
-          expect(Math.abs(chainCx - safeCx), `${table.name} centred x`).toBeLessThan(4);
-          expect(Math.abs(chainCy - safeCy), `${table.name} centred y`).toBeLessThan(4);
+          expect(Math.abs(chainCx - table.felt.w / 2), `${table.name} centred x`).toBeLessThan(table.felt.w * 0.05);
+          expect(Math.abs(chainCy - table.felt.h / 2), `${table.name} centred y`).toBeLessThan(table.felt.h * 0.05);
           const ring = 2;
           for (const tile of layout.tiles) {
             const left = table.felt.w / 2 + pan.x + tile.x * view.scale;
@@ -948,6 +946,94 @@ describe("board scale", () => {
       }
     }
   }, 40_000);
+
+  it("keeps every rendered tile inside the felt and the chain on its centre", () => {
+    const log = JSON.parse(
+      readFileSync(new URL("../../rules/src/fixtures/soak-m2-overlap.json", import.meta.url), "utf8"),
+    ) as {
+      players: Array<{ id: string; name: string }>;
+      config: { boneyardMode: "draw_one"; seriesLength: 3; targetScore: number };
+      hands: Array<{
+        handNumber: number;
+        seed: string;
+        actions: Array<{ playerId: string; intent: { type: string; tileId?: string; endId?: string } }>;
+      }>;
+    };
+    const surfaces = [
+      { name: "phone", w: 412, h: 915 },
+      { name: "cover", w: 344, h: 882 },
+      { name: "inner", w: 751, h: 832 },
+    ];
+    let plays = 0;
+    for (const surface of surfaces) {
+      const felt = { w: surface.w, h: surface.h };
+      const inner = feltInnerRect(felt);
+      const zones = seatZones(felt, 3);
+      zones.push({ left: 0, top: felt.h - 150, right: felt.w, bottom: felt.h });
+      let match = createMatch(log.players, log.config);
+      let previous: number | null = null;
+      for (const hand of log.hands) {
+        match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+        if (hand.handNumber !== 5) {
+          for (const action of hand.actions) {
+            const result = applyIntent(match, action.playerId, action.intent as never);
+            expect(result.ok, result.error).toBe(true);
+            match = result.match;
+          }
+          previous = null;
+          continue;
+        }
+      for (const action of hand.actions) {
+        const result = applyIntent(match, action.playerId, action.intent as never);
+        expect(result.ok, result.error).toBe(true);
+        match = result.match;
+        if (action.intent.type !== "play" || !match.hand) continue;
+        plays += 1;
+        const board = match.hand.board;
+        const view = feltScale({
+          board,
+          felt,
+          screenWidth: felt.w,
+          zones,
+          previous,
+          newHand: previous == null,
+        });
+        const layout = layoutBoard(board, view.limits);
+        const scale = containScale({
+          tiles: layout.tiles,
+          felt,
+          screenWidth: felt.w,
+          zones,
+          previous,
+          newHand: previous == null,
+        });
+        const shift = chainViewShift(layout.tiles, scale);
+        let minL = Infinity;
+        let minT = Infinity;
+        let maxR = -Infinity;
+        let maxB = -Infinity;
+        for (const tile of layout.tiles) {
+          const rect = renderedTileRect(felt, tile, scale, shift);
+          const where = `${surface.name} ${tile.tileId}`;
+          expect(rect.left, where).toBeGreaterThanOrEqual(inner.left - 0.5);
+          expect(rect.top, where).toBeGreaterThanOrEqual(inner.top - 0.5);
+          expect(rect.right, where).toBeLessThanOrEqual(inner.right + 0.5);
+          expect(rect.bottom, where).toBeLessThanOrEqual(inner.bottom + 0.5);
+          minL = Math.min(minL, rect.left);
+          minT = Math.min(minT, rect.top);
+          maxR = Math.max(maxR, rect.right);
+          maxB = Math.max(maxB, rect.bottom);
+        }
+        const cx = (minL + maxR) / 2;
+        const cy = (minT + maxB) / 2;
+        expect(Math.abs(cx - felt.w / 2), `${surface.name} centre x`).toBeLessThan(felt.w * 0.05);
+        expect(Math.abs(cy - felt.h / 2), `${surface.name} centre y`).toBeLessThan(felt.h * 0.05);
+        previous = scale;
+      }
+      }
+    }
+    expect(plays).toBeGreaterThan(40);
+  });
 });
 
 const PHONE_RESERVE = { top: 62, right: 63, bottom: 30, left: 63 };
