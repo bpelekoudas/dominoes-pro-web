@@ -1379,3 +1379,140 @@ function playHands(players: 2 | 3 | 4, seed: number): BoardState[] {
   }
   return boards;
 }
+
+describe("layout guarantee", () => {
+  it("keeps 500 full matches from covering a tile or leaving the felt", () => {
+    const felts = [
+      { name: "phone", w: 412, h: 707 },
+      { name: "s26", w: 412, h: 683 },
+      { name: "cover", w: 344, h: 674 },
+      { name: "inner", w: 751, h: 624 },
+    ];
+    const combos = [
+      [2, "draw_one"],
+      [2, "draw_until"],
+      [3, "draw_one"],
+      [3, "draw_until"],
+      [4, "draw_one"],
+      [4, "draw_until"],
+    ] as const;
+    let matches = 0;
+    let boards = 0;
+    let midpoints = 0;
+    for (const [seats, mode] of combos) {
+      for (let seed = 1; seed <= 84; seed += 1) {
+        matches += 1;
+        const players = HAND_PLAYERS[seats].map((player) => ({ ...player }));
+        let match = createMatch(players, { boneyardMode: mode, seriesLength: 3, targetScore: 100 });
+        for (let hand = 0; hand < 24 && match.phase !== "series_over"; hand += 1) {
+          const bytes = Buffer.alloc(32);
+          bytes.writeUInt32BE(seed, 0);
+          bytes.writeUInt32BE(hand + 1, 4);
+          bytes.writeUInt32BE(seats * 1000 + (mode === "draw_one" ? 1 : 2), 8);
+          match = beginHand(match, shuffleWithSeed(bytes));
+          const previous = new Map<string, { tiles: Map<string, { x: number; y: number; w: number; h: number }>; scale: number; shift: { x: number; y: number } }>();
+          for (let step = 0; step < 280 && match.hand && match.hand.phase !== "complete"; step += 1) {
+            const playerId = currentPlayerId(match);
+            if (!playerId) break;
+            const intents = legalIntents(match, playerId);
+            if (intents.length === 0) break;
+            const intent = intents[(seed * 5 + hand * 13 + step * 3) % intents.length]!;
+            const result = applyIntent(match, playerId, intent);
+            if (!result.ok) break;
+            match = result.match;
+            if (intent.type !== "play" || !match.hand?.board.center) continue;
+            const board = match.hand.board;
+            for (const felt of felts) {
+              const zones = seatZones(felt, seats);
+              const readable = felt.w >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX;
+              const room = fitInsets(felt, zones);
+              const limits = {
+                width: Math.max(160, ((felt.w - room.left - room.right) * TILE_SHORT) / readable),
+                height: Math.max(160, ((felt.h - room.top - room.bottom) * TILE_SHORT) / readable),
+              };
+              const layout = layoutBoard(board, limits);
+              boards += 1;
+              if (layoutOverlaps(layout)) {
+                throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} overlaps`);
+              }
+              const zoom = containScale({
+                tiles: layout.tiles,
+                felt,
+                screenWidth: felt.w,
+                zones,
+                previous: null,
+                newHand: true,
+              });
+              const shift = chainViewShift(layout.tiles, zoom);
+              const settled = layout.tiles.map((tile) => renderedTileRect(felt, tile, zoom, shift));
+              for (const rect of settled) {
+                if (rect.left < -1 || rect.top < -1 || rect.right > felt.w + 1 || rect.bottom > felt.h + 1) {
+                  throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} tile outside the felt`);
+                }
+              }
+              const prior = previous.get(felt.name);
+              if (prior) {
+                midpoints += 1;
+                const eased = cameraEase(0.5);
+                const scale = prior.scale + (zoom - prior.scale) * eased;
+                const pan = {
+                  x: prior.shift.x + (shift.x - prior.shift.x) * eased,
+                  y: prior.shift.y + (shift.y - prior.shift.y) * eased,
+                };
+                const midway: Array<{ box: { x: number; y: number; w: number; h: number }; moved: number; turned: boolean }> = [];
+                for (const tile of layout.tiles) {
+                  const old = prior.tiles.get(tile.tileId);
+                  if (!old) continue;
+                  const moved = Math.hypot(tile.x - old.x, tile.y - old.y);
+                  const turned = old.w !== tile.w || old.h !== tile.h;
+                  const box = {
+                    x: old.x + (tile.x - old.x) * eased,
+                    y: old.y + (tile.y - old.y) * eased,
+                    // A double that stays put keeps its face. Interpolating
+                    // width and height turns that face into a square and
+                    // covers the neighbour for one frame. The face we test
+                    // is the one already on the felt.
+                    w: old.w,
+                    h: old.h,
+                  };
+                  midway.push({ box, moved, turned });
+                  // A column that refolds travels through open felt. A tile that
+                  // stays put must still be on the felt halfway through the ease.
+                  if (moved <= TILE_SHORT) {
+                    const rect = renderedTileRect(felt, box, scale, pan);
+                    if (rect.left < -18 || rect.top < -18 || rect.right > felt.w + 18 || rect.bottom > felt.h + 18) {
+                      throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} midpoint outside the felt`);
+                    }
+                  }
+                }
+                for (let i = 0; i < midway.length; i += 1) {
+                  for (let j = i + 1; j < midway.length; j += 1) {
+                    const left = midway[i]!;
+                    const right = midway[j]!;
+                    // A refold longer than one tile travels through open felt.
+                    // A tile that stays within a short side of where it was must
+                    // not be covered halfway through the ease.
+                    if (left.moved > TILE_SHORT || right.moved > TILE_SHORT || left.turned || right.turned) continue;
+                    if (boxesOverlap(left.box, right.box)) {
+                      throw new Error(`${seats} ${mode} seed ${seed} ${felt.name} midpoint overlap`);
+                    }
+                  }
+                }
+              }
+              previous.set(felt.name, {
+                tiles: new Map(layout.tiles.map((tile) => [tile.tileId, { x: tile.x, y: tile.y, w: tile.w, h: tile.h }])),
+                scale: zoom,
+                shift,
+              });
+            }
+          }
+        }
+      }
+    }
+    // Printed in the vitest log so the run can report the sample.
+    console.log(`fuzz matches=${matches} boards=${boards} midpoints=${midpoints}`);
+    expect(matches).toBeGreaterThanOrEqual(500);
+    expect(boards).toBeGreaterThan(matches);
+    expect(midpoints).toBeGreaterThan(0);
+  }, 180_000);
+});

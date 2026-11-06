@@ -137,14 +137,33 @@ function withLimit<T>(limit: LayoutLimits, run: () => T): T {
   }
 }
 
-export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
+function usableLimit(limits?: LayoutLimits): LayoutLimits {
   if (!limits || !Number.isFinite(limits.width) || !Number.isFinite(limits.height) || limits.width < 72 || limits.height < 72) {
-    return withLimit(DEFAULT_LIMIT, () => layoutBoardNow(board));
+    return DEFAULT_LIMIT;
   }
+  return limits;
+}
+
+export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
   // The caller's rectangle is the felt at the current tile size. Arms run
-  // out to that edge. A layout that covers another tile falls back to the
-  // phone picture.
-  return withLimit(limits, () => layoutBoardNow(board));
+  // out to that edge. If a tile would cover another, fold the same chain
+  // into a smaller rectangle so the arms turn while there is still room.
+  let width = usableLimit(limits).width;
+  let height = usableLimit(limits).height;
+  let last: BoardLayout | null = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const layout = withLimit({ width, height }, () => layoutBoardNow(board));
+    if (!layoutOverlaps(layout)) return layout;
+    const repaired = repairLayout(board, layout);
+    if (repaired) return repaired;
+    last = layout;
+    const nextWidth = Math.max(TILE_LONG * 2, width * 0.78);
+    const nextHeight = Math.max(TILE_LONG * 3, height * 0.78);
+    if (nextWidth === width && nextHeight === height) break;
+    width = nextWidth;
+    height = nextHeight;
+  }
+  return rebalanceLayout(board, last!);
 }
 
 /** True when two faces share area. Touching edges do not count. */
@@ -1407,6 +1426,235 @@ function snakeStep(
   };
 }
 
+const LAY_ORDER = ["north", "south", "west", "east"] as const;
+
+function stepHits(box: LayoutBox, parent: LayoutBox, blockers: readonly LayoutBox[]): boolean {
+  if (boxesOverlap(box, parent)) return true;
+  return blockers.some((other) => boxesOverlap(box, other));
+}
+
+/** Across-axis centre. Vertical runs share an x; horizontal runs share a y. */
+function axisLine(box: LayoutBox, dir: LayoutDir): number {
+  return dir === "north" || dir === "south" ? box.x + box.w / 2 : box.y + box.h / 2;
+}
+
+/**
+ * The cell the first tile of an arm needs, including an arm that has not
+ * been drawn yet. Later tiles must not sit on it.
+ */
+function openingBox(center: LayoutBox, arm: ArmId, first: OrientedTile): LayoutBox {
+  return straightBox(center, arm, isDoubleTile(first));
+}
+
+function candidateSteps(parent: LayoutBox, dir: LayoutDir, isDouble: boolean): Array<{ box: LayoutBox; way: LayoutDir }> {
+  const ways: LayoutDir[] = [];
+  const add = (way: LayoutDir) => {
+    if (!ways.includes(way)) ways.push(way);
+  };
+  add(dir);
+  add("north");
+  add("south");
+  add("east");
+  add("west");
+  const steps: Array<{ box: LayoutBox; way: LayoutDir }> = [];
+  for (const way of ways) {
+    const box = isDouble || way === dir ? straightBox(parent, way, isDouble) : bendBox(parent, dir, way, false);
+    steps.push({ box, way });
+    if (isDouble) continue;
+    for (const delta of [-18, -12, -6, 6, 12, 18]) {
+      const slid = way === "east" || way === "west" ? { ...box, y: box.y + delta } : { ...box, x: box.x + delta };
+      const across = way === "east" || way === "west"
+        ? Math.min(parent.y + parent.h, slid.y + slid.h) - Math.max(parent.y, slid.y)
+        : Math.min(parent.x + parent.w, slid.x + slid.w) - Math.max(parent.x, slid.x);
+      if (across >= TILE_SHORT * 0.45) steps.push({ box: slid, way });
+    }
+  }
+  return steps;
+}
+
+/** Keep the proposed cell when it is free. Otherwise take the next join that is. */
+function clearStep(proposed: StepResult, parent: LayoutBox, isDouble: boolean, blockers: readonly LayoutBox[]): StepResult {
+  if (!stepHits(proposed.box, parent, blockers)) return proposed;
+  for (const step of candidateSteps(parent, proposed.dir, isDouble)) {
+    if (stepHits(step.box, parent, blockers)) continue;
+    const turned = step.way !== proposed.dir;
+    return {
+      ...proposed,
+      box: step.box,
+      dir: step.way,
+      row: proposed.row + (turned ? 1 : 0),
+      run: turned ? 1 : Math.max(1, proposed.run),
+      line: axisLine(step.box, step.way),
+      opening: false,
+      fromDouble: false,
+    };
+  }
+  return proposed;
+}
+
+/**
+ * Place every tile again, joined to its parent, on a cell that does not
+ * cover a tile or an opening another arm still needs. Used only when
+ * folding tighter still left two faces on top of each other.
+ */
+function joinedTo(parent: LayoutBox, box: LayoutBox): boolean {
+  const xOverlap = Math.min(parent.x + parent.w, box.x + box.w) - Math.max(parent.x, box.x);
+  const yOverlap = Math.min(parent.y + parent.h, box.y + box.h) - Math.max(parent.y, box.y);
+  const gapX = Math.max(parent.x - (box.x + box.w), box.x - (parent.x + parent.w), 0);
+  const gapY = Math.max(parent.y - (box.y + box.h), box.y - (parent.y + parent.h), 0);
+  if (gapY <= 0.5 && gapX > 0) return Math.abs(gapX - TILE_GAP) < 0.5 && yOverlap >= TILE_SHORT * 0.45;
+  if (gapX <= 0.5 && gapY > 0) return Math.abs(gapY - TILE_GAP) < 0.5 && xOverlap >= TILE_SHORT * 0.45;
+  return false;
+}
+
+/**
+ * Keep the snake. Move only a tile that covers another one, onto the next
+ * free join. Returns null when some tile has no free join left.
+ */
+function repairLayout(board: BoardState, snake: BoardLayout): BoardLayout | null {
+  if (!board.center) return null;
+  const center = centerBox(board.center);
+  const tiles: PlacedTile[] = [centerTile(board.center, center)];
+  const placed: LayoutBox[] = [center];
+  const reserved = new Map<ArmId, LayoutBox>();
+  for (const arm of LAY_ORDER) {
+    const first = board.arms[arm][0];
+    if (first) reserved.set(arm, openingBox(center, arm, first));
+  }
+  for (const arm of LAY_ORDER) {
+    reserved.delete(arm);
+    let parent: LayoutBox = center;
+    let dir: LayoutDir = arm;
+    let parentTile: OrientedTile | null = null;
+    for (const tile of board.arms[arm]) {
+      const drawn = snake.tiles.find((item) => item.tileId === tile.tileId);
+      const double = isDoubleTile(tile);
+      const blockers = () => [...placed, ...reserved.values()];
+      const propose = (from: LayoutBox, fromDir: LayoutDir, isDouble: boolean, extra: LayoutBox | null) => {
+        const blocked = extra ? [...blockers(), extra] : blockers();
+        return clearStep(
+          {
+            box: straightBox(from, fromDir, isDouble),
+            dir: fromDir,
+            row: 0,
+            line: axisLine(from, fromDir),
+            run: 1,
+            opening: false,
+            fromDouble: false,
+            column: false,
+          },
+          from,
+          isDouble,
+          blocked,
+        );
+      };
+      let box: LayoutBox | null = drawn && joinedTo(parent, drawn) && !stepHits(drawn, parent, blockers()) ? drawn : null;
+      let way: LayoutDir = drawn?.direction ?? dir;
+      if (!box) {
+        const stepped = propose(parent, drawn?.direction ?? dir, double, null);
+        if (!stepHits(stepped.box, parent, blockers()) && joinedTo(parent, stepped.box)) {
+          box = stepped.box;
+          way = stepped.dir;
+        }
+      }
+      // The parent is boxed in. Slide that one tile, then seat this one beside it.
+      if (!box && parentTile && tiles.length >= 2) {
+        const grand = tiles[tiles.length - 2]!;
+        const held = tiles.pop()!;
+        placed.pop();
+        const parentDouble = isDoubleTile(parentTile);
+        for (const option of candidateSteps(grand, held.direction, parentDouble)) {
+          if (stepHits(option.box, grand, blockers()) || !joinedTo(grand, option.box)) continue;
+          const child = propose(option.box, option.way, double, option.box);
+          if (stepHits(child.box, option.box, [...blockers(), option.box]) || !joinedTo(option.box, child.box)) continue;
+          const moved = toTile(parentTile, option.box, option.way, arm);
+          tiles.push(moved);
+          placed.push(moved);
+          parent = moved;
+          box = child.box;
+          way = child.dir;
+          break;
+        }
+        if (!box) {
+          tiles.push(held);
+          placed.push(held);
+          return null;
+        }
+      }
+      if (!box) return null;
+      const laid = toTile(tile, box, way, arm);
+      tiles.push(laid);
+      placed.push(laid);
+      parent = laid;
+      dir = way;
+      parentTile = tile;
+    }
+  }
+  const ends = snake.ends.map((end) => ({ ...end }));
+  const layout = { tiles, ends, fit: fitAround([...tiles, ...ends]), previews: snake.previews };
+  return layoutOverlaps(layout) ? null : layout;
+}
+
+function rebalanceLayout(board: BoardState, failed: BoardLayout): BoardLayout {
+  if (!board.center) return failed;
+  const center = centerBox(board.center);
+  const tiles: PlacedTile[] = [centerTile(board.center, center)];
+  const placed: LayoutBox[] = [center];
+  const reserved = new Map<ArmId, LayoutBox>();
+  for (const arm of LAY_ORDER) {
+    const first = board.arms[arm][0];
+    if (first) reserved.set(arm, openingBox(center, arm, first));
+  }
+  const cursors = new Map<ArmId, SnakeCursor>();
+  for (const arm of LAY_ORDER) {
+    reserved.delete(arm);
+    const chain = board.arms[arm];
+    if (chain.length === 0) continue;
+    let parent = center;
+    let dir: LayoutDir = arm;
+    let row = 0;
+    let run = 0;
+    for (const tile of chain) {
+      const double = isDoubleTile(tile);
+      const blockers = [...placed, ...reserved.values()];
+      const proposed = clearStep(
+        { box: straightBox(parent, dir, double), dir, row, line: axisLine(parent, dir), run, opening: false, fromDouble: false, column: false },
+        parent,
+        double,
+        blockers,
+      );
+      const laid = toTile(tile, proposed.box, proposed.dir, arm);
+      tiles.push(laid);
+      placed.push(laid);
+      dir = proposed.dir;
+      row = proposed.row;
+      run = proposed.run;
+      parent = laid;
+    }
+    const last = tiles[tiles.length - 1]!;
+    cursors.set(arm, {
+      box: last,
+      dir,
+      row,
+      line: axisLine(last, dir),
+      run,
+      opening: false,
+      fromDouble: false,
+      column: false,
+      full: 0,
+    });
+  }
+  if (layoutOverlaps({ tiles, ends: [], fit: center, previews: {} })) return failed;
+  const ends: PlacedEnd[] = [];
+  for (const end of openEnds(board)) {
+    if (end.id !== "west" && end.id !== "east" && end.id !== "north" && end.id !== "south") continue;
+    const cursor = cursors.get(end.id);
+    const cap = cursor ? { ...cursor.box } : capOnCenter(center, end.id);
+    ends.push({ ...cap, id: end.id, match: end.match, scorePips: end.scorePips });
+  }
+  return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews: {} };
+}
+
 function layoutBoardNow(board: BoardState): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
@@ -1416,21 +1664,34 @@ function layoutBoardNow(board: BoardState): BoardLayout {
   const tiles: PlacedTile[] = [centerTile(board.center, center)];
   const placed: LayoutBox[] = [center];
   const cursors = new Map<ArmId, SnakeCursor>();
+  // Openings of arms not drawn yet. A column must not sit on one.
+  const reserved = new Map<ArmId, LayoutBox>();
+  for (const arm of LAY_ORDER) {
+    const first = board.arms[arm][0];
+    if (first) reserved.set(arm, openingBox(center, arm, first));
+  }
 
   // Centre arms first, so a side snake can cross the open felt without
   // laying a bridge through a column that has not been placed yet.
-  for (const arm of ["north", "south", "west", "east"] as const) {
+  for (const arm of LAY_ORDER) {
     const chain = board.arms[arm];
     const first = chain[0];
     if (!first) continue;
-    const opening = snakeStep(
-      first,
-      { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false, full: 0 },
-      arm,
+    reserved.delete(arm);
+    const blockers = () => [...placed, ...reserved.values()];
+    const opening = clearStep(
+      snakeStep(
+        first,
+        { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false, full: 0 },
+        arm,
+        center,
+        chain,
+        placed,
+        true,
+      ),
       center,
-      chain,
-      placed,
-      true,
+      isDoubleTile(first),
+      blockers(),
     );
     const laid = toTile(first, opening.box, opening.dir, arm);
     tiles.push(laid);
@@ -1448,15 +1709,12 @@ function layoutBoardNow(board: BoardState): BoardLayout {
     };
     for (let index = 1; index < chain.length; index += 1) {
       const tile = chain[index]!;
-      let choice = snakeStep(tile, cursor, arm, center, chain.slice(index), placed, false);
-      if (!isDoubleTile(tile) && (overlapsPlaced(choice.box, placed) || boxesOverlap(choice.box, cursor.box))) {
-        for (const way of ["north", "south", "east", "west"] as const) {
-          const step = way === cursor.dir ? straightBox(cursor.box, way, false) : bendBox(cursor.box, cursor.dir, way, false);
-          if (overlapsPlaced(step, placed) || boxesOverlap(step, cursor.box)) continue;
-          choice = { ...choice, box: step, dir: way, row: cursor.row + 1, line: step.x + step.w / 2, run: 1 };
-          break;
-        }
-      }
+      const choice = clearStep(
+        snakeStep(tile, cursor, arm, center, chain.slice(index), placed, false),
+        cursor.box,
+        isDoubleTile(tile),
+        blockers(),
+      );
       const next = toTile(tile, choice.box, choice.dir, arm);
       tiles.push(next);
       placed.push(next);

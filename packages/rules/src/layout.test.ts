@@ -1203,7 +1203,7 @@ describe("board layout", () => {
       }>;
     };
     let match = createMatch(log.players, log.config);
-    const limits = [undefined, { width: 220, height: 640 }, { width: 344, height: 720 }] as const;
+    const limits = [undefined, { width: 220, height: 640 }, { width: 412, height: 683 }, { width: 344, height: 720 }] as const;
     for (const hand of log.hands) {
       match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
       let play = 0;
@@ -1219,6 +1219,45 @@ describe("board layout", () => {
             layoutOverlaps(layout),
             `g${hand.gameNumber} h${hand.handNumber} play ${play} ${action.intent.tileId} ${limit ? limit.width : "phone"}`,
           ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("does not cover a tile on the soaked 3-seat draw-one match, including the tight felt", () => {
+    const file = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "soak-3993aed-m2.json");
+    const log = JSON.parse(readFileSync(file, "utf8")) as {
+      players: Array<{ id: string; name: string }>;
+      config: { boneyardMode: "draw_one"; seriesLength: 3; targetScore: number };
+      hands: Array<{
+        gameNumber: number;
+        handNumber: number;
+        seed: string;
+        actions: Array<{ playerId: string; intent: { type: "play"; tileId: string; endId: string } | { type: "draw" } | { type: "knock" } }>;
+      }>;
+    };
+    let match = createMatch(log.players, log.config);
+    const limits = [
+      undefined,
+      { width: 220, height: 640 },
+      { width: 412, height: 683 },
+      { width: 344, height: 674 },
+      { width: 751, height: 624 },
+    ] as const;
+    for (const hand of log.hands) {
+      match = beginHand(match, shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+      let play = 0;
+      for (const action of hand.actions) {
+        const result = applyIntent(match, action.playerId, action.intent);
+        expect(result.ok, `${hand.gameNumber}.${hand.handNumber} ${result.error}`).toBe(true);
+        match = result.match;
+        if (action.intent.type !== "play" || !match.hand) continue;
+        play += 1;
+        for (const limit of limits) {
+          const layout = limit ? layoutBoard(match.hand.board, limit) : layoutBoard(match.hand.board);
+          const where = `${hand.gameNumber}.${hand.handNumber} play ${play} ${action.intent.type === "play" ? action.intent.tileId : ""} ${limit ? `${limit.width}x${limit.height}` : "phone"}`;
+          expect(layoutOverlaps(layout), where).toBe(false);
+          if (hand.gameNumber === 2 && hand.handNumber === 3) assertJoined(match.hand.board, layout, where);
         }
       }
     }
