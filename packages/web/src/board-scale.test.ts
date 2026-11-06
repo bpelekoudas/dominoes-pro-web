@@ -12,6 +12,7 @@ import {
   chainViewShift,
   containScale,
   feltScale,
+  zoomSamples,
   centeredChain,
   chainBounds,
   clearanceInsets,
@@ -529,7 +530,9 @@ describe("board scale", () => {
       { name: "inner", felt: { w: 751, h: 832 } },
     ];
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/data-camera="armed"\] \.board-scaler[\s\S]{0,240}transition:\s*none/);
+    expect(css).toMatch(/is-camera-hold \{\s*visibility:\s*hidden/);
+    expect(css).toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,320}transition:[\s\S]{0,200}var\(--camera-ease\)/);
+    expect(css).not.toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,80}transition:\s*none/);
     let turns = 0;
     let smallest = Number.POSITIVE_INFINITY;
     for (const table of tables) {
@@ -602,6 +605,38 @@ describe("board scale", () => {
     expect(smallest).toBeGreaterThan(8);
     expect(smallest).toBeLessThan(TILE_LONG);
   }, 40_000);
+
+  it("hides a tile that does not fit yet while the zoom eases down", () => {
+    const felt = { w: 412, h: 915 };
+    const zones = seatZones(felt, 4);
+    const insets = fitInsets(felt, zones);
+    const pan = boardShift(insets);
+    const before = [
+      { x: -18, y: -36, w: 36, h: 72 },
+      { x: -18, y: 38, w: 36, h: 400 },
+    ];
+    const added = { x: -18, y: 440, w: 36, h: 72 };
+    const after = [...before, added];
+    const previous = containScale({ tiles: before, felt, screenWidth: felt.w, zones, previous: null, newHand: true });
+    const next = containScale({ tiles: after, felt, screenWidth: felt.w, zones, previous, newHand: false });
+    expect(next).toBeLessThan(previous);
+    expect(contained(before, felt, insets, pan, previous, 2)).toBe(true);
+    expect(contained(after, felt, insets, pan, previous, 2)).toBe(false);
+    const samples = zoomSamples(previous, next, 4);
+    expect(samples[samples.length - 1]).toBeCloseTo(next, 8);
+    for (let index = 1; index < samples.length; index += 1) {
+      expect(samples[index]!).toBeLessThan(samples[index - 1]!);
+    }
+    const early = previous + (next - previous) * 0.05;
+    expect(contained(before, felt, insets, pan, early, 2), "tiles already down stay inside").toBe(true);
+    expect(contained(after, felt, insets, pan, early, 2), "the new tile is still outside early in the ease").toBe(false);
+    for (const frame of samples) {
+      expect(contained(before, felt, insets, pan, frame, 2), `old tiles at ${frame}`).toBe(true);
+    }
+    expect(contained(after, felt, insets, pan, next, 2)).toBe(true);
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).toMatch(/is-camera-hold \{\s*visibility:\s*hidden/);
+  });
 
   it("holds a lopsided arm inside the felt on a phone and a fold", () => {
     let board = emptyBoard();

@@ -7,6 +7,7 @@ import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
+  CAMERA_EASE_MS,
   containScale,
   feltScale,
   fitInsets,
@@ -155,6 +156,10 @@ export function Table({
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number } | null>(null);
   const limitHold = useRef<{ hand: string; limits: { width: number; height: number } } | null>(null);
+  const anchorHold = useRef<{ hand: string; shift: { x: number; y: number } } | null>(null);
+  const knownTiles = useRef<{ hand: string; ids: Set<string> }>({ hand: "", ids: new Set() });
+  const [heldIds, setHeldIds] = useState<ReadonlySet<string>>(new Set());
+  const settleTimer = useRef(0);
   const frozen = useRef(false);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
@@ -231,7 +236,52 @@ export function Table({
         newHand: previous == null,
         readablePx,
       });
-      const shift = boardShift(room);
+      if (!anchorHold.current || anchorHold.current.hand !== handKey) {
+        anchorHold.current = { hand: handKey, shift: boardShift(room) };
+      }
+      const shift = anchorHold.current.shift;
+      const shrinking = previous != null && zoom < previous - 0.004;
+      if (knownTiles.current.hand !== handKey) {
+        knownTiles.current = { hand: handKey, ids: new Set(layout.tiles.map((tile) => tile.tileId)) };
+        setHeldIds(new Set());
+        viewport.dataset.cameraSettling = "false";
+      } else {
+        const fresh = layout.tiles.map((tile) => tile.tileId).filter((id) => !knownTiles.current.ids.has(id));
+        if (shrinking && fresh.length > 0) {
+          // The new tile does not fit at the old size. Hide it until the
+          // ease finishes, so the tiles already on the felt are the only
+          // ones painted while the picture shrinks around the spinner.
+          viewport.dataset.cameraSettling = "true";
+          viewport.dataset.zoom = "ease";
+          setHeldIds(new Set(fresh));
+          window.clearTimeout(settleTimer.current);
+          const scaler = viewport.querySelector(".board-scaler");
+          const release = () => {
+            for (const id of fresh) knownTiles.current.ids.add(id);
+            if (viewport.dataset.cameraSettling === "true") viewport.dataset.cameraSettling = "false";
+            setHeldIds(new Set());
+          };
+          const onEnd = (event: Event) => {
+            if ((event as TransitionEvent).propertyName !== "transform") return;
+            scaler?.removeEventListener("transitionend", onEnd);
+            window.clearTimeout(settleTimer.current);
+            release();
+          };
+          scaler?.addEventListener("transitionend", onEnd);
+          settleTimer.current = window.setTimeout(() => {
+            scaler?.removeEventListener("transitionend", onEnd);
+            release();
+          }, CAMERA_EASE_MS + 60);
+        } else if (shrinking) {
+          viewport.dataset.zoom = "snap";
+          window.requestAnimationFrame(() => {
+            if (viewport.dataset.zoom === "snap") viewport.dataset.zoom = "ease";
+          });
+          for (const tile of layout.tiles) knownTiles.current.ids.add(tile.tileId);
+        } else {
+          for (const id of fresh) knownTiles.current.ids.add(id);
+        }
+      }
       const none = { top: 0, right: 0, bottom: 0, left: 0 };
       setClip((current) => (sameInsets(current, none) ? current : none));
       held.current = { hand: handKey, scale: zoom };
@@ -383,6 +433,7 @@ export function Table({
       data-board-frozen={handOver ? "true" : "false"}
       data-win-board="true"
       data-camera={cameraArmed ? "armed" : "hold"}
+      data-zoom="ease"
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
@@ -411,7 +462,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
@@ -539,6 +590,26 @@ function Arrival({
     let frame = 0;
     let timer = 0;
     let cancelled = false;
+    const waitForCamera = () => new Promise<void>((resolve) => {
+      const root = document.querySelector(".table-scroll");
+      if (!root || root.getAttribute("data-camera-settling") !== "true") {
+        resolve();
+        return;
+      }
+      const scaler = root.querySelector(".board-scaler");
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        scaler?.removeEventListener("transitionend", onEnd);
+        resolve();
+      };
+      const onEnd = (event: Event) => {
+        if ((event as TransitionEvent).propertyName === "transform") finish();
+      };
+      scaler?.addEventListener("transitionend", onEnd);
+      window.setTimeout(finish, CAMERA_EASE_MS + 80);
+    });
     const start = () => {
       tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
       const seat = document.querySelector<HTMLElement>(`.rail[data-player-id="${CSS.escape(playerId)}"] .avatar`);
@@ -567,8 +638,18 @@ function Arrival({
       });
       return true;
     };
-    if (!start()) frame = window.requestAnimationFrame(() => {
-      if (!cancelled) start();
+    const begin = () => {
+      if (cancelled) return;
+      if (!start()) {
+        frame = window.requestAnimationFrame(() => {
+          if (!cancelled) start();
+        });
+      }
+    };
+    // The parent measure effect runs after this one and may start a zoom.
+    // Wait for that ease before reading where the tile lands.
+    frame = window.requestAnimationFrame(() => {
+      void waitForCamera().then(() => begin());
     });
     return () => {
       cancelled = true;

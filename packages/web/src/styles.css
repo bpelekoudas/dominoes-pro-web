@@ -831,11 +831,18 @@ input {
   transform-origin: top left;
   transition: none;
 }
-.table-scroll[data-camera="armed"] .board-scaler,
-.table-scroll[data-camera="armed"] .board-stage {
-  /* The fit is applied in the same frame. An ease would paint the new
-     chain at the old, too-large scale and clip it on the way down. */
-  transition: none;
+.table-scroll {
+  --camera-ease: 480ms;
+}
+.board-tile.is-camera-hold { visibility: hidden; }
+.table-scroll[data-camera="armed"][data-zoom="ease"] .board-scaler {
+  transition:
+    width var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1),
+    height var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1),
+    transform var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1);
+}
+.table-scroll[data-camera="armed"][data-zoom="ease"] .board-stage {
+  transition: transform var(--camera-ease) cubic-bezier(0.22, 0.8, 0.28, 1);
 }
 .table-scroll[data-cam-user="drag"] .board-scaler,
 .table-scroll[data-cam-user="drag"] .board-stage {

@@ -226,15 +226,15 @@ export const CAMERA_COMFORT = 72;
  * long chain is at the floor.
  */
 export const CAMERA_EDGE = 30;
-/** Ease-out on the felt. No overshoot. */
-export const CAMERA_EASE_MS = 240;
+/** Ease-out on the felt. No overshoot. Matches the board-scaler transition. */
+export const CAMERA_EASE_MS = 480;
 
 /** Air between a tile and a seat badge, rack, header, or the bottom bar. */
 export const BADGE_GAP = 10;
 /** Extra air inside the clear zone. The chain shrinks before it touches a seat or the felt edge. */
 const CHAIN_CLEAR = 16;
-/** Screen pixels kept around a tile so the gold ring stays on the felt. */
-export const TILE_RING_PAD = 6;
+/** Screen pixels kept around a tile so the gold ring stays off the felt edge. */
+export const TILE_RING_PAD = 14;
 
 export interface AxisInsets {
   top: number;
@@ -266,6 +266,18 @@ export const READABLE_WIDE_PX = 44;
 /** Move a felt-centered chain into an asymmetric safe rect. */
 export function boardShift(insets: AxisInsets): { x: number; y: number } {
   return { x: (insets.left - insets.right) / 2, y: (insets.top - insets.bottom) / 2 };
+}
+
+/**
+ * Scales between a previous zoom and the fit, not including the previous
+ * value itself. The last sample is the fit. Monotonic when `to` is smaller.
+ */
+export function zoomSamples(from: number, to: number, steps = 4): number[] {
+  const samples: number[] = [];
+  for (let step = 1; step <= steps; step += 1) {
+    samples.push(from + (to - from) * (step / steps));
+  }
+  return samples;
 }
 
 /**
