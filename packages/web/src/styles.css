@@ -439,7 +439,7 @@ input {
     0 2px 5px rgba(0, 0, 0, 0.7);
 }
 .edge-left .sliver,
-.edge-right .sliver { width: 20px; height: 28px; }
+.edge-right .sliver { width: 16px; height: 28px; }
 .edge-left .sliver { border-radius: 0 4px 4px 0; }
 .edge-right .sliver { border-radius: 4px 0 0 4px; }
 .edge-top .sliver { width: 26px; height: 20px; border-radius: 0 0 4px 4px; }
