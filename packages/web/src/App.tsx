@@ -1057,13 +1057,8 @@ function EdgeSeat({
     >
       {edge === "top" ? null : (
         <div className={`edge-head edge-head-${edge}`}>
-          {edge === "left" ? (
-            <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
-          ) : null}
           <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />
-          {edge === "right" ? (
-            <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
-          ) : null}
+          <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
         </div>
       )}
       <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">

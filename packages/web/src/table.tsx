@@ -12,7 +12,6 @@ import {
   chainViewShift,
   feltScale,
   fitFrameScale,
-  scaleClearOfSlots,
   frameInsets,
   nextFeltSize,
   tilesRelocating,
@@ -241,33 +240,15 @@ export function Table({
       // chain would cross the felt. The layout on screen may still be the
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
-      const fitted = fitFrameScale({
+      const frameShift = boardShift(frameEdge);
+      // The token slots sit in the margin outside this frame. Shrinking the
+      // picture to clear a slot zooms out a play before a tile reaches the edge.
+      const zoom = fitFrameScale({
         tiles: layout.tiles,
         felt,
         screenWidth,
         frame: frameEdge,
         previous,
-      });
-      const feltBox = viewport.getBoundingClientRect();
-      const slots = [...document.querySelectorAll<HTMLElement>("[data-token-slot]")].map((slot) => {
-        const rect = slot.getBoundingClientRect();
-        return {
-          left: rect.left - feltBox.left,
-          top: rect.top - feltBox.top,
-          right: rect.right - feltBox.left,
-          bottom: rect.bottom - feltBox.top,
-        };
-      });
-      const frameShift = boardShift(frameEdge);
-      const zoom = scaleClearOfSlots({
-        tiles: layout.tiles,
-        felt,
-        slots,
-        scale: fitted,
-        shift: (scale) => {
-          const centered = chainViewShift(layout.tiles, scale);
-          return { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
-        },
       });
       const centered = chainViewShift(layout.tiles, zoom);
       const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };

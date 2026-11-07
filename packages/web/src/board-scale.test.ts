@@ -1770,4 +1770,66 @@ describe("token slot clearance", () => {
     expect(rectsMeet(before, slot)).toBe(false);
     expect(scaleClearOfSlots({ tiles: [tile], felt, slots: [slot], scale: open, shift })).toBe(open);
   });
+
+  it("a slot in the left margin does not pull a tile that is on the frame edge", () => {
+    const felt = { w: 390, h: 641 };
+    const open = (OPEN_TILE_FRAC * felt.w) / TILE_SHORT;
+    const tile = { x: 0, y: 0, w: TILE_SHORT, h: TILE_LONG };
+    const shift = () => ({ x: 20 - felt.w / 2, y: -220 });
+    const onEdge = renderedTileRect(felt, tile, open, shift());
+    expect(onEdge.left).toBeCloseTo(20, 5);
+    const slot = { left: 0, top: onEdge.top, right: 20, bottom: onEdge.top + 30 };
+    expect(rectsMeet(onEdge, slot)).toBe(false);
+    // The 6px air treats the shared frame line as a hit, so this helper would
+    // zoom while the tile is still inside the edge. The camera does not call it.
+    expect(scaleClearOfSlots({ tiles: [tile], felt, slots: [slot], scale: open, shift })).toBeLessThan(open);
+  });
+
+  it("the felt-edge zoom and a margin slot agree on the first zoom-out of one seeded hand", () => {
+    const felt = { w: 390, h: 641 };
+    const screenWidth = 390;
+    const open = (OPEN_TILE_FRAC * screenWidth) / TILE_SHORT;
+    const frame = frameInsets(null, felt);
+    const bytes = Buffer.alloc(32);
+    bytes.writeUInt32BE(11, 0);
+    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    let match = beginHand(
+      createMatch(players, { playerCount: 4, boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+      shuffleWithSeed(bytes),
+    );
+    let previous: number | null = null;
+    let held: { width: number; height: number } | null = null;
+    let edgePlay = -1;
+    let plays = 0;
+    for (let guard = 0; guard < 40 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+      const playerId = currentPlayerId(match);
+      if (!playerId) break;
+      const intents = legalIntents(match, playerId);
+      const intent = intents.find((item) => item.type === "play") ?? intents[0];
+      if (!intent) break;
+      const result = applyIntent(match, playerId, intent);
+      expect(result.ok).toBe(true);
+      if (!result.ok) break;
+      match = result.match;
+      if (intent.type !== "play" || !match.hand) continue;
+      plays += 1;
+      const solved = feltScale({
+        board: match.hand.board,
+        felt,
+        screenWidth,
+        previous,
+        newHand: previous == null,
+        tableId: null,
+        frame,
+      });
+      if (!held || solved.limits.width > held.width + 4 || solved.limits.height > held.height + 4) held = solved.limits;
+      const layout = layoutBoard(match.hand.board, held ?? undefined);
+      const edge = fitFrameScale({ tiles: layout.tiles, felt, screenWidth, frame, previous });
+      if (edgePlay < 0 && edge < open - 0.02) edgePlay = plays;
+      previous = edge;
+      if (edgePlay >= 0) break;
+    }
+    expect(edgePlay).toBeGreaterThan(1);
+    expect(plays).toBe(edgePlay);
+  });
 });

@@ -436,8 +436,8 @@ input {
   flex: none;
   max-width: 100%;
 }
-/* Inset past the skill label, which hangs off the avatar, and clear of the tile column. */
-.edge-left .edge-head { align-self: flex-start; margin-left: 14px; margin-bottom: 6px; }
+/* The west token sits in the left margin, outside the playing edge, beside the picture. */
+.edge-left .edge-head { align-self: flex-start; margin-left: 0; margin-bottom: 6px; }
 .edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; margin-bottom: 6px; }
 .edge-top .edge-head { align-self: center; }
 .token-slot {
