@@ -708,26 +708,24 @@ export function Game({
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
-          <div className="opponent-rail" data-opponents={opponents.length}>
-            {opponents.map((seat) => (
-              <div
-                key={seat.player.id}
-                className={`opponent-chip${seat.edge === "top" ? " edge-top" : ""}${seat.player.isTurn ? " turn" : ""}`}
-                data-edge={seat.edge}
-                data-player-id={seat.player.id}
-              >
-                <span className="token-slot" data-token-slot={seat.player.id} data-edge={seat.edge} aria-hidden="true" />
-                <EdgeBadge
-                  player={seat.player}
-                  view={view}
-                  pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
-                  low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
-                  forward={gameFocus === seat.player.id}
-                  talk={bubbleText(bubble, seat.player.id) || (notice?.playerId === seat.player.id ? notice.text : null)}
-                />
-              </div>
-            ))}
-          </div>
+          {opponents.some((seat) => seat.edge !== "right") ? (
+            <div className="corner-bar" data-opponents={opponents.length}>
+              {opponents
+                .filter((seat) => seat.edge !== "right")
+                .map((seat) => (
+                  <OpponentChip
+                    key={seat.player.id}
+                    edge={seat.edge}
+                    player={seat.player}
+                    view={view}
+                    pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
+                    low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
+                    forward={gameFocus === seat.player.id}
+                    talk={bubbleText(bubble, seat.player.id) || (notice?.playerId === seat.player.id ? notice.text : null)}
+                  />
+                ))}
+            </div>
+          ) : null}
           <div className="table-frame" data-opponents={opponents.length}>
             <div className="table-middle">
               <Table
@@ -750,6 +748,20 @@ export function Game({
             </div>
           </div>
           <div className="hand-tray">
+            {opponents
+              .filter((seat) => seat.edge === "right")
+              .map((seat) => (
+                <OpponentChip
+                  key={seat.player.id}
+                  edge={seat.edge}
+                  player={seat.player}
+                  view={view}
+                  pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
+                  low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
+                  forward={gameFocus === seat.player.id}
+                  talk={bubbleText(bubble, seat.player.id) || (notice?.playerId === seat.player.id ? notice.text : null)}
+                />
+              ))}
             <div className="tray-notices">
               <div className="you-float">
                 {you ? (
@@ -1069,7 +1081,8 @@ function EdgeSeat({
   );
 }
 
-function EdgeBadge({
+function OpponentChip({
+  edge,
   player,
   view,
   pips,
@@ -1077,6 +1090,7 @@ function EdgeBadge({
   forward,
   talk,
 }: {
+  edge: Exclude<SeatEdge, "bottom">;
   player: PlayerView["players"][number];
   view: PlayerView;
   pips: number | null;
@@ -1087,25 +1101,36 @@ function EdgeBadge({
   const clock = useServerNow(view.serverNow);
   const live = useShownScore(player.id, player.score);
   const over = live.score >= view.settings.targetScore;
+  // The picture sits on the screen edge. The token is the inner side of it.
+  const tokenFirst = edge !== "left";
+  const slot = <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />;
   return (
-    <div className={`seat-chip edge-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`} data-player-id={player.id}>
-      <button type="button" className="seat-tap" data-action="player-card" onClick={() => requestSeatCard(player)}>
-        <AvatarFace
-          id={player.avatarId}
-          bot={player.bot}
-          skill={cpuSkill(player.difficulty)}
-          frameId={player.frameId}
-          timer={turnRatio(player.isTurn, view, clock)}
-        />
-        <span className="game-col">
-          <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
-            {live.score}
-          </strong>
-          <GamePips won={player.gamesWon} needed={view.winsNeeded} />
-        </span>
-        {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
-      </button>
-      {talk ? <TalkLine text={talk} /> : null}
+    <div
+      className={`opponent-chip${edge === "top" ? " edge-top" : ""}${player.isTurn ? " turn" : ""}`}
+      data-edge={edge}
+      data-player-id={player.id}
+    >
+      {tokenFirst ? slot : null}
+      <div className={`seat-chip edge-badge stack-badge${player.isTurn ? " turn" : ""}${live.hot ? " win-hot" : ""}${forward ? " win-forward" : ""}`} data-player-id={player.id}>
+        <button type="button" className="seat-tap stack-tap" data-action="player-card" onClick={() => requestSeatCard(player)}>
+          <AvatarFace
+            id={player.avatarId}
+            bot={player.bot}
+            skill={null}
+            frameId={player.frameId}
+            timer={turnRatio(player.isTurn, view, clock)}
+          />
+          <span className="game-col stack-meta">
+            <GamePips won={player.gamesWon} needed={view.winsNeeded} />
+            <strong className={live.pulse ? "is-scoring" : undefined} data-win-score={player.id} data-over={over ? "true" : "false"}>
+              {live.score}
+            </strong>
+          </span>
+          {pips != null ? <em className={`seat-pips${low ? " low" : ""}`}>{low ? `${pips} LOW HAND` : pips}</em> : null}
+        </button>
+        {talk ? <TalkLine text={talk} /> : null}
+      </div>
+      {tokenFirst ? null : slot}
     </div>
   );
 }

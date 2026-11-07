@@ -339,42 +339,73 @@ input {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-/* Opponent pictures, scores, and the last-domino token sit off the felt,
-   in the dark bar above the copper frame. The face-down hands stay on the edge. */
-.opponent-rail {
+/* West sits above the left hand, north in the top-right corner, both in the
+   dark bar above the felt. East sits in the dark tray, below the right hand. */
+.corner-bar {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
-  min-height: 44px;
-  padding: 2px 8px 6px;
+  padding: 0 2px 4px;
   background: #141414;
   z-index: 6;
 }
-.opponent-rail[data-opponents="1"] { justify-content: center; }
 .opponent-chip {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 2px;
   min-width: 0;
-  max-width: 32%;
+  max-width: 78px;
 }
-.opponent-rail[data-opponents="2"] .opponent-chip { max-width: 48%; }
-.opponent-rail[data-opponents="1"] .opponent-chip { max-width: none; }
-.opponent-chip .token-slot { flex: none; }
+.opponent-chip[data-edge="top"] { margin-left: auto; }
+.opponent-chip .token-slot { flex: none; margin-top: 2px; }
 .opponent-chip:not(.turn) .edge-badge { opacity: 0.58; }
 .opponent-chip.turn .edge-badge { opacity: 1; }
-.opponent-rail .edge-badge {
+.opponent-chip .edge-badge,
+.stack-badge {
   position: relative;
   left: auto;
   top: auto;
   right: auto;
+  width: max-content;
+  max-width: 52px;
   margin: 0;
-  max-width: 100%;
+  padding: 2px 3px 3px;
+  border-radius: 12px;
 }
-.opponent-rail .cpu-tag { left: 0; transform: none; }
-.opponent-rail .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; }
+.stack-tap {
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  width: auto;
+}
+.stack-meta { align-items: center; gap: 0; }
+.stack-badge .avatar { width: 26px; height: 26px; }
+.stack-badge .game-pips { height: 12px; padding: 0 3px; font-size: 0.62rem; }
+.stack-badge strong { font-size: 0.72rem; }
+.stack-badge .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; margin-top: 1px; }
+.stack-badge .cpu-tag { display: none; }
+.stack-badge .talk-line {
+  left: 2px;
+  right: 2px;
+  top: auto;
+  bottom: 2px;
+  transform: none;
+  max-height: 14px;
+}
+.hand-tray > .opponent-chip[data-edge="right"] {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 6;
+}
+.hand-tray:has(.opponent-chip[data-edge="right"]) .tray-notices {
+  padding-right: 64px;
+  height: auto;
+  min-height: 64px;
+  max-height: none;
+}
 .table-frame {
   flex: 1;
   min-height: 0;
@@ -1686,6 +1717,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   cursor: pointer;
 }
 .seat-tap { gap: 4px; width: 100%; }
+.stack-badge .stack-tap { flex-direction: column; align-items: center; gap: 1px; width: auto; }
 .seat-row { width: 100%; min-height: 44px; }
 .seat-list .seat-row { flex: 1; }
 .edge .seat-tap { pointer-events: auto; }
