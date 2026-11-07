@@ -401,15 +401,25 @@ input {
   z-index: 6;
 }
 .hand-tray:has(.opponent-chip[data-edge="right"]) .tray-notices {
-  padding-right: 70px;
+  padding-right: 72px;
   height: auto;
   min-height: 64px;
   max-height: none;
+  overflow: visible;
+  flex-wrap: wrap;
+  align-content: center;
 }
-.hand-tray:has(.opponent-chip[data-edge="right"]) .your-turn {
+.hand-tray:has(.opponent-chip[data-edge="right"]) .your-turn,
+.hand-tray:has(.opponent-chip[data-edge="right"]) .status-line,
+.hand-tray:has(.opponent-chip[data-edge="right"]) .status-math {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+  max-width: 100%;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  line-height: 1.15;
+  text-align: center;
 }
 .table-frame {
   flex: 1;

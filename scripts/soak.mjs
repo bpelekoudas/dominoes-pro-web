@@ -1702,6 +1702,28 @@ function auditTable() {
       };
     }
   }
+  const eastStack = document.querySelector(".opponent-chip[data-edge='right']");
+  if (eastStack) {
+    const clipped = (node) => {
+      if (!node || node.getClientRects().length === 0) return null;
+      const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      const box = node.getBoundingClientRect();
+      if (box.width < 2) return null;
+      const cut = node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1;
+      const covered = overlaps(box, eastStack.getBoundingClientRect());
+      if (!cut && !covered) return null;
+      return { text, cut, covered, rect: plain(box) };
+    };
+    const turnClip = clipped(document.querySelector(".your-turn"));
+    if (turnClip) {
+      return { ok: false, reason: "The turn pill is truncated beside the east stack.", turn: turnClip, ...evidence };
+    }
+    const scoreClip = clipped(document.querySelector(".status-math"));
+    if (scoreClip) {
+      return { ok: false, reason: "The score line is truncated beside the east stack.", score: scoreClip, ...evidence };
+    }
+  }
   for (const bar of document.querySelectorAll(".edge-badge, .you-float .seat-chip")) {
     const box = bar.getBoundingClientRect();
     if (box.width < 2) continue;
