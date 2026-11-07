@@ -1184,12 +1184,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
     0 0 0 1px rgba(255, 248, 230, 0.72),
     0 1px 2px rgba(0, 0, 0, 0.55);
 }
-.hand-tile .half { padding: calc(var(--hand-tile, 44px) * 0.09); }
-.hand-tile .half i {
-  /* Same circle as the board. A fixed fraction of the tile ignored the half's box. */
-  width: 16cqmin;
-  height: 16cqmin;
-}
+.hand-tile .half { padding: 0; }
 .domino.face-down {
   background:
     repeating-linear-gradient(-32deg, #141414, #141414 5px, #2a1517 5px, #2a1517 6px);
@@ -1207,8 +1202,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .half i {
   position: absolute;
   /* One length for both axes, from the shorter side, so the pip stays a circle. */
-  width: 16cqmin;
-  height: 16cqmin;
+  width: 18cqmin;
+  height: 18cqmin;
   margin: 0;
   transform: translate(-50%, -50%);
   border-radius: 50%;
