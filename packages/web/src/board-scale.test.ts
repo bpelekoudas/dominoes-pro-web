@@ -23,6 +23,8 @@ import {
   scaleClearOfSlots,
   feltScale,
   frameInsets,
+  keepOutInsets,
+  mergeInsets,
   nextFeltSize,
   safeRoom,
   tilesRelocating,
@@ -1831,5 +1833,19 @@ describe("token slot clearance", () => {
     }
     expect(edgePlay).toBeGreaterThan(1);
     expect(plays).toBe(edgePlay);
+  });
+
+  it("charges a left badge to the left edge only, and the fit uses the deeper line", () => {
+    const felt = { w: 390, h: 641 };
+    const badge = { left: 14, top: 207, right: 77, bottom: 235 };
+    const hand = { left: 0, top: 120, right: 22, bottom: 520 };
+    const insets = keepOutInsets(felt, [badge, hand]);
+    expect(insets.left).toBeGreaterThanOrEqual(77);
+    expect(insets.right).toBe(0);
+    expect(insets.top).toBe(0);
+    const frame = frameInsets(null, felt);
+    const usable = mergeInsets(frame, insets);
+    expect(usable.left).toBe(insets.left);
+    expect(usable.left).toBeGreaterThan(frame.left);
   });
 });

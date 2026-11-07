@@ -13,6 +13,8 @@ import {
   feltScale,
   fitFrameScale,
   frameInsets,
+  keepOutInsets,
+  mergeInsets,
   nextFeltSize,
   tilesRelocating,
   READABLE_PHONE_PX,
@@ -198,10 +200,24 @@ export function Table({
       const zones = measureZones(viewport);
       const felt = { w: width, h: height };
       const frameEdge = frameInsets(view.tableId, felt);
+      const feltBox = viewport.getBoundingClientRect();
+      const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-badge, [data-token-slot], .edge-slivers, .seat-chip")].map(
+        (node) => {
+          const rect = node.getBoundingClientRect();
+          return {
+            left: rect.left - feltBox.left,
+            top: rect.top - feltBox.top,
+            right: rect.right - feltBox.left,
+            bottom: rect.bottom - feltBox.top,
+          };
+        },
+      );
+      // Badges, the token, and the face-down hands are the usable edge.
+      // The copper line still applies where it is further in.
+      const usable = mergeInsets(frameEdge, keepOutInsets(felt, keepOuts));
       const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
       const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
-      // The chain fits the frame of the table on screen. Zoom out only when
-      // a tile would cross that line.
+      // Zoom out only when a tile would cross that usable edge.
       if (!board?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
       const solved = feltScale({
@@ -214,7 +230,7 @@ export function Table({
         newHand: previous == null,
         readablePx,
         tableId: view.tableId,
-        frame: frameEdge,
+        frame: usable,
       });
       // Badges jitter by a pixel and must not refold the snake. A zoom-out
       // grows the design felt, and that growth is the one change that sticks.
@@ -222,7 +238,13 @@ export function Table({
         limitHold.current?.hand === handKey &&
         (solved.limits.width > limitHold.current.limits.width + 4 ||
           solved.limits.height > limitHold.current.limits.height + 4);
-      if (!limitHold.current || limitHold.current.hand !== handKey || grew || resized) {
+      // A badge or a longer side hand can pull the turn in. A one-pixel
+      // jitter must not. Eight design pixels is about one pip at phone size.
+      const tighter =
+        limitHold.current?.hand === handKey &&
+        (solved.limits.width < limitHold.current.limits.width - 8 ||
+          solved.limits.height < limitHold.current.limits.height - 8);
+      if (!limitHold.current || limitHold.current.hand !== handKey || grew || tighter || resized) {
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
@@ -240,14 +262,12 @@ export function Table({
       // chain would cross the felt. The layout on screen may still be the
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
-      const frameShift = boardShift(frameEdge);
-      // The token slots sit in the margin outside this frame. Shrinking the
-      // picture to clear a slot zooms out a play before a tile reaches the edge.
+      const frameShift = boardShift(usable);
       const zoom = fitFrameScale({
-        tiles: layout.tiles,
+        tiles: [...layout.tiles, ...layout.ends],
         felt,
         screenWidth,
-        frame: frameEdge,
+        frame: usable,
         previous,
       });
       const centered = chainViewShift(layout.tiles, zoom);

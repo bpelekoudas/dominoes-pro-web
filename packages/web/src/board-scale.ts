@@ -457,10 +457,53 @@ export function rectsMeet(
   return a.left < b.right + gap && a.right > b.left - gap && a.top < b.bottom + gap && a.bottom > b.top - gap;
 }
 
+export interface ScreenBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * How far badges, token slots, and side hands reach in from the felt.
+ * Each box is charged to its nearest edge, so a left badge does not
+ * also shrink the right side. The chain turns and fits inside this line.
+ */
+export function keepOutInsets(felt: FeltSize, boxes: readonly ScreenBox[], gap = 6): AxisInsets {
+  const insets: AxisInsets = { left: 0, top: 0, right: 0, bottom: 0 };
+  const capX = felt.w * 0.42;
+  const capY = felt.h * 0.42;
+  const snap = (value: number) => Math.ceil(value / 4) * 4;
+  for (const box of boxes) {
+    if (box.right - box.left < 4 || box.bottom - box.top < 4) continue;
+    if (box.right <= 0 || box.left >= felt.w || box.bottom <= 0 || box.top >= felt.h) continue;
+    const midX = (Math.max(box.left, 0) + Math.min(box.right, felt.w)) / 2;
+    const midY = (Math.max(box.top, 0) + Math.min(box.bottom, felt.h)) / 2;
+    const nearest = Math.min(midX, felt.w - midX, midY, felt.h - midY);
+    if (nearest === midX) insets.left = Math.max(insets.left, Math.min(capX, snap(box.right + gap)));
+    else if (nearest === felt.w - midX) insets.right = Math.max(insets.right, Math.min(capX, snap(felt.w - box.left + gap)));
+    else if (nearest === midY) insets.top = Math.max(insets.top, Math.min(capY, snap(box.bottom + gap)));
+    else insets.bottom = Math.max(insets.bottom, Math.min(capY, snap(felt.h - box.top + gap)));
+  }
+  return insets;
+}
+
+export function mergeInsets(frame: AxisInsets, keepOut: AxisInsets): AxisInsets {
+  return {
+    left: Math.max(frame.left, keepOut.left),
+    right: Math.max(frame.right, keepOut.right),
+    top: Math.max(frame.top, keepOut.top),
+    bottom: Math.max(frame.bottom, keepOut.bottom),
+  };
+}
+
 /**
  * The largest scale at or under `scale` whose tiles stay out of every token
  * slot. The slot is where the red last-domino token sits, so a tile there
  * covers the token. A chain that never reaches a slot keeps its scale.
+ * The camera does not use this as its scale: a 6px air on a slot inside the
+ * felt zooms a play before the tile reaches the edge. Keep-outs go through
+ * the frame instead, so the arm turns there and the fit uses that edge.
  */
 export function scaleClearOfSlots(input: {
   tiles: readonly LayoutBox[];
