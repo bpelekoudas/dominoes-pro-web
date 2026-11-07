@@ -401,10 +401,15 @@ input {
   z-index: 6;
 }
 .hand-tray:has(.opponent-chip[data-edge="right"]) .tray-notices {
-  padding-right: 64px;
+  padding-right: 70px;
   height: auto;
   min-height: 64px;
   max-height: none;
+}
+.hand-tray:has(.opponent-chip[data-edge="right"]) .your-turn {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 .table-frame {
   flex: 1;
