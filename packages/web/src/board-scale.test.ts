@@ -9,6 +9,7 @@ import {
   boardShift,
   CAMERA_EDGE,
   cameraScale,
+  cameraHoldStale,
   cameraSettlesOn,
   CAMERA_EASE_MS,
   cameraEase,
@@ -1847,5 +1848,30 @@ describe("token slot clearance", () => {
     const usable = mergeInsets(frame, insets);
     expect(usable.left).toBe(insets.left);
     expect(usable.left).toBeGreaterThan(frame.left);
+  });
+
+  it("keeps a refold off a badge when the same tiles slide and the scale does not change", () => {
+    const felt = { w: 390, h: 641 };
+    const frame = { left: 108, right: 96, top: 64, bottom: 26 };
+    const before = [{ x: -200, y: -18, w: 72, h: 36 }];
+    const after = [{ x: -360, y: -18, w: 72, h: 36 }];
+    const scale = 1;
+    const shiftFor = (tiles: typeof before) => ({
+      x: chainViewShift(tiles, scale).x + boardShift(frame).x,
+      y: chainViewShift(tiles, scale).y + boardShift(frame).y,
+    });
+    const badge = { left: 14, top: 300, right: 108, bottom: 360 };
+    const stale = renderedTileRect(felt, after[0]!, scale, shiftFor(before));
+    expect(rectsMeet(stale, badge)).toBe(true);
+    const fresh = renderedTileRect(felt, after[0]!, scale, shiftFor(after));
+    expect(rectsMeet(fresh, badge)).toBe(false);
+    expect(fresh.left).toBeGreaterThanOrEqual(frame.left - 0.01);
+    const delta = Math.abs(shiftFor(before).x - shiftFor(after).x);
+    expect(
+      cameraHoldStale({ sameHand: true, landed: false, resized: false, needsRoom: false, shiftDelta: delta }),
+    ).toBe(true);
+    expect(
+      cameraHoldStale({ sameHand: true, landed: false, resized: false, needsRoom: false, shiftDelta: 0.4 }),
+    ).toBe(false);
   });
 });

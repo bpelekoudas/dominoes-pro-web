@@ -465,11 +465,33 @@ export interface ScreenBox {
 }
 
 /**
+ * Air between a tile and a keep-out. The hot end ring paints 4px outside
+ * the tile, and the chain still wants a few pixels of felt past that.
+ */
+export const KEEP_OUT_GAP = 10;
+
+/**
+ * A refold can slide the chain onto a badge without adding a tile or
+ * changing the scale. The held camera is stale when the new centre is
+ * more than a pixel away, or when the picture needs more room.
+ */
+export function cameraHoldStale(input: {
+  sameHand: boolean;
+  landed: boolean;
+  resized: boolean;
+  needsRoom: boolean;
+  shiftDelta: number;
+}): boolean {
+  if (!input.sameHand) return true;
+  return input.landed || input.resized || input.needsRoom || input.shiftDelta > 1;
+}
+
+/**
  * How far badges, token slots, and side hands reach in from the felt.
  * Each box is charged to its nearest edge, so a left badge does not
  * also shrink the right side. The chain turns and fits inside this line.
  */
-export function keepOutInsets(felt: FeltSize, boxes: readonly ScreenBox[], gap = 6): AxisInsets {
+export function keepOutInsets(felt: FeltSize, boxes: readonly ScreenBox[], gap = KEEP_OUT_GAP): AxisInsets {
   const insets: AxisInsets = { left: 0, top: 0, right: 0, bottom: 0 };
   const capX = felt.w * 0.42;
   const capY = felt.h * 0.42;

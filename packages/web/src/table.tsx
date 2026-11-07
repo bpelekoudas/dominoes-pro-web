@@ -8,11 +8,13 @@ import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
   CAMERA_EASE_MS,
+  cameraHoldStale,
   cameraSettlesOn,
   chainViewShift,
   feltScale,
   fitFrameScale,
   frameInsets,
+  KEEP_OUT_GAP,
   keepOutInsets,
   mergeInsets,
   nextFeltSize,
@@ -201,7 +203,7 @@ export function Table({
       const felt = { w: width, h: height };
       const frameEdge = frameInsets(view.tableId, felt);
       const feltBox = viewport.getBoundingClientRect();
-      const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-badge, [data-token-slot], .edge-slivers, .seat-chip")].map(
+      const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-badge, .cpu-tag, .seat-pips, [data-token-slot], .edge-slivers")].map(
         (node) => {
           const rect = node.getBoundingClientRect();
           return {
@@ -214,7 +216,7 @@ export function Table({
       );
       // Badges, the token, and the face-down hands are the usable edge.
       // The copper line still applies where it is further in.
-      const usable = mergeInsets(frameEdge, keepOutInsets(felt, keepOuts));
+      const usable = mergeInsets(frameEdge, keepOutInsets(felt, keepOuts, KEEP_OUT_GAP));
       const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
       const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
       // Zoom out only when a tile would cross that usable edge.
@@ -263,21 +265,34 @@ export function Table({
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
       const frameShift = boardShift(usable);
+      // Ends are the highlighted play spots. Fit and centre the same box,
+      // or a cap that hangs past the tiles lands on a badge.
+      const fitted = [...layout.tiles, ...layout.ends];
       const zoom = fitFrameScale({
-        tiles: [...layout.tiles, ...layout.ends],
+        tiles: fitted,
         felt,
         screenWidth,
         frame: usable,
         previous,
       });
-      const centered = chainViewShift(layout.tiles, zoom);
+      const centered = chainViewShift(fitted, zoom);
       const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
       const tileIds = layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
       // A refold can walk a tile into a token slot without adding a tile.
       // That still has to pull the scale down. Choosing does not.
       const needsRoom = held.current?.hand === handKey && zoom < held.current.scale - 0.01;
-      if (!landed && !resized && !needsRoom && held.current?.hand === handKey) {
+      const heldShift = anchorHold.current?.hand === handKey ? anchorHold.current.shift : nextShift;
+      const shiftDelta = Math.max(Math.abs(heldShift.x - nextShift.x), Math.abs(heldShift.y - nextShift.y));
+      if (
+        !cameraHoldStale({
+          sameHand: held.current?.hand === handKey,
+          landed,
+          resized,
+          needsRoom,
+          shiftDelta,
+        })
+      ) {
         return;
       }
       anchorHold.current = { hand: handKey, shift: nextShift };

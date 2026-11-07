@@ -437,8 +437,8 @@ input {
   max-width: 100%;
 }
 /* Inset past the skill label, which hangs off the avatar. The token stays beside the picture. */
-.edge-left .edge-head { align-self: flex-start; margin-left: 14px; margin-bottom: 6px; }
-.edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; margin-bottom: 6px; }
+.edge-left .edge-head { align-self: flex-start; margin-left: 22px; margin-bottom: 6px; }
+.edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; margin-right: 8px; margin-bottom: 6px; }
 .edge-top .edge-head { align-self: center; }
 .token-slot {
   width: 20px;
@@ -3332,6 +3332,9 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
   white-space: nowrap;
 }
 .seat-pips.low { background: #e31e26; border-color: #fff6d8; }
+/* A centered pill is wider than the badge. Pin it to the screen side so it cannot leave the phone. */
+.edge-left .seat-pips { left: 0; right: auto; transform: none; }
+.edge-right .seat-pips { left: auto; right: 0; transform: none; }
 .seat-chip.you strong[data-over="true"] {
   color: #fff6d8;
   text-shadow: 0 0 10px rgba(227, 30, 38, 0.85);
