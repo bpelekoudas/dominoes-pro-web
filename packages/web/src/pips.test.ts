@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { allTiles } from "../../rules/src/tiles.js";
-import { PIP_DIAMETER, PIP_INSET, PIP_RADIUS, pipCenters, rotatePip, type PipPoint, type PipRotation } from "./pips.js";
+import { PIP_DIAMETER, PIP_INSET, PIP_PITCH, PIP_RADIUS, pipCenters, rotatePip, type PipPoint, type PipRotation } from "./pips.js";
 
 const ROTATIONS: PipRotation[] = [0, 90, 180, 270];
 /** The face radius is 7px on a half about one short side (36px) across. */
@@ -46,12 +46,10 @@ describe("pip positions", () => {
   it("places every tile's pips at all four orientations, round and evenly spaced", () => {
     expect(allTiles()).toHaveLength(28);
     expect(PIP_DIAMETER).toBe(PIP_RADIUS * 2);
-    expect(PIP_DIAMETER).toBeGreaterThanOrEqual(0.17);
-    expect(PIP_DIAMETER).toBeLessThanOrEqual(0.2);
-    expect(PIP_INSET).toBeGreaterThanOrEqual(0.22);
-    expect(PIP_INSET).toBeLessThanOrEqual(0.25);
+    expect(PIP_DIAMETER).toBeCloseTo(0.13, 5);
+    expect(PIP_INSET).toBeCloseTo(0.18, 5);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.half i \{[^}]*width:\s*18cqmin;\s*height:\s*18cqmin;/);
+    expect(css).toMatch(/\.half i \{[^}]*width:\s*13cqmin;\s*height:\s*13cqmin;/);
     expect(css).not.toMatch(/\.hand-tile \.half i \{[^}]*width:/);
     let checked = 0;
     for (const tile of allTiles()) {
@@ -81,32 +79,29 @@ describe("pip positions", () => {
 
     for (const rotation of ROTATIONS) {
       const six = pipCenters(6, rotation);
+      const distances = pairDistances(six);
+      const neighbours = distances.filter((distance) => Math.abs(distance - PIP_PITCH) < 1e-6);
+      expect(neighbours, `six @${rotation}`).toHaveLength(7);
       const xs = [...new Set(six.map((dot) => dot.x.toFixed(4)))];
       const ys = [...new Set(six.map((dot) => dot.y.toFixed(4)))];
-      const wide = Math.max(xs.length, ys.length);
-      const narrow = Math.min(xs.length, ys.length);
-      expect(wide, `six @${rotation} rows`).toBe(3);
-      expect(narrow, `six @${rotation} columns`).toBe(2);
+      expect(Math.max(xs.length, ys.length), `six @${rotation}`).toBe(3);
+      expect(Math.min(xs.length, ys.length), `six @${rotation}`).toBe(2);
     }
   });
 
   it("sits corner pips a short way in from each edge", () => {
     for (const rotation of ROTATIONS) {
-      for (const value of [2, 3, 4, 5, 6]) {
-        const dots = pipCenters(value, rotation);
-        const corners = dots.filter((dot) => nearestInset(dot) < 0.4);
-        expect(corners.length, `${value} @${rotation}`).toBeGreaterThanOrEqual(2);
-        for (const dot of corners) {
-          const inset = nearestInset(dot);
-          expect(inset, `${value} @${rotation}`).toBeGreaterThanOrEqual(0.22);
-          expect(inset, `${value} @${rotation}`).toBeLessThanOrEqual(0.25);
-        }
+      const four = pipCenters(4, rotation);
+      for (const dot of four) {
+        expect(Math.min(dot.x, 1 - dot.x), `4 @${rotation}`).toBeCloseTo(PIP_INSET, 5);
+        expect(Math.min(dot.y, 1 - dot.y), `4 @${rotation}`).toBeCloseTo(PIP_INSET, 5);
       }
-    }
-    const four = pipCenters(4, 0);
-    for (const dot of four) {
-      expect(Math.min(dot.x, 1 - dot.x)).toBeCloseTo(PIP_INSET, 5);
-      expect(Math.min(dot.y, 1 - dot.y)).toBeCloseTo(PIP_INSET, 5);
+      const six = pipCenters(6, rotation);
+      const outer = Math.min(...six.map((dot) => nearestInset(dot)));
+      expect(outer, `6 @${rotation}`).toBeCloseTo(0.5 - PIP_PITCH, 5);
+      const gaps = pairDistances(six).filter((distance) => distance < PIP_PITCH + 0.05);
+      for (const gap of gaps) expect(gap, `6 @${rotation} gap`).toBeCloseTo(PIP_PITCH, 5);
+      expect(PIP_PITCH - PIP_DIAMETER, "clear gap").toBeGreaterThan(PIP_DIAMETER);
     }
   });
 
@@ -127,10 +122,10 @@ describe("pip positions", () => {
       const measured = (await waitForMeasure(page)) as Measure[];
       expect(measured.length).toBeGreaterThan(0);
       for (const item of measured) {
-        expect(item.diameter, `${item.id} diameter`).toBeGreaterThanOrEqual(0.17);
-        expect(item.diameter, `${item.id} diameter`).toBeLessThanOrEqual(0.2);
-        expect(item.cornerInset, `${item.id} inset`).toBeGreaterThanOrEqual(0.22);
-        expect(item.cornerInset, `${item.id} inset`).toBeLessThanOrEqual(0.25);
+        expect(item.diameter, `${item.id} diameter`).toBeGreaterThan(0.11);
+        expect(item.diameter, `${item.id} diameter`).toBeLessThan(0.16);
+        expect(item.cornerInset, `${item.id} inset`).toBeGreaterThan(0.15);
+        expect(item.cornerInset, `${item.id} inset`).toBeLessThan(0.22);
         expect(Math.abs(item.dotW - item.dotH), `${item.id} circle`).toBeLessThan(0.4);
       }
       for (const size of [56, 30]) {

@@ -7,10 +7,16 @@
  * grid with the tile. The diameter is one number for both axes, so a pip stays
  * a circle when the half is not square.
  */
-/** Centre of a corner pip, as a fraction of the half from each edge. */
-export const PIP_INSET = 0.24;
-/** Diameter as a fraction of the half's shorter side. Matches 18cqmin in the CSS. */
-export const PIP_DIAMETER = 0.18;
+/**
+ * Centre of a 4's corner pip, as a fraction of the half from each edge.
+ * Measured from the wood set: the dots are small and the corners sit close
+ * to the face, with a wide gap between neighbours.
+ */
+export const PIP_INSET = 0.18;
+/** Diameter as a fraction of the half's shorter side. Matches 13cqmin in the CSS. */
+export const PIP_DIAMETER = 0.13;
+/** Centre-to-centre for a 6. One pitch on both axes, so the gaps stay even. */
+export const PIP_PITCH = 0.3;
 export const PIP_RADIUS = PIP_DIAMETER / 2;
 
 export type PipRotation = 0 | 90 | 180 | 270;
@@ -23,6 +29,11 @@ export interface PipPoint {
 const EDGE = PIP_INSET;
 const FAR = 1 - PIP_INSET;
 const MID = 0.5;
+const COL = PIP_PITCH / 2;
+const NEAR = MID - COL;
+const WIDE = MID + COL;
+const ROW = MID - PIP_PITCH;
+const DEEP = MID + PIP_PITCH;
 
 /** Positions in the upright half, before a turn. */
 const FACES: Record<number, ReadonlyArray<readonly [number, number]>> = {
@@ -50,14 +61,14 @@ const FACES: Record<number, ReadonlyArray<readonly [number, number]>> = {
     [EDGE, FAR],
     [FAR, FAR],
   ],
-  // Two columns on the corner lines, three evenly spaced rows.
+  // Two columns, three rows, the same gap each way.
   6: [
-    [EDGE, EDGE],
-    [FAR, EDGE],
-    [EDGE, MID],
-    [FAR, MID],
-    [EDGE, FAR],
-    [FAR, FAR],
+    [NEAR, ROW],
+    [WIDE, ROW],
+    [NEAR, MID],
+    [WIDE, MID],
+    [NEAR, DEEP],
+    [WIDE, DEEP],
   ],
 };
 

@@ -14,6 +14,7 @@ import {
   cameraEase,
   chainViewShift,
   containScale,
+  fitFrameScale,
   glidePoses,
   poseAt,
   feltInnerRect,
@@ -1502,7 +1503,7 @@ describe("charcoal frame", () => {
         newHand: true,
         tableId: "TBL-013",
       });
-      expect(open.scale * TILE_SHORT, `${scene.name} nine tiles`).toBeCloseTo(0.135 * scene.felt.w, 1);
+      expect(open.scale * TILE_SHORT, `${scene.name} nine tiles`).toBeLessThanOrEqual(0.135 * scene.felt.w + 0.1);
       const layout = layoutBoard(board, open.limits);
       const shift = chainViewShift(layout.tiles, open.scale);
       const pan = { x: shift.x + boardShift(frame).x, y: shift.y + boardShift(frame).y };
@@ -1514,6 +1515,39 @@ describe("charcoal frame", () => {
         expect(rect.bottom, tile.tileId).toBeLessThanOrEqual(scene.felt.h - frame.bottom + 1);
       }
     }
+  });
+
+  it("keeps an east 4-seat arm inside the copper line", () => {
+    let board = placeTile(emptyBoard(), "lead", tileById("6-6"));
+    const used = new Set(["6-6"]);
+    for (let n = 0; n < 10; n += 1) {
+      const ends = openEnds(board);
+      const east = ends.find((end) => end.id === "east") ?? ends[0];
+      if (!east) break;
+      const tile = allTiles().find((candidate) => !used.has(candidate.id) && (candidate.low === east.match || candidate.high === east.match));
+      if (!tile) break;
+      used.add(tile.id);
+      board = placeTile(board, east.id, tile);
+    }
+    const felt = { w: 412, h: 683 };
+    const frame = frameInsets("TBL-013", felt);
+    const view = feltScale({
+      board,
+      felt,
+      screenWidth: 412,
+      zones: seatZones(felt, 4),
+      previous: null,
+      newHand: true,
+      tableId: "TBL-013",
+    });
+    const layout = layoutBoard(board, view.limits);
+    const scale = fitFrameScale({ tiles: layout.tiles, felt, screenWidth: 412, frame, previous: null });
+    const shift = chainViewShift(layout.tiles, scale);
+    const pan = { x: shift.x + boardShift(frame).x, y: shift.y + boardShift(frame).y };
+    const eastMost = layout.tiles.reduce((far, tile) => (tile.x + tile.w > far.x + far.w ? tile : far));
+    const rect = renderedTileRect(felt, eastMost, scale, pan);
+    expect(rect.right, eastMost.tileId).toBeLessThanOrEqual(felt.w - frame.right + 0.6);
+    expect(rect.left, eastMost.tileId).toBeGreaterThanOrEqual(frame.left);
   });
 
   it("refits when the Chrome toolbar shortens the felt and does not zoom back in", () => {

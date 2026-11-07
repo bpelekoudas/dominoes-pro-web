@@ -163,12 +163,33 @@ export function frameInsets(tableId: string | null | undefined, felt: FeltSize):
   const right = felt.w - (art.right * scale - cropX);
   const bottom = felt.h - (art.bottom * scale - cropY);
   const clamp = (value: number, limit: number) => Math.min(Math.max(0, value), Math.max(0, limit));
+  // The stroke is a couple of pixels wide. Sitting on its inner edge paints
+  // the tile across the line, so the fit stops short of it.
+  const air = 8;
   return {
-    left: clamp(left, felt.w / 2 - 1),
-    top: clamp(top, felt.h / 2 - 1),
-    right: clamp(right, felt.w / 2 - 1),
-    bottom: clamp(bottom, felt.h / 2 - 1),
+    left: clamp(left + air, felt.w / 2 - 1),
+    top: clamp(top + air, felt.h / 2 - 1),
+    right: clamp(right + air, felt.w / 2 - 1),
+    bottom: clamp(bottom + air, felt.h / 2 - 1),
   };
+}
+
+/** Scale that keeps these tiles inside the frame. Only shrinks, and never past the opening size. */
+export function fitFrameScale(input: {
+  tiles: readonly LayoutBox[];
+  felt: FeltSize;
+  screenWidth: number;
+  frame: AxisInsets;
+  previous: number | null;
+}): number {
+  const open = (OPEN_TILE_FRAC * Math.max(1, input.screenWidth)) / TILE_SHORT;
+  const cap = input.previous == null || !Number.isFinite(input.previous) ? open : Math.min(input.previous, open);
+  const room = safeRoom(input.felt, input.frame);
+  const box = chainBounds(input.tiles, 0);
+  const fitW = room.w / Math.max(1, box.w);
+  const fitH = room.h / Math.max(1, box.h);
+  const fit = Math.min(Number.isFinite(fitW) && fitW > 0 ? fitW : cap, Number.isFinite(fitH) && fitH > 0 ? fitH : cap);
+  return Math.min(cap, fit);
 }
 
 /** A real resize, including the Chrome toolbar, takes a new measurement. A one-pixel jitter does not. */

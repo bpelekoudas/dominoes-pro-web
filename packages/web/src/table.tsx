@@ -11,6 +11,7 @@ import {
   cameraSettlesOn,
   chainViewShift,
   feltScale,
+  fitFrameScale,
   frameInsets,
   nextFeltSize,
   tilesRelocating,
@@ -239,7 +240,13 @@ export function Table({
       // chain would cross the felt. The layout on screen may still be the
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
-      const zoom = solved.scale;
+      const zoom = fitFrameScale({
+        tiles: layout.tiles,
+        felt,
+        screenWidth,
+        frame: frameEdge,
+        previous,
+      });
       const centered = chainViewShift(layout.tiles, zoom);
       const frameShift = boardShift(frameEdge);
       const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
