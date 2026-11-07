@@ -26,6 +26,7 @@ import {
   frameInsets,
   keepOutInsets,
   mergeInsets,
+  settledHandCamera,
   nextFeltSize,
   safeRoom,
   tilesRelocating,
@@ -1874,4 +1875,88 @@ describe("token slot clearance", () => {
       cameraHoldStale({ sameHand: true, landed: false, resized: false, needsRoom: false, shiftDelta: 0.4 }),
     ).toBe(false);
   });
+
+  it("zooms on the same play as the felt edge once badges are off the board", () => {
+    const felt = { w: 390, h: 641 };
+    const screenWidth = 390;
+    const open = (OPEN_TILE_FRAC * screenWidth) / TILE_SHORT;
+    const frame = frameInsets(null, felt);
+    const hands = [
+      { left: 0, top: 180, right: 20, bottom: 500 },
+      { left: 370, top: 180, right: 390, bottom: 500 },
+      { left: 8, top: 0, right: 382, bottom: 20 },
+    ];
+    const rows: { seed: number; edge: number; now: number; delta: number }[] = [];
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const edgePlay = firstZoom(seed, felt, screenWidth, frame, open, []);
+      const nowPlay = firstZoom(seed, felt, screenWidth, frame, open, hands);
+      rows.push({ seed, edge: edgePlay, now: nowPlay, delta: nowPlay - edgePlay });
+    }
+    expect(rows.every((row) => row.delta === 0)).toBe(true);
+  });
+
+  it("a tile on the frame line does not sit under a side hand", () => {
+    const hand = { left: 0, top: 200, right: 20, bottom: 400 };
+    const tile = { left: 20, top: 220, right: 92, bottom: 256 };
+    expect(rectsMeet(tile, hand)).toBe(false);
+    expect(hand.right).toBeLessThanOrEqual(20);
+  });
 });
+
+function firstZoom(
+  seed: number,
+  felt: { w: number; h: number },
+  screenWidth: number,
+  frame: { top: number; right: number; bottom: number; left: number },
+  open: number,
+  keepOuts: { left: number; top: number; right: number; bottom: number }[],
+): number {
+  const bytes = Buffer.alloc(32);
+  bytes.writeUInt32BE(seed, 0);
+  const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+  let match = beginHand(
+    createMatch(players, { playerCount: 4, boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+    shuffleWithSeed(bytes),
+  );
+  let previous: number | null = null;
+  let held: { width: number; height: number } | null = null;
+  let plays = 0;
+  for (let guard = 0; guard < 28 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+    const playerId = currentPlayerId(match);
+    if (!playerId) break;
+    const intents = legalIntents(match, playerId);
+    const intent = intents.find((item) => item.type === "play") ?? intents[0];
+    if (!intent) break;
+    const result = applyIntent(match, playerId, intent);
+    expect(result.ok).toBe(true);
+    if (!result.ok) break;
+    match = result.match;
+    if (intent.type !== "play" || !match.hand) continue;
+    plays += 1;
+    const solved = feltScale({
+      board: match.hand.board,
+      felt,
+      screenWidth,
+      previous,
+      newHand: previous == null,
+      frame,
+    });
+    if (!held || solved.limits.width > held.width + 4 || solved.limits.height > held.height + 4) held = solved.limits;
+    const layout = layoutBoard(match.hand.board, held ?? undefined);
+    const edgeScale = fitFrameScale({ tiles: layout.tiles, felt, screenWidth, frame, previous });
+    const cam = settledHandCamera({
+      board: match.hand.board,
+      felt,
+      screenWidth,
+      frame,
+      keepOuts,
+      previous,
+      heldLimits: held,
+    });
+    const scale = keepOuts.length === 0 ? edgeScale : cam.scale;
+    if (keepOuts.length > 0) held = cam.limits;
+    if (scale < open - 0.02) return plays;
+    previous = scale;
+  }
+  return plays;
+}

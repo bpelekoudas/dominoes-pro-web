@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, layoutOverlaps, PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type PlacedEnd } from "../../rules/src/layout.js";
+import { layoutBoard, layoutOverlaps, PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
@@ -11,16 +11,10 @@ import {
   cameraHoldStale,
   cameraSettlesOn,
   chainViewShift,
-  feltScale,
-  fitFrameScale,
   frameInsets,
-  KEEP_OUT_GAP,
-  keepOutInsets,
-  mergeInsets,
+  settledHandCamera,
   nextFeltSize,
   tilesRelocating,
-  READABLE_PHONE_PX,
-  READABLE_WIDE_PX,
   handOverPlacement,
   landedTileBox,
   zoneInsets,
@@ -102,7 +96,7 @@ export function Table({
 }) {
   const board = view.board;
   // The felt the chain should fold into, in design pixels, at the readable floor.
-  const [limits, setLimits] = useState<{ width: number; height: number } | null>(null);
+  const [limits, setLimits] = useState<LayoutLimits | null>(null);
   const layout = useMemo(() => {
     if (!board?.center) return null;
     try {
@@ -181,7 +175,6 @@ export function Table({
     const viewport = viewportRef.current;
     if (!viewport || !layout || !frame) return;
     const measure = () => {
-      const nextReserve = measureReserve(viewport);
       // Hand over keeps the last scale. The sheet must not zoom the chain.
       if (frozen.current && held.current?.hand === handKey) return;
       let width = viewport.clientWidth;
@@ -199,11 +192,10 @@ export function Table({
       if (resized) feltLock.current = { hand: handKey, w: width, h: height, table: tableId };
       const column = viewport.closest(".felt-column");
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
-      const zones = measureZones(viewport);
       const felt = { w: width, h: height };
       const frameEdge = frameInsets(view.tableId, felt);
       const feltBox = viewport.getBoundingClientRect();
-      const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-badge, .cpu-tag, .seat-pips, [data-token-slot], .edge-slivers")].map(
+      const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-slivers")].map(
         (node) => {
           const rect = node.getBoundingClientRect();
           return {
@@ -214,25 +206,19 @@ export function Table({
           };
         },
       );
-      // Badges, the token, and the face-down hands are the usable edge.
-      // The copper line still applies where it is further in.
-      const usable = mergeInsets(frameEdge, keepOutInsets(felt, keepOuts, KEEP_OUT_GAP));
-      const largeTiles = document.documentElement.dataset.tileSize === "large" ? 1.22 : 1;
-      const readablePx = (screenWidth >= 720 ? READABLE_WIDE_PX : READABLE_PHONE_PX) * largeTiles;
-      // Zoom out only when a tile would cross that usable edge.
+      // The felt frame is the fit. Badges, the token, and the side hands are
+      // local obstacles: an arm turns before the box in front of it, and the
+      // picture zooms only when that turned chain no longer fits the frame.
       if (!board?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
-      const solved = feltScale({
+      const solved = settledHandCamera({
         board,
         felt,
         screenWidth,
-        reserve: nextReserve,
-        zones,
+        frame: frameEdge,
+        keepOuts,
         previous,
-        newHand: previous == null,
-        readablePx,
-        tableId: view.tableId,
-        frame: usable,
+        heldLimits: limitHold.current?.hand === handKey ? limitHold.current.limits : null,
       });
       // Badges jitter by a pixel and must not refold the snake. A zoom-out
       // grows the design felt, and that growth is the one change that sticks.
@@ -252,31 +238,25 @@ export function Table({
       const handLimits = limitHold.current.limits;
       setLimits((current) => {
         if (
-          current &&
-          Math.abs(current.width - handLimits.width) < 1 &&
-          Math.abs(current.height - handLimits.height) < 1
+          current
+          && Math.abs(current.width - handLimits.width) < 1
+          && Math.abs(current.height - handLimits.height) < 1
+          && !(current.obstacles && current.obstacles.length > 0)
         ) {
           return current;
         }
         return handLimits;
       });
-      // feltScale already held the opening size and zoomed only if this
-      // chain would cross the felt. The layout on screen may still be the
-      // previous fold until the new limits commit; use the scale that matches
-      // the limits we just chose.
-      const frameShift = boardShift(usable);
-      // Ends are the highlighted play spots. Fit and centre the same box,
-      // or a cap that hangs past the tiles lands on a badge.
-      const fitted = [...layout.tiles, ...layout.ends];
-      const zoom = fitFrameScale({
-        tiles: fitted,
-        felt,
-        screenWidth,
-        frame: usable,
-        previous,
-      });
+      // Full size until a tile would cross the felt edge, or the thin
+      // side-hand strip where that strip is past the frame.
+      const frameShift = boardShift(solved.edge);
+      const fitted = [...solved.layout.tiles, ...solved.layout.ends];
+      const zoom = solved.scale;
       const centered = chainViewShift(fitted, zoom);
-      const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
+      const nextShift = {
+        x: centered.x + frameShift.x + solved.nudge.x,
+        y: centered.y + frameShift.y + solved.nudge.y,
+      };
       const tileIds = layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
       // A refold can walk a tile into a token slot without adding a tile.

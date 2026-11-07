@@ -708,6 +708,26 @@ export function Game({
         <Lobby view={view} link={link} onStart={() => onSend({ type: "start" })} onSend={onSend} />
       ) : (
         <>
+          <div className="opponent-rail" data-opponents={opponents.length}>
+            {opponents.map((seat) => (
+              <div
+                key={seat.player.id}
+                className={`opponent-chip${seat.edge === "top" ? " edge-top" : ""}${seat.player.isTurn ? " turn" : ""}`}
+                data-edge={seat.edge}
+                data-player-id={seat.player.id}
+              >
+                <span className="token-slot" data-token-slot={seat.player.id} data-edge={seat.edge} aria-hidden="true" />
+                <EdgeBadge
+                  player={seat.player}
+                  view={view}
+                  pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
+                  low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
+                  forward={gameFocus === seat.player.id}
+                  talk={bubbleText(bubble, seat.player.id) || (notice?.playerId === seat.player.id ? notice.text : null)}
+                />
+              </div>
+            ))}
+          </div>
           <div className="table-frame" data-opponents={opponents.length}>
             <div className="table-middle">
               <Table
@@ -725,17 +745,7 @@ export function Game({
               <ControlToken playerId={view.lastDominoId} stamp={view.lastDominoKey ?? ""} />
               <DrawFlight draw={view.lastDraw} handKey={`${view.gameNumber}:${view.handNumber}`} />
               {opponents.map((seat) => (
-                <EdgeSeat
-                  key={seat.player.id}
-                  edge={seat.edge}
-                  player={seat.player}
-                  bubble={bubbleText(bubble, seat.player.id)}
-                  notice={notice?.playerId === seat.player.id ? notice.text : null}
-                  view={view}
-                  pips={showCounts ? view.lastHand?.pipCounts[seat.player.id] ?? null : null}
-                  low={showCounts && view.lastHand?.reason === "locked" && view.lastHand.winnerIds.includes(seat.player.id)}
-                  forward={gameFocus === seat.player.id}
-                />
+                <EdgeSeat key={seat.player.id} edge={seat.edge} player={seat.player} />
               ))}
             </div>
           </div>
@@ -1005,21 +1015,9 @@ function Lobby({
 function EdgeSeat({
   edge,
   player,
-  bubble,
-  notice,
-  view,
-  pips,
-  low,
-  forward,
 }: {
   edge: Exclude<SeatEdge, "bottom">;
   player: PlayerView["players"][number];
-  bubble: string | null;
-  notice: string | null;
-  view: PlayerView;
-  pips: number | null;
-  low: boolean;
-  forward: boolean;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
   const [gap, setGap] = useState(3);
@@ -1055,12 +1053,6 @@ function EdgeSeat({
       data-tiles={count}
       data-skin={player.tileSkin || "ivory"}
     >
-      {edge === "top" ? null : (
-        <div className={`edge-head edge-head-${edge}`}>
-          <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
-          <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />
-        </div>
-      )}
       <div className="edge-slivers" data-gap={gap.toFixed(2)} aria-hidden="true">
         {Array.from({ length: count }, (_, index) => (
           <i
@@ -1070,12 +1062,6 @@ function EdgeSeat({
           />
         ))}
       </div>
-      {edge === "top" ? (
-        <div className="edge-head edge-head-top">
-          <EdgeBadge player={player} view={view} pips={pips} low={low} forward={forward} talk={bubble || notice} />
-          <span className="token-slot" data-token-slot={player.id} data-edge={edge} aria-hidden="true" />
-        </div>
-      ) : null}
       <span className="sr-only">
         {player.name}, {count} tiles
       </span>

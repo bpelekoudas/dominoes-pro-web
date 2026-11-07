@@ -510,6 +510,159 @@ export function keepOutInsets(felt: FeltSize, boxes: readonly ScreenBox[], gap =
   return insets;
 }
 
+/**
+ * Keep-out boxes in the layout's design space, at this scale and camera
+ * shift. The chain turns before each box. The felt rectangle stays put.
+ */
+export function designObstacles(
+  felt: FeltSize,
+  shift: { x: number; y: number },
+  scale: number,
+  boxes: readonly ScreenBox[],
+  gap = KEEP_OUT_GAP + 4,
+): LayoutBox[] {
+  if (!(scale > 0.05)) return [];
+  const snap = (value: number) => Math.round(value / 4) * 4;
+  const out: LayoutBox[] = [];
+  for (const box of boxes) {
+    if (box.right - box.left < 4 || box.bottom - box.top < 4) continue;
+    if (box.right <= 0 || box.left >= felt.w || box.bottom <= 0 || box.top >= felt.h) continue;
+    const left = snap((Math.max(box.left, 0) - gap - felt.w / 2 - shift.x) / scale);
+    const top = snap((Math.max(box.top, 0) - gap - felt.h / 2 - shift.y) / scale);
+    const right = snap((Math.min(box.right, felt.w) + gap - felt.w / 2 - shift.x) / scale);
+    const bottom = snap((Math.min(box.bottom, felt.h) + gap - felt.h / 2 - shift.y) / scale);
+    if (right - left < 4 || bottom - top < 4) continue;
+    out.push({ x: left, y: top, w: right - left, h: bottom - top });
+  }
+  return out;
+}
+
+/**
+ * The picture after one play has settled. Opponent badges sit off the felt,
+ * so they are not an edge. Face-down hands are a thin strip on the felt
+ * edge: where that strip is past the frame, the arm stops there. The fit
+ * is still that edge, not a smaller copy of the whole table.
+ */
+export function settledHandCamera(input: {
+  board: BoardState;
+  felt: FeltSize;
+  screenWidth: number;
+  frame: AxisInsets;
+  /** Side-hand strips only. Badges and tokens are off the felt. */
+  keepOuts?: readonly ScreenBox[];
+  previous: number | null;
+  heldLimits?: { width: number; height: number } | null;
+}): {
+  scale: number;
+  limits: { width: number; height: number };
+  obstacles: LayoutBox[];
+  layout: ReturnType<typeof layoutBoard>;
+  nudge: { x: number; y: number };
+  edge: AxisInsets;
+} {
+  // Side hands are painted on the frame line. The fit stays the felt frame,
+  // the same edge ea81cc4 uses, so a hand does not shrink the whole table.
+  const edge = input.frame;
+  const solved = feltScale({
+    board: input.board,
+    felt: input.felt,
+    screenWidth: input.screenWidth,
+    previous: input.previous,
+    newHand: input.previous == null,
+    frame: input.frame,
+  });
+  let limits = input.heldLimits ?? solved.limits;
+  const grew = input.heldLimits != null && (solved.limits.width > input.heldLimits.width + 4 || solved.limits.height > input.heldLimits.height + 4);
+  const tighter = input.heldLimits != null && (solved.limits.width < input.heldLimits.width - 8 || solved.limits.height < input.heldLimits.height - 8);
+  if (!input.heldLimits || grew || tighter) limits = solved.limits;
+  const layout = layoutBoard(input.board, limits);
+  const scale = fitFrameScale({
+    tiles: layout.tiles,
+    felt: input.felt,
+    screenWidth: input.screenWidth,
+    frame: edge,
+    previous: input.previous,
+  });
+  return { scale, limits, obstacles: [], layout, nudge: { x: 0, y: 0 }, edge };
+}
+
+/**
+ * How far the centred chain can slide and still sit inside the frame,
+ * far enough that no tile meets a keep-out. `clear` is false when the
+ * slack is not enough.
+ */
+export function clearanceNudge(input: {
+  tiles: readonly LayoutBox[];
+  felt: FeltSize;
+  frame: AxisInsets;
+  scale: number;
+  keepOuts: readonly ScreenBox[];
+}): { x: number; y: number; clear: boolean } {
+  const scale = input.scale;
+  const origin = {
+    x: chainViewShift(input.tiles, scale).x + boardShift(input.frame).x,
+    y: chainViewShift(input.tiles, scale).y + boardShift(input.frame).y,
+  };
+  const rects = input.tiles.map((tile) => renderedTileRect(input.felt, tile, scale, origin));
+  if (rects.length === 0) return { x: 0, y: 0, clear: true };
+  const room = {
+    left: input.frame.left,
+    top: input.frame.top,
+    right: input.felt.w - input.frame.right,
+    bottom: input.felt.h - input.frame.bottom,
+  };
+  let minL = Infinity;
+  let maxR = -Infinity;
+  let minT = Infinity;
+  let maxB = -Infinity;
+  for (const rect of rects) {
+    minL = Math.min(minL, rect.left);
+    maxR = Math.max(maxR, rect.right);
+    minT = Math.min(minT, rect.top);
+    maxB = Math.max(maxB, rect.bottom);
+  }
+  const slack = {
+    left: minL - room.left,
+    right: room.right - maxR,
+    top: minT - room.top,
+    bottom: room.bottom - maxB,
+  };
+  let dx = 0;
+  let dy = 0;
+  const gap = 2;
+  for (let pass = 0; pass < 4; pass += 1) {
+    for (const rect of rects) {
+      const moved = { left: rect.left + dx, right: rect.right + dx, top: rect.top + dy, bottom: rect.bottom + dy };
+      for (const box of input.keepOuts) {
+        if (!rectsMeet(moved, box, gap)) continue;
+        const pushLeft = moved.right - (box.left - gap);
+        const pushRight = box.right + gap - moved.left;
+        const pushUp = moved.bottom - (box.top - gap);
+        const pushDown = box.bottom + gap - moved.top;
+        const horizontal = Math.min(pushLeft, pushRight) <= Math.min(pushUp, pushDown);
+        if (horizontal) {
+          if (pushRight < pushLeft) dx += pushRight;
+          else dx -= pushLeft;
+        } else if (pushDown < pushUp) dy += pushDown;
+        else dy -= pushUp;
+      }
+    }
+  }
+  const clamped = {
+    x: Math.min(Math.max(dx, -Math.max(0, slack.left)), Math.max(0, slack.right)),
+    y: Math.min(Math.max(dy, -Math.max(0, slack.top)), Math.max(0, slack.bottom)),
+  };
+  const clear = input.tiles.every((tile) => {
+    const rect = renderedTileRect(input.felt, tile, scale, { x: origin.x + clamped.x, y: origin.y + clamped.y });
+    return input.keepOuts.every((box) => !rectsMeet(rect, box, gap))
+      && rect.left >= room.left - 0.5
+      && rect.right <= room.right + 0.5
+      && rect.top >= room.top - 0.5
+      && rect.bottom <= room.bottom + 0.5;
+  });
+  return { x: clamped.x, y: clamped.y, clear };
+}
+
 export function mergeInsets(frame: AxisInsets, keepOut: AxisInsets): AxisInsets {
   return {
     left: Math.max(frame.left, keepOut.left),

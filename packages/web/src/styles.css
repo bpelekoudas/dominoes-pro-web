@@ -339,6 +339,42 @@ input {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+/* Opponent pictures, scores, and the last-domino token sit off the felt,
+   in the dark bar above the copper frame. The face-down hands stay on the edge. */
+.opponent-rail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 44px;
+  padding: 2px 8px 6px;
+  background: #141414;
+  z-index: 6;
+}
+.opponent-rail[data-opponents="1"] { justify-content: center; }
+.opponent-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 32%;
+}
+.opponent-rail[data-opponents="2"] .opponent-chip { max-width: 48%; }
+.opponent-rail[data-opponents="1"] .opponent-chip { max-width: none; }
+.opponent-chip .token-slot { flex: none; }
+.opponent-chip:not(.turn) .edge-badge { opacity: 0.58; }
+.opponent-chip.turn .edge-badge { opacity: 1; }
+.opponent-rail .edge-badge {
+  position: relative;
+  left: auto;
+  top: auto;
+  right: auto;
+  margin: 0;
+  max-width: 100%;
+}
+.opponent-rail .cpu-tag { left: 0; transform: none; }
+.opponent-rail .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; }
 .table-frame {
   flex: 1;
   min-height: 0;
@@ -403,7 +439,7 @@ input {
     0 2px 5px rgba(0, 0, 0, 0.7);
 }
 .edge-left .sliver,
-.edge-right .sliver { width: 22px; height: 28px; }
+.edge-right .sliver { width: 20px; height: 28px; }
 .edge-left .sliver { border-radius: 0 4px 4px 0; }
 .edge-right .sliver { border-radius: 4px 0 0 4px; }
 .edge-top .sliver { width: 26px; height: 20px; border-radius: 0 0 4px 4px; }

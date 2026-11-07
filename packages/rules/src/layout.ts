@@ -118,10 +118,25 @@ interface Cursor {
 export interface LayoutLimits {
   width: number;
   height: number;
+  /**
+   * Local boxes in the same design space as the tiles. An arm runs straight
+   * toward the felt edge and turns when the next tile would enter one of
+   * these. They do not shrink the felt rectangle.
+   */
+  obstacles?: readonly LayoutBox[];
 }
 
 const DEFAULT_LIMIT: LayoutLimits = { width: PHONE_WIDTH, height: PHONE_HEIGHT };
 let activeLimit: LayoutLimits = DEFAULT_LIMIT;
+
+function hitsObstacle(box: LayoutBox): boolean {
+  const obstacles = activeLimit.obstacles;
+  if (!obstacles || obstacles.length === 0) return false;
+  for (const obstacle of obstacles) {
+    if (boxesOverlap(box, obstacle)) return true;
+  }
+  return false;
+}
 
 function insideActive(box: LayoutBox): boolean {
   return insideRect(box, activeLimit.width, activeLimit.height);
@@ -152,7 +167,7 @@ export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayo
   let height = usableLimit(limits).height;
   let last: BoardLayout | null = null;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    const layout = withLimit({ width, height }, () => layoutBoardNow(board));
+    const layout = withLimit({ width, height, obstacles: limits?.obstacles }, () => layoutBoardNow(board));
     if (!layoutOverlaps(layout)) return layout;
     const repaired = repairLayout(board, layout);
     if (repaired) return repaired;
@@ -985,16 +1000,37 @@ function portraitSnakeStep(
   if ((arm === "west" || arm === "east") && cursor.row === 0 && cursor.dir === arm) {
     // A double stays crosswise on the stem. It never makes the corner, and it
     // does not count as one of the two full tiles the arm has to lay first.
-    if (double) return kept(arm, 0, cursor.run + 1);
-    const stem = straightBox(cursor.box, arm, false);
+    const stem = straightBox(cursor.box, arm, double);
+    const blocked = hitsObstacle(stem);
+    if (double && !blocked) return kept(arm, 0, cursor.run + 1);
     // Run straight while the next tile still lands inside the felt. Turn at
     // the edge when that turn keeps a half-tile gap. Only run past the edge
     // when the turn itself would crowd another tile.
     const parentDouble = cursor.box.h > cursor.box.w;
     const corner = parentDouble ? straightBox(cursor.box, laneDir, false) : bendBox(cursor.box, arm, laneDir, false);
     const cornerOk = free(corner) && laneClear(corner, cursor.box, placed);
-    if (free(stem) && (insideActive(stem) || (cursor.full < 2 && !cornerOk))) return kept(arm, 0, cursor.run + 1);
-    if (cornerOk) {
+    // A badge, token, or side hand is not the felt edge. Turn before it,
+    // the other way when the usual corner is itself blocked.
+    if (!double && blocked) {
+      const otherDir = opposite(laneDir);
+      const other = parentDouble ? straightBox(cursor.box, otherDir, false) : bendBox(cursor.box, arm, otherDir, false);
+      const otherOk = free(other) && laneClear(other, cursor.box, placed) && !hitsObstacle(other);
+      const turn = cornerOk && !hitsObstacle(corner) ? { box: corner, dir: laneDir } : otherOk ? { box: other, dir: otherDir } : null;
+      if (turn) {
+        return {
+          box: turn.box,
+          dir: turn.dir,
+          row: 1,
+          line: turn.box.x + turn.box.w / 2,
+          run: 1,
+          opening: false,
+          fromDouble: false,
+          column: false,
+        };
+      }
+    }
+    if (!blocked && free(stem) && (insideActive(stem) || (cursor.full < 2 && !cornerOk))) return kept(arm, 0, cursor.run + 1);
+    if (cornerOk && !hitsObstacle(corner)) {
       return {
         box: corner,
         dir: laneDir,
@@ -1006,7 +1042,7 @@ function portraitSnakeStep(
         column: false,
       };
     }
-    if (free(stem)) return kept(arm, 0, cursor.run + 1);
+    if (!blocked && free(stem)) return kept(arm, 0, cursor.run + 1);
     return kept(arm, 0, cursor.run + 1);
   }
 
