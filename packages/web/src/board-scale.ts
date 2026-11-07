@@ -448,6 +448,47 @@ export function renderedTileRect(
   return { left, top, right: left + tile.w * scale, bottom: top + tile.h * scale };
 }
 
+/** True when the two boxes overlap. `gap` keeps that many pixels of air as overlap too. */
+export function rectsMeet(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number },
+  gap = 0,
+): boolean {
+  return a.left < b.right + gap && a.right > b.left - gap && a.top < b.bottom + gap && a.bottom > b.top - gap;
+}
+
+/**
+ * The largest scale at or under `scale` whose tiles stay out of every token
+ * slot. The slot is where the red last-domino token sits, so a tile there
+ * covers the token. A chain that never reaches a slot keeps its scale.
+ */
+export function scaleClearOfSlots(input: {
+  tiles: readonly LayoutBox[];
+  felt: FeltSize;
+  slots: readonly { left: number; top: number; right: number; bottom: number }[];
+  scale: number;
+  shift: (scale: number) => { x: number; y: number };
+}): number {
+  const slots = input.slots.filter((slot) => slot.right - slot.left > 8 && slot.bottom - slot.top > 8);
+  if (slots.length === 0 || input.tiles.length === 0 || !(input.scale > 0)) return input.scale;
+  const hits = (scale: number) => {
+    const shift = input.shift(scale);
+    return input.tiles.some((tile) => {
+      const rect = renderedTileRect(input.felt, tile, scale, shift);
+      return slots.some((slot) => rectsMeet(rect, slot, 6));
+    });
+  };
+  if (!hits(input.scale)) return input.scale;
+  let low = Math.min(0.15, input.scale);
+  let high = input.scale;
+  for (let step = 0; step < 16; step += 1) {
+    const mid = (low + high) / 2;
+    if (hits(mid)) high = mid;
+    else low = mid;
+  }
+  return low;
+}
+
 /**
  * Put the chain's own box on the centre of the felt. Chrome insets shrink the
  * picture so it still clears them; they do not slide the chain off centre.

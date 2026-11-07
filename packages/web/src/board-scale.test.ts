@@ -19,6 +19,8 @@ import {
   poseAt,
   feltInnerRect,
   renderedTileRect,
+  rectsMeet,
+  scaleClearOfSlots,
   feltScale,
   frameInsets,
   nextFeltSize,
@@ -1733,4 +1735,39 @@ describe("layout guarantee", () => {
     expect(midpoints).toBeGreaterThan(0);
     expect(coverChecks).toBeGreaterThan(0);
   }, 180_000);
+});
+
+describe("token slot clearance", () => {
+  it("records the live overlap of the west slot and the 3-3", () => {
+    const slot = { left: 80.89, top: 284.72, right: 100.89, bottom: 314.72 };
+    const tile = { left: 93.21, top: 260, right: 139.65, bottom: 352.9 };
+    expect(rectsMeet(tile, slot)).toBe(true);
+    expect(slot.right - tile.left).toBeGreaterThan(6);
+  });
+
+  it("shrinks until the west tile is clear of the left slot", () => {
+    const felt = { w: 390, h: 700 };
+    const slot = { left: 80.89, top: 284.72, right: 100.89, bottom: 314.72 };
+    const tile = { x: -80, y: -36, w: 36, h: 72 };
+    const centerX = -10.3;
+    const shift = (scale: number) => ({ x: -centerX * scale, y: 0 });
+    const open = 1.46;
+    const before = renderedTileRect(felt, tile, open, shift(open));
+    expect(rectsMeet(before, slot)).toBe(true);
+    const scale = scaleClearOfSlots({ tiles: [tile], felt, slots: [slot], scale: open, shift });
+    expect(scale).toBeLessThan(open);
+    const after = renderedTileRect(felt, tile, scale, shift(scale));
+    expect(rectsMeet(after, slot)).toBe(false);
+  });
+
+  it("leaves a chain that already misses the slot at its opening size", () => {
+    const felt = { w: 390, h: 700 };
+    const slot = { left: 14, top: 260, right: 34, bottom: 290 };
+    const tile = { x: -18, y: -36, w: 36, h: 72 };
+    const shift = (scale: number) => ({ x: 0, y: 0 });
+    const open = 1.46;
+    const before = renderedTileRect(felt, tile, open, shift(open));
+    expect(rectsMeet(before, slot)).toBe(false);
+    expect(scaleClearOfSlots({ tiles: [tile], felt, slots: [slot], scale: open, shift })).toBe(open);
+  });
 });

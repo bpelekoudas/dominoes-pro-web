@@ -12,6 +12,7 @@ import {
   chainViewShift,
   feltScale,
   fitFrameScale,
+  scaleClearOfSlots,
   frameInsets,
   nextFeltSize,
   tilesRelocating,
@@ -240,21 +241,42 @@ export function Table({
       // chain would cross the felt. The layout on screen may still be the
       // previous fold until the new limits commit; use the scale that matches
       // the limits we just chose.
-      const zoom = fitFrameScale({
+      const fitted = fitFrameScale({
         tiles: layout.tiles,
         felt,
         screenWidth,
         frame: frameEdge,
         previous,
       });
-      const centered = chainViewShift(layout.tiles, zoom);
+      const feltBox = viewport.getBoundingClientRect();
+      const slots = [...document.querySelectorAll<HTMLElement>("[data-token-slot]")].map((slot) => {
+        const rect = slot.getBoundingClientRect();
+        return {
+          left: rect.left - feltBox.left,
+          top: rect.top - feltBox.top,
+          right: rect.right - feltBox.left,
+          bottom: rect.bottom - feltBox.top,
+        };
+      });
       const frameShift = boardShift(frameEdge);
+      const zoom = scaleClearOfSlots({
+        tiles: layout.tiles,
+        felt,
+        slots,
+        scale: fitted,
+        shift: (scale) => {
+          const centered = chainViewShift(layout.tiles, scale);
+          return { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
+        },
+      });
+      const centered = chainViewShift(layout.tiles, zoom);
       const nextShift = { x: centered.x + frameShift.x, y: centered.y + frameShift.y };
       const tileIds = layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
-      // Choosing, dragging, and a highlight do not move the picture.
-      // A tile landing, a new hand, or a real resize does, in one glide.
-      if (!landed && !resized && held.current?.hand === handKey) {
+      // A refold can walk a tile into a token slot without adding a tile.
+      // That still has to pull the scale down. Choosing does not.
+      const needsRoom = held.current?.hand === handKey && zoom < held.current.scale - 0.01;
+      if (!landed && !resized && !needsRoom && held.current?.hand === handKey) {
         return;
       }
       anchorHold.current = { hand: handKey, shift: nextShift };

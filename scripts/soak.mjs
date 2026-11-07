@@ -97,6 +97,12 @@ const report = {
 
 let exitCode = 0;
 try {
+  if (args.uiOnly) {
+    console.log("UI smoke only");
+    report.ui = await uiSmoke(pageUrl.origin, args.out);
+    console.log(`  ${report.ui.summary}`);
+    report.reconnect = "skipped";
+  } else {
   const cleaned = await cleanup();
   console.log(`Cleanup before the run: ${JSON.stringify(cleaned)}`);
   console.log("Computer knock on an empty boneyard");
@@ -143,6 +149,7 @@ try {
     console.log(`  ${report.ui.summary}`);
   } else {
     report.ui = { ok: true, skipped: true, summary: "skipped (--no-ui)" };
+  }
   }
 } catch (error) {
   exitCode = 1;
@@ -1332,7 +1339,9 @@ async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
   const notes = [];
   for (const size of TOKEN_VIEWPORTS) {
     await page.setViewportSize({ width: size.width, height: size.height });
-    await page.waitForTimeout(250);
+    // The chain eases for 480ms after a resize. Measuring during that glide
+    // sees a tile still crossing a slot it will leave.
+    await settleCamera(page);
     const audit = await page.evaluate(auditTokenSlots);
     if (!audit.ok) {
       const saved = await saveUiFailure(page, outDir, audit);
@@ -1782,11 +1791,12 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const parsed = { url: "", matches: 8, seats: 4, noUi: false, stallMs: 20_000, out: "soak-reports", replay: "" };
+  const parsed = { url: "", matches: 8, seats: 4, noUi: false, uiOnly: false, stallMs: 20_000, out: "soak-reports", replay: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     const next = argv[i + 1];
     if (token === "--no-ui") parsed.noUi = true;
+    else if (token === "--ui-only") parsed.uiOnly = true;
     else if (token === "--url") parsed.url = next ?? "";
     else if (token === "--matches") parsed.matches = Number(next);
     else if (token === "--seats") parsed.seats = Number(next);
@@ -1794,7 +1804,7 @@ function parseArgs(argv) {
     else if (token === "--out") parsed.out = next ?? parsed.out;
     else if (token === "--replay") parsed.replay = next ?? "";
     else continue;
-    if (token !== "--no-ui") i += 1;
+    if (token !== "--no-ui" && token !== "--ui-only") i += 1;
   }
   if (!Number.isFinite(parsed.matches) || parsed.matches < 1) parsed.matches = 8;
   if (!Number.isFinite(parsed.seats)) parsed.seats = 4;

@@ -1,8 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { motionMs } from "../../rules/src/motion.js";
+import { CAMERA_EASE_MS } from "./board-scale.js";
 import {
+  boxesOverlap,
   controlRoute,
   controlSlideMs,
   dominoTokenAction,
@@ -50,6 +52,7 @@ function slotFor(playerId: string): HTMLElement | null {
 export function ControlToken({ playerId, stamp }: { playerId: string | null; stamp: string }) {
   const [pos, setPos] = useState<Point | null>(null);
   const [bump, setBump] = useState(0);
+  const [parked, setParked] = useState(false);
   const posRef = useRef<Point | null>(null);
   const heldRef = useRef<{ playerId: string; key: string } | null>(null);
   const bumpedRef = useRef<string | null>(null);
@@ -145,11 +148,43 @@ export function ControlToken({ playerId, stamp }: { playerId: string | null; sta
     };
   }, [playerId, stamp]);
 
+  useEffect(() => {
+    const root = document.querySelector(".felt-app");
+    if (!root || !playerId) return;
+    let timer = 0;
+    const coversTile = () => {
+      const token = document.querySelector<HTMLElement>("[data-token=last-domino]");
+      if (!token) return false;
+      const box = token.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) return false;
+      const tokenBox = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+      return [...document.querySelectorAll<HTMLElement>("[data-board-tile]")].some((tile) => {
+        const rect = tile.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return false;
+        return boxesOverlap(tokenBox, { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+      });
+    };
+    const release = () => setParked(coversTile());
+    const onRun = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest(".board-scaler, .board-stage, .board-tile")) return;
+      setParked(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(release, CAMERA_EASE_MS + 40);
+    };
+    root.addEventListener("transitionrun", onRun);
+    return () => {
+      root.removeEventListener("transitionrun", onRun);
+      window.clearTimeout(timer);
+    };
+  }, [playerId]);
+
   if (!pos || !playerId) return null;
   return createPortal(
     <svg
       key={bump}
-      className={bump > 0 ? "control-token is-bump" : "control-token"}
+      className={`control-token${bump > 0 ? " is-bump" : ""}${parked ? " is-parked" : ""}`}
       data-control="token"
       data-token="last-domino"
       data-holder={playerId}

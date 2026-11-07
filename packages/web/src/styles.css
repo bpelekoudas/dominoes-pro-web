@@ -241,6 +241,8 @@ input {
 .control-token line { stroke: #d5a336; stroke-width: 1.2; }
 .control-token circle { fill: #efefef; }
 .control-token.is-bump { animation: control-bump calc(240ms * var(--motion)) ease; }
+/* Hidden while a tile is sliding through the slot. The box stays put. */
+.control-token.is-parked { visibility: hidden; }
 @keyframes control-bump {
   0% { transform: scale(1); }
   40% { transform: scale(1.18) translateY(-3px); }
