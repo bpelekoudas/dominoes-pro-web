@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { allTiles } from "../../rules/src/tiles.js";
-import { PIP_DIAMETER, PIP_INSET, PIP_PITCH, PIP_RADIUS, pipCenters, rotatePip, type PipPoint, type PipRotation } from "./pips.js";
+import { PIP_COL_INSET, PIP_DIAMETER, PIP_END_INSET, PIP_PITCH, PIP_RADIUS, pipCenters, rotatePip, type PipPoint, type PipRotation } from "./pips.js";
 
 const ROTATIONS: PipRotation[] = [0, 90, 180, 270];
 /** The face radius is 7px on a half about one short side (36px) across. */
@@ -46,10 +46,12 @@ describe("pip positions", () => {
   it("places every tile's pips at all four orientations, round and evenly spaced", () => {
     expect(allTiles()).toHaveLength(28);
     expect(PIP_DIAMETER).toBe(PIP_RADIUS * 2);
-    expect(PIP_DIAMETER).toBeCloseTo(0.13, 5);
-    expect(PIP_INSET).toBeCloseTo(0.18, 5);
+    expect(PIP_DIAMETER).toBeCloseTo(0.2, 5);
+    expect(PIP_COL_INSET).toBeCloseTo(0.2, 5);
+    expect(PIP_END_INSET).toBeCloseTo(0.19, 5);
+    expect(PIP_PITCH).toBeCloseTo(0.31, 5);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.half i \{[^}]*width:\s*13cqmin;\s*height:\s*13cqmin;/);
+    expect(css).toMatch(/\.half i \{[^}]*width:\s*20cqw;\s*height:\s*20cqw;/);
     expect(css).not.toMatch(/\.hand-tile \.half i \{[^}]*width:/);
     let checked = 0;
     for (const tile of allTiles()) {
@@ -69,7 +71,7 @@ describe("pip positions", () => {
           }
           const distances = pairDistances(dots);
           for (const distance of distances) {
-            expect(distance, `${tile.id} ${value} @${rotation} overlap`).toBeGreaterThan(PIP_DIAMETER + 0.04);
+            expect(distance, `${tile.id} ${value} @${rotation} overlap`).toBeGreaterThan(PIP_DIAMETER + 0.05);
           }
           checked += 1;
         }
@@ -80,8 +82,9 @@ describe("pip positions", () => {
     for (const rotation of ROTATIONS) {
       const six = pipCenters(6, rotation);
       const distances = pairDistances(six);
-      const neighbours = distances.filter((distance) => Math.abs(distance - PIP_PITCH) < 1e-6);
-      expect(neighbours, `six @${rotation}`).toHaveLength(7);
+      const along = distances.filter((distance) => Math.abs(distance - PIP_PITCH) < 1e-6);
+      const across = distances.filter((distance) => Math.abs(distance - (1 - 2 * PIP_COL_INSET)) < 1e-6);
+      expect(along.length + across.length, `six @${rotation}`).toBe(7);
       const xs = [...new Set(six.map((dot) => dot.x.toFixed(4)))];
       const ys = [...new Set(six.map((dot) => dot.y.toFixed(4)))];
       expect(Math.max(xs.length, ys.length), `six @${rotation}`).toBe(3);
@@ -93,15 +96,21 @@ describe("pip positions", () => {
     for (const rotation of ROTATIONS) {
       const four = pipCenters(4, rotation);
       for (const dot of four) {
-        expect(Math.min(dot.x, 1 - dot.x), `4 @${rotation}`).toBeCloseTo(PIP_INSET, 5);
-        expect(Math.min(dot.y, 1 - dot.y), `4 @${rotation}`).toBeCloseTo(PIP_INSET, 5);
+        const xs = [Math.min(dot.x, 1 - dot.x), Math.min(dot.y, 1 - dot.y)].sort((a, b) => a - b);
+        expect(xs[0], `4 @${rotation} end`).toBeCloseTo(Math.min(PIP_END_INSET, PIP_COL_INSET), 5);
+        expect(xs[1], `4 @${rotation} side`).toBeCloseTo(Math.max(PIP_END_INSET, PIP_COL_INSET), 5);
       }
       const six = pipCenters(6, rotation);
       const outer = Math.min(...six.map((dot) => nearestInset(dot)));
-      expect(outer, `6 @${rotation}`).toBeCloseTo(0.5 - PIP_PITCH, 5);
+      expect(outer, `6 @${rotation}`).toBeCloseTo(PIP_END_INSET, 5);
       const gaps = pairDistances(six).filter((distance) => distance < PIP_PITCH + 0.05);
       for (const gap of gaps) expect(gap, `6 @${rotation} gap`).toBeCloseTo(PIP_PITCH, 5);
-      expect(PIP_PITCH - PIP_DIAMETER, "clear gap").toBeGreaterThan(PIP_DIAMETER);
+      expect(PIP_PITCH - PIP_DIAMETER, "6 row gap").toBeGreaterThan(0.05);
+      const five = pipCenters(5, rotation);
+      const centre = five.find((dot) => Math.abs(dot.x - 0.5) < 1e-6 && Math.abs(dot.y - 0.5) < 1e-6)!;
+      const corner = five.find((dot) => dot !== centre)!;
+      const reach = Math.hypot(corner.x - centre.x, corner.y - centre.y);
+      expect(reach - PIP_DIAMETER, `5 @${rotation} centre gap`).toBeGreaterThan(0.05);
     }
   });
 
@@ -122,10 +131,10 @@ describe("pip positions", () => {
       const measured = (await waitForMeasure(page)) as Measure[];
       expect(measured.length).toBeGreaterThan(0);
       for (const item of measured) {
-        expect(item.diameter, `${item.id} diameter`).toBeGreaterThan(0.11);
-        expect(item.diameter, `${item.id} diameter`).toBeLessThan(0.16);
-        expect(item.cornerInset, `${item.id} inset`).toBeGreaterThan(0.15);
-        expect(item.cornerInset, `${item.id} inset`).toBeLessThan(0.22);
+        expect(item.diameter, `${item.id} diameter`).toBeGreaterThan(0.18);
+        expect(item.diameter, `${item.id} diameter`).toBeLessThan(0.23);
+        expect(item.cornerInset, `${item.id} inset`).toBeGreaterThan(0.16);
+        expect(item.cornerInset, `${item.id} inset`).toBeLessThan(0.23);
         expect(Math.abs(item.dotW - item.dotH), `${item.id} circle`).toBeLessThan(0.4);
       }
       for (const size of [56, 30]) {
@@ -158,9 +167,10 @@ function renderFixture(css: string): string {
 </head><body>
 <div id="root"></div>
 <script>
-const inset = ${PIP_INSET};
+const col = ${PIP_COL_INSET};
+const end = ${PIP_END_INSET};
 const faces = {
-  4: [[inset, inset], [1-inset, inset], [inset, 1-inset], [1-inset, 1-inset]]
+  4: [[col, end], [1-col, end], [col, 1-end], [1-col, 1-end]]
 };
 function half(value) {
   const span = document.createElement("span");

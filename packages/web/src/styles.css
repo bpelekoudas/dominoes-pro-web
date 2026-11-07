@@ -1201,9 +1201,9 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .half i {
   position: absolute;
-  /* One length for both axes, from the shorter side, so the pip stays a circle. */
-  width: 13cqmin;
-  height: 13cqmin;
+  /* Circle whose diameter is 0.20 of the half's width, on the board and in the hand. */
+  width: 20cqw;
+  height: 20cqw;
   margin: 0;
   transform: translate(-50%, -50%);
   border-radius: 50%;

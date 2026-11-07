@@ -8,15 +8,18 @@
  * a circle when the half is not square.
  */
 /**
- * Centre of a 4's corner pip, as a fraction of the half from each edge.
- * Measured from the wood set: the dots are small and the corners sit close
- * to the face, with a wide gap between neighbours.
+ * Measured on Bryan's 6-6 crop: the tile is 95px wide and the half about 93px
+ * tall. Column centres are 0.20 of the half's width in from the long edges.
+ * The end row is 0.19 of the half's length in from the end, so the two row
+ * gaps are 0.31 (his pitch reading was about 0.29). A 4 and a 5 use those
+ * same corners. The dot is 0.20 of the half's width.
  */
-export const PIP_INSET = 0.18;
-/** Diameter as a fraction of the half's shorter side. Matches 13cqmin in the CSS. */
-export const PIP_DIAMETER = 0.13;
-/** Centre-to-centre for a 6. One pitch on both axes, so the gaps stay even. */
-export const PIP_PITCH = 0.3;
+export const PIP_DIAMETER = 0.2;
+export const PIP_COL_INSET = 0.2;
+export const PIP_END_INSET = 0.19;
+export const PIP_PITCH = (1 - 2 * PIP_END_INSET) / 2;
+/** Kept so older checks can say "the corner inset". A 4's corner uses both. */
+export const PIP_INSET = PIP_END_INSET;
 export const PIP_RADIUS = PIP_DIAMETER / 2;
 
 export type PipRotation = 0 | 90 | 180 | 270;
@@ -26,49 +29,46 @@ export interface PipPoint {
   y: number;
 }
 
-const EDGE = PIP_INSET;
-const FAR = 1 - PIP_INSET;
+const COL = PIP_COL_INSET;
+const FAR_COL = 1 - PIP_COL_INSET;
+const END = PIP_END_INSET;
+const FAR_END = 1 - PIP_END_INSET;
 const MID = 0.5;
-const COL = PIP_PITCH / 2;
-const NEAR = MID - COL;
-const WIDE = MID + COL;
-const ROW = MID - PIP_PITCH;
-const DEEP = MID + PIP_PITCH;
 
 /** Positions in the upright half, before a turn. */
 const FACES: Record<number, ReadonlyArray<readonly [number, number]>> = {
   0: [],
   1: [[MID, MID]],
   2: [
-    [EDGE, EDGE],
-    [FAR, FAR],
+    [COL, END],
+    [FAR_COL, FAR_END],
   ],
   3: [
-    [EDGE, EDGE],
+    [COL, END],
     [MID, MID],
-    [FAR, FAR],
+    [FAR_COL, FAR_END],
   ],
   4: [
-    [EDGE, EDGE],
-    [FAR, EDGE],
-    [EDGE, FAR],
-    [FAR, FAR],
+    [COL, END],
+    [FAR_COL, END],
+    [COL, FAR_END],
+    [FAR_COL, FAR_END],
   ],
   5: [
-    [EDGE, EDGE],
-    [FAR, EDGE],
+    [COL, END],
+    [FAR_COL, END],
     [MID, MID],
-    [EDGE, FAR],
-    [FAR, FAR],
+    [COL, FAR_END],
+    [FAR_COL, FAR_END],
   ],
-  // Two columns, three rows, the same gap each way.
+  // Two columns on the 4's side inset, three rows on the 4's end inset.
   6: [
-    [NEAR, ROW],
-    [WIDE, ROW],
-    [NEAR, MID],
-    [WIDE, MID],
-    [NEAR, DEEP],
-    [WIDE, DEEP],
+    [COL, END],
+    [FAR_COL, END],
+    [COL, MID],
+    [FAR_COL, MID],
+    [COL, FAR_END],
+    [FAR_COL, FAR_END],
   ],
 };
 
