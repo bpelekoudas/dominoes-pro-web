@@ -438,7 +438,7 @@ input {
 }
 /* Inset past the skill label, which hangs off the avatar. The token stays beside the picture. */
 .edge-left .edge-head { align-self: flex-start; margin-left: 22px; margin-bottom: 6px; }
-.edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; margin-right: 8px; margin-bottom: 6px; }
+.edge-right .edge-head { align-self: flex-end; flex-direction: row-reverse; gap: 20px; margin-right: 8px; margin-bottom: 6px; }
 .edge-top .edge-head { align-self: center; }
 .token-slot {
   width: 20px;
