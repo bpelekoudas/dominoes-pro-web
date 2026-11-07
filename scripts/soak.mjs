@@ -1724,11 +1724,27 @@ function auditTable() {
       return { ok: false, reason: "The score line is truncated beside the east stack.", score: scoreClip, ...evidence };
     }
   }
-  for (const bar of document.querySelectorAll(".edge-badge, .you-float .seat-chip")) {
+  const column = document.querySelector(".felt-column");
+  if (column) {
+    const prior = column.scrollLeft;
+    column.scrollLeft = 48;
+    const moved = column.scrollLeft;
+    column.scrollLeft = prior;
+    if (moved > 1) {
+      return {
+        ok: false,
+        reason: "The table column scrolls sideways and clips the west stack.",
+        scroll: moved,
+        ...evidence,
+      };
+    }
+  }
+  const margin = 4;
+  for (const bar of document.querySelectorAll(".edge-badge, .you-float .seat-chip, .token-slot, [data-token=last-domino]")) {
     const box = bar.getBoundingClientRect();
-    if (box.width < 2) continue;
-    if (box.left < -1 || box.right > window.innerWidth + 1) {
-      return { ok: false, reason: "A seat bar leaves the screen.", bar: plain(box), ...evidence };
+    if (box.width < 2 || box.height < 2) continue;
+    if (box.left < margin || box.right > window.innerWidth - margin) {
+      return { ok: false, reason: "A seat bar leaves the screen.", bar: plain(box), margin, ...evidence };
     }
     const avatar = bar.querySelector(".avatar")?.getBoundingClientRect();
     const col = bar.querySelector(".game-col, .chip-text")?.getBoundingClientRect();

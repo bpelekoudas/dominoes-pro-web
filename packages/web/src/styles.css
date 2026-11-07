@@ -180,17 +180,23 @@ input {
   flex-direction: column;
   height: 100dvh;
   max-height: 100dvh;
-  overflow: hidden;
+  /* clip, not hidden: hidden is still a scroll container. */
+  overflow: clip;
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
 }
+/* The playbar is wider than a phone, so this column's contents stick out past
+   the screen. A hidden overflow would still scroll: the first tile tap calls
+   scrollIntoView and pans the column about 7px, which slides the west stack
+   off the left edge. clip paints the overflow and cannot pan. */
 .felt-column {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
 }
 /* A reconnect or error note sits over the rail. It must not steal felt height
    and zoom the chain. */
@@ -218,8 +224,10 @@ input {
   align-items: center;
   flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
   min-height: 44px;
   padding: env(safe-area-inset-top) 4px 0 8px;
+  overflow-x: clip;
 }
 .play-mark { width: 16px; height: 24px; flex: none; }
 .play-mark rect { fill: var(--red); }
@@ -347,7 +355,7 @@ input {
   align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
-  padding: 0 2px 4px;
+  padding: 0 6px 4px;
   background: #141414;
   z-index: 6;
 }
@@ -396,8 +404,8 @@ input {
 }
 .hand-tray > .opponent-chip[data-edge="right"] {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 6px;
+  right: 6px;
   z-index: 6;
 }
 .hand-tray:has(.opponent-chip[data-edge="right"]) .tray-notices {
