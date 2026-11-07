@@ -1630,6 +1630,31 @@ function auditTable() {
     if (!inside) {
       return { ok: false, reason: "A tile sits outside the felt.", tile: { id: tileId, rect: plain(box) }, ...evidence };
     }
+    // The frame is the copper line plus 8px. A tile on that line, or on a hand, fails.
+    const frameX = Math.max(20, safe.width * 0.04);
+    const frameY = Math.max(20, safe.height * 0.04);
+    const inFrame =
+      box.left >= safe.left + frameX - 1 &&
+      box.top >= safe.top + frameY - 1 &&
+      box.right <= safe.right - frameX + 1 &&
+      box.bottom <= safe.bottom - frameY + 1;
+    if (!inFrame) {
+      return { ok: false, reason: "A tile crosses the frame.", tile: { id: tileId, rect: plain(box) }, frame: { x: frameX, y: frameY }, ...evidence };
+    }
+    const clearOf = (node) => {
+      const other = node.getBoundingClientRect();
+      if (other.width < 2 || other.height < 2) return true;
+      const gap = 2;
+      return box.right <= other.left - gap || other.right <= box.left - gap || box.bottom <= other.top - gap || other.bottom <= box.top - gap;
+    };
+    const handHit = [...document.querySelectorAll(".sliver, .hand-tile")].find((node) => !clearOf(node));
+    if (handHit) {
+      return { ok: false, reason: "A tile touches a hand.", tile: { id: tileId, rect: plain(box) }, ...evidence };
+    }
+    const markerHit = [...document.querySelectorAll(".edge-badge, .seat-chip, [data-token=last-domino]")].find((node) => !clearOf(node));
+    if (markerHit) {
+      return { ok: false, reason: "A tile touches a badge or the token.", tile: { id: tileId, rect: plain(box) }, ...evidence };
+    }
     const hit = zones.find((zone) => overlaps(box, zone.box));
     if (hit) {
       return {
@@ -1737,6 +1762,18 @@ function auditTable() {
         scroll: moved,
         ...evidence,
       };
+    }
+  }
+  const header = document.querySelector(".playbar");
+  if (header && header.scrollWidth > header.clientWidth + 1) {
+    return { ok: false, reason: "The header is wider than the phone.", width: header.scrollWidth, room: header.clientWidth, ...evidence };
+  }
+  for (const control of document.querySelectorAll(".playbar .play-code, .playbar .build-sha, .playbar .profile-chip, .playbar .play-signin, .playbar .icon-button")) {
+    const box = control.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) continue;
+    if (box.left < 1 || box.top < 0 || box.right > window.innerWidth - 1 || box.bottom > window.innerHeight) {
+      const label = control.getAttribute("aria-label") || control.className;
+      return { ok: false, reason: "A header control is off the screen.", label, bar: plain(box), ...evidence };
     }
   }
   const margin = 4;
