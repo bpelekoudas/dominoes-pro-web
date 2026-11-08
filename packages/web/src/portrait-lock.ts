@@ -17,6 +17,15 @@ export function needsPortraitOverlay(width: number, height: number): boolean {
 }
 
 /**
+ * The landscape overlay is not a felt the chain should fit. Measuring it
+ * zooms the hand out, and the play rule that never zooms back in would
+ * keep that tiny scale after the phone turns upright.
+ */
+export function shouldRefitFelt(viewport: { width: number; height: number }): boolean {
+  return !needsPortraitOverlay(viewport.width, viewport.height);
+}
+
+/**
  * Ask the browser to lock portrait. Android honors this for an installed
  * home-screen app and for fullscreen. A normal tab rejects the call.
  * iOS Safari does not implement screen.orientation.lock, and it does not
