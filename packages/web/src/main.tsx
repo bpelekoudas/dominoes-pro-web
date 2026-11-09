@@ -6,6 +6,7 @@ import "@fontsource/red-hat-text/600.css";
 import { MOTION } from "../../rules/src/motion.js";
 import { applyA11y } from "./a11y";
 import { App } from "./App";
+import { PortraitOverlay } from "./portrait";
 import { pulse } from "./pulse";
 import "./styles.css";
 
@@ -53,5 +54,6 @@ if (!root) throw new Error("Missing root.");
 createRoot(root).render(
   <StrictMode>
     <App />
+    <PortraitOverlay />
   </StrictMode>,
 );

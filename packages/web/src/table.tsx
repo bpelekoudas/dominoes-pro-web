@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { layoutBoard, layoutOverlaps, PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
+import { shouldRefitFelt } from "./portrait-lock";
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
@@ -219,6 +220,10 @@ export function Table({
       let width = viewport.clientWidth;
       let height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
+      // A sideways phone is covered by the rotate overlay. Fitting that short
+      // felt zooms the chain out, and a later portrait measure must not keep
+      // the tiny scale. Plays still zoom out; turning the phone does not.
+      if (!shouldRefitFelt({ width: window.innerWidth, height: window.innerHeight })) return;
       // The first felt size of the hand is the one that fits the chain.
       // A later hint, banner, or sheet must not zoom it. A real resize
       // changes the width and takes a fresh measurement.

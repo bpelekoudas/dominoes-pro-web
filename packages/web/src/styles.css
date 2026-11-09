@@ -4037,3 +4037,35 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
   .player-home { display: grid; place-items: center; }
   .ph { height: min(900px, 100dvh); border-radius: 28px; }
 }
+
+/* A phone on its side. The game stays mounted underneath, so the socket and
+   the turn clock keep running. Rotating back removes only this cover. */
+.portrait-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 28px 20px;
+  background:
+    radial-gradient(520px 240px at 100% -10%, rgba(227, 30, 38, 0.28), transparent 62%),
+    linear-gradient(180deg, #1c1c1c 0%, #101010 100%);
+  color: var(--paper);
+}
+.portrait-lock-card {
+  width: min(440px, 100%);
+  text-align: center;
+}
+.portrait-phone { width: 88px; height: 88px; }
+.portrait-lock h1 {
+  margin: 8px 0 10px;
+  font-size: clamp(2.4rem, 8vw, 3.4rem);
+  line-height: 0.9;
+}
+.portrait-lock p {
+  margin: 0 auto;
+  max-width: 28rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
