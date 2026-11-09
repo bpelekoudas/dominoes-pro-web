@@ -1,0 +1,39 @@
+/** Same travel as a tile the player drags onto the chain (220ms ease, 240ms to land). */
+export const OPPONENT_GLIDE_MS = 240;
+
+export interface SeatBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An opponent play that arrives while we are watching. The play already on
+ * the table when we sit down (reconnect or a late join) does not fly.
+ */
+export function shouldFlyOpponentTile(input: {
+  playerId: string | null;
+  yourId: string;
+  seq: number;
+  joinedSeq: number | null;
+  bigMoment: boolean;
+  reducedMotion: boolean;
+}): boolean {
+  if (input.joinedSeq === null || input.seq === input.joinedSeq) return false;
+  if (!input.playerId || input.playerId === input.yourId) return false;
+  if (input.bigMoment || input.reducedMotion) return false;
+  return true;
+}
+
+/** Where the face-down tile was, before this play removed it from the side hand. */
+export function departureBox(hands: ReadonlyMap<string, SeatBox>, playerId: string): SeatBox | null {
+  const box = hands.get(playerId);
+  if (!box || box.width < 2 || box.height < 2) return null;
+  return box;
+}
+
+/** The camera stays put until this flight's seq is cleared. */
+export function cameraBlockedByFlight(hold: { seq: number } | null, seq: number): boolean {
+  return hold !== null && hold.seq === seq;
+}

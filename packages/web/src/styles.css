@@ -1198,15 +1198,23 @@ input {
   position: fixed;
   z-index: 20;
   pointer-events: none;
+  perspective: 600px;
   filter: drop-shadow(0 10px 8px rgba(0, 0, 0, 0.45));
   transition:
-    left calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1),
-    top calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1),
-    width calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1),
-    height calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1),
-    filter calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1);
+    left 220ms cubic-bezier(0.4, 0, 0.15, 1),
+    top 220ms cubic-bezier(0.4, 0, 0.15, 1),
+    width 220ms cubic-bezier(0.4, 0, 0.15, 1),
+    height 220ms cubic-bezier(0.4, 0, 0.15, 1);
 }
-.arrive-tile .domino { animation: tile-squash calc(420ms * var(--motion)) cubic-bezier(0.4, 0, 0.15, 1); }
+.arrive-tile.is-reveal .domino {
+  transform-origin: center center;
+  animation: tile-flip 220ms cubic-bezier(0.4, 0, 0.15, 1);
+}
+@keyframes tile-flip {
+  0% { transform: rotateY(78deg) scaleX(0.45); }
+  50% { transform: rotateY(0deg) scaleX(1); }
+  100% { transform: none; }
+}
 @keyframes tile-squash {
   0% { transform: scale(1.04, 0.98); }
   78% { transform: scale(1.02, 0.96); }

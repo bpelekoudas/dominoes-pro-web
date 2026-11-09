@@ -25,6 +25,7 @@ import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
 import { scoreTier } from "./feel/ladder";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { cameraBlockedByFlight, departureBox, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer } from "./moment.js";
 import {
@@ -147,6 +148,9 @@ export function Table({
   const knownTiles = useRef<{ hand: string; ids: Set<string> }>({ hand: "", ids: new Set() });
   const [heldIds, setHeldIds] = useState<ReadonlySet<string>>(new Set());
   const frozen = useRef(false);
+  const flightHold = useRef<{ seq: number } | null>(null);
+  const [flightDone, setFlightDone] = useState(0);
+  const seatHands = useRef(new Map<string, SeatBox>());
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -177,6 +181,9 @@ export function Table({
     const measure = () => {
       // Hand over keeps the last scale. The sheet must not zoom the chain.
       if (frozen.current && held.current?.hand === handKey) return;
+      // An opponent tile is still flying in from their hand. Once the hand
+      // has a scale, the camera eases only after that glide lands.
+      if (held.current && cameraBlockedByFlight(flightHold.current, view.lastPlay?.seq ?? -1)) return;
       let width = viewport.clientWidth;
       let height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
@@ -309,7 +316,21 @@ export function Table({
       observer.observe(node);
     });
     return () => observer.disconnect();
-  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId]);
+  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId, view.lastPlay?.seq, flightDone]);
+
+  useLayoutEffect(() => {
+    const next = new Map<string, SeatBox>();
+    document.querySelectorAll<HTMLElement>(".rail[data-player-id]").forEach((rail) => {
+      const id = rail.getAttribute("data-player-id");
+      const slivers = rail.querySelectorAll(".sliver");
+      const last = slivers[slivers.length - 1];
+      if (!id || !(last instanceof HTMLElement)) return;
+      const rect = last.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return;
+      next.set(id, { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    });
+    seatHands.current = next;
+  });
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -530,7 +551,14 @@ export function Table({
           document.body,
         );
       })}
-      <Arrival lastPlay={view.lastPlay} yourId={view.yourId} layout={layout} />
+      <Arrival
+        lastPlay={view.lastPlay}
+        yourId={view.yourId}
+        layout={layout}
+        flightHold={flightHold}
+        hands={seatHands}
+        onFlightEnd={() => setFlightDone((n) => n + 1)}
+      />
       <FeelRipple knock={feel.knock} />
       {popup && pop && popAt ? (
         <FlyingScore pop={pop} text={popup.text} at={popAt} />
@@ -568,57 +596,62 @@ function Arrival({
   lastPlay,
   yourId,
   layout,
+  flightHold,
+  hands,
+  onFlightEnd,
 }: {
   lastPlay: PlayerView["lastPlay"];
   yourId: string;
   layout: BoardLayout | null;
+  flightHold: { current: { seq: number } | null };
+  hands: { current: Map<string, SeatBox> };
+  onFlightEnd: () => void;
 }) {
   const seq = lastPlay?.seq ?? -1;
   const tileId = lastPlay?.tileId ?? null;
   const playerId = lastPlay?.playerId ?? null;
   const awarded = lastPlay?.awarded ?? 0;
-  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const joined = useRef<number | null>(null);
+  const armed = useRef<number | null>(null);
+  if (joined.current === null) joined.current = seq;
+  const fly = shouldFlyOpponentTile({
+    playerId,
+    yourId,
+    seq,
+    joinedSeq: joined.current,
+    bigMoment: bigMomentLevel(awarded) !== null,
+    reducedMotion: prefersReducedMotion(),
+  });
+  if (fly && armed.current !== seq) {
+    armed.current = seq;
+    flightHold.current = { seq };
+  }
+  const [box, setBox] = useState<SeatBox | null>(null);
   const [face, setFace] = useState<{ a: number; b: number; orientation: "horizontal" | "vertical" } | null>(null);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
-  const skip = playerId === yourId || !tileId || bigMomentLevel(awarded) !== null || prefersReducedMotion();
+  const endRef = useRef(onFlightEnd);
+  endRef.current = onFlightEnd;
 
   useLayoutEffect(() => {
-    if (skip || !tileId || !playerId) {
-      setBox(null);
-      return;
-    }
+    if (!fly || !tileId || !playerId) return;
+    const from = departureBox(hands.current, playerId);
     let tile: HTMLElement | null = null;
-    let frame = 0;
+    let frameId = 0;
     let timer = 0;
     let cancelled = false;
-    const waitForCamera = () => new Promise<void>((resolve) => {
-      const root = document.querySelector(".table-scroll");
-      if (!root || root.getAttribute("data-camera-settling") !== "true") {
-        resolve();
-        return;
-      }
-      const scaler = root.querySelector(".board-scaler");
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        scaler?.removeEventListener("transitionend", onEnd);
-        resolve();
-      };
-      const onEnd = (event: Event) => {
-        if ((event as TransitionEvent).propertyName === "transform") finish();
-      };
-      scaler?.addEventListener("transitionend", onEnd);
-      window.setTimeout(finish, CAMERA_EASE_MS + 80);
-    });
+    const mySeq = seq;
+    const release = (landed: boolean) => {
+      if (flightHold.current?.seq !== mySeq) return;
+      flightHold.current = null;
+      if (landed) endRef.current();
+    };
     const start = () => {
       tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
-      const seat = document.querySelector<HTMLElement>(`.rail[data-player-id="${CSS.escape(playerId)}"] .avatar`);
-      if (!tile || !seat) return false;
+      const origin = from ?? liveHandBox(playerId);
+      if (!tile || !origin) return false;
       const to = tile.getBoundingClientRect();
       if (to.width < 2 || to.height < 2) return false;
-      const from = seat.getBoundingClientRect();
       const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
       tile.classList.add("is-arriving");
       setFace(
@@ -626,13 +659,14 @@ function Arrival({
           ? { a: placed.a, b: placed.b, orientation: placed.orientation }
           : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
       );
-      setBox({ left: from.left, top: from.top, width: Math.max(18, from.width), height: Math.max(18, from.height) });
+      setBox(origin);
       timer = window.setTimeout(() => {
         tile?.classList.remove("is-arriving");
         if (!cancelled) setBox(null);
-      }, motionMs(420));
-      frame = window.requestAnimationFrame(() => {
-        frame = window.requestAnimationFrame(() => {
+        release(true);
+      }, OPPONENT_GLIDE_MS);
+      frameId = window.requestAnimationFrame(() => {
+        frameId = window.requestAnimationFrame(() => {
           if (cancelled || !tile) return;
           const landed = tile.getBoundingClientRect();
           setBox({ left: landed.left, top: landed.top, width: landed.width, height: landed.height });
@@ -640,35 +674,41 @@ function Arrival({
       });
       return true;
     };
-    const begin = () => {
+    frameId = window.requestAnimationFrame(() => {
       if (cancelled) return;
-      if (!start()) {
-        frame = window.requestAnimationFrame(() => {
-          if (!cancelled) start();
-        });
-      }
-    };
-    // The parent measure effect runs after this one and may start a zoom.
-    // Wait for that ease before reading where the tile lands.
-    frame = window.requestAnimationFrame(() => {
-      void waitForCamera().then(() => begin());
+      if (start()) return;
+      frameId = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        if (!start()) release(true);
+      });
     });
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(frameId);
       window.clearTimeout(timer);
       tile?.classList.remove("is-arriving");
+      if (flightHold.current?.seq === mySeq) flightHold.current = null;
       setBox(null);
     };
-  }, [seq, tileId, playerId, skip]);
+  }, [fly, seq, tileId, playerId]);
 
   if (!box || !face) return null;
   return createPortal(
-    <div className="arrive-tile" data-arrive={tileId ?? ""} style={box}>
+    <div className="arrive-tile is-reveal" data-arrive={tileId ?? ""} data-arrive-from={playerId ?? ""} style={box}>
       <Domino a={face.a} b={face.b} orientation={face.orientation} />
     </div>,
     document.body,
   );
+}
+
+function liveHandBox(playerId: string): SeatBox | null {
+  const rail = document.querySelector<HTMLElement>(`.rail[data-player-id="${CSS.escape(playerId)}"]`);
+  const slivers = rail?.querySelectorAll(".sliver");
+  const last = slivers?.[slivers.length - 1];
+  if (!(last instanceof HTMLElement)) return null;
+  const rect = last.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return null;
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
 }
 
 function nextSlotBox(layout: BoardLayout, end: PlacedEnd, isDouble: boolean): LayoutBox {
