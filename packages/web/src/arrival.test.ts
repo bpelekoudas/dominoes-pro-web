@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cameraBlockedByFlight, departureBox, shouldFlyOpponentTile } from "./arrival";
+import { boardDuringOpponentFlight, cameraBlockedByFlight, departureBox, shouldFlyOpponentTile } from "./arrival";
 
 const watching = {
   playerId: "west",
@@ -34,5 +34,12 @@ describe("opponent tile flight", () => {
     expect(cameraBlockedByFlight(hold, 4)).toBe(true);
     expect(cameraBlockedByFlight(null, 4)).toBe(false);
     expect(cameraBlockedByFlight(hold, 5)).toBe(false);
+  });
+
+  it("keeps the chain still while the opponent tile is in the air", () => {
+    const before = ["6-6", "5-6"];
+    const after = ["6-6", "5-6", "0-0"];
+    expect(boardDuringOpponentFlight(before, after, true)).toBe(before);
+    expect(boardDuringOpponentFlight(before, after, false)).toBe(after);
   });
 });

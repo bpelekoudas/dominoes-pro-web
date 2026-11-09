@@ -37,3 +37,8 @@ export function departureBox(hands: ReadonlyMap<string, SeatBox>, playerId: stri
 export function cameraBlockedByFlight(hold: { seq: number } | null, seq: number): boolean {
   return hold !== null && hold.seq === seq;
 }
+
+/** Tiles already on the felt stay where they are while an opponent tile is in the air. */
+export function boardDuringOpponentFlight<T>(previous: T, next: T, flying: boolean): T {
+  return flying ? previous : next;
+}

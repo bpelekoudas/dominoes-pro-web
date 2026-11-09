@@ -14,6 +14,7 @@ import {
   frameInsets,
   settledHandCamera,
   nextFeltSize,
+  renderedTileRect,
   tilesRelocating,
   handOverPlacement,
   landedTileBox,
@@ -25,7 +26,7 @@ import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
 import { scoreTier } from "./feel/ladder";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
-import { cameraBlockedByFlight, departureBox, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
+import { cameraBlockedByFlight, boardDuringOpponentFlight, departureBox, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer } from "./moment.js";
 import {
@@ -73,6 +74,22 @@ function endPoints(plays: Array<{ endId: string; points: number }>, endId: strin
   return points > 0 ? `+${points}` : "0";
 }
 
+function pictureFrom(board: PlayerView["board"], limits: LayoutLimits | null): BoardLayout | null {
+  if (!board?.center) return null;
+  try {
+    const picture = layoutBoard(board, limits ?? undefined);
+    if (!layoutOverlaps(picture)) return picture;
+    const plain = layoutBoard(board);
+    return layoutOverlaps(plain) ? picture : plain;
+  } catch {
+    try {
+      return layoutBoard(board);
+    } catch {
+      return null;
+    }
+  }
+}
+
 export function Table({
   view,
   selectedTile,
@@ -95,32 +112,46 @@ export function Table({
   /** Points for each open end. Easy practice only, and only while hints are on. */
   showScores?: boolean;
 }) {
-  const board = view.board;
+  const liveBoard = view.board;
+  const previousBoard = useRef(liveBoard);
+  const frozenBoard = useRef(liveBoard);
+  const flightHold = useRef<{ seq: number } | null>(null);
+  const armedFlight = useRef<number | null>(null);
+  const joinedSeq = useRef<number | null>(null);
+  const chainHeld = useRef(false);
+  const cameraAim = useRef<SeatBox | null>(null);
+  const [flightDone, setFlightDone] = useState(0);
+  const [concealed, setConcealed] = useState<string | null>(null);
+  const playSeq = view.lastPlay?.seq ?? -1;
+  if (joinedSeq.current === null) joinedSeq.current = playSeq;
+  const flyNow = shouldFlyOpponentTile({
+    playerId: view.lastPlay?.playerId ?? null,
+    yourId: view.yourId,
+    seq: playSeq,
+    joinedSeq: joinedSeq.current,
+    bigMoment: view.lastPlay ? bigMomentLevel(view.lastPlay.awarded) !== null : false,
+    reducedMotion: prefersReducedMotion(),
+  });
+  if (flyNow && armedFlight.current !== playSeq) {
+    armedFlight.current = playSeq;
+    frozenBoard.current = previousBoard.current;
+    flightHold.current = { seq: playSeq };
+    chainHeld.current = true;
+    cameraAim.current = null;
+  }
+  const board = boardDuringOpponentFlight(frozenBoard.current, liveBoard, chainHeld.current);
   // The felt the chain should fold into, in design pixels, at the readable floor.
   const [limits, setLimits] = useState<LayoutLimits | null>(null);
-  const layout = useMemo(() => {
-    if (!board?.center) return null;
-    try {
-      const picture = layoutBoard(board, limits ?? undefined);
-      if (!layoutOverlaps(picture)) return picture;
-      const plain = layoutBoard(board);
-      return layoutOverlaps(plain) ? picture : plain;
-    } catch {
-      try {
-        return layoutBoard(board);
-      } catch {
-        return null;
-      }
-    }
-  }, [board, limits]);
+  const layout = useMemo(() => pictureFrom(board, limits), [board, limits, flightDone]);
+  const incoming = useMemo(() => pictureFrom(liveBoard, limits), [liveBoard, limits]);
   const frame = useMemo(() => {
-    if (!layout) return null;
+    if (!layout && !liveBoard?.center) return null;
     // The stage stays centred on the spinner so a tile's place does not jump.
     // The camera shift moves the whole chain's box into the safe felt.
     const w = limits?.width ?? PHONE_WIDTH;
     const h = limits?.height ?? PHONE_HEIGHT;
     return { x: -w / 2, y: -h / 2, w, h };
-  }, [layout, limits]);
+  }, [layout, limits, liveBoard]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -148,8 +179,6 @@ export function Table({
   const knownTiles = useRef<{ hand: string; ids: Set<string> }>({ hand: "", ids: new Set() });
   const [heldIds, setHeldIds] = useState<ReadonlySet<string>>(new Set());
   const frozen = useRef(false);
-  const flightHold = useRef<{ seq: number } | null>(null);
-  const [flightDone, setFlightDone] = useState(0);
   const seatHands = useRef(new Map<string, SeatBox>());
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
@@ -158,6 +187,10 @@ export function Table({
   const handOver = view.phase === "between" || view.phase === "over";
   const lastTileId = view.lastPlay?.tileId ?? null;
   const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
+
+  useLayoutEffect(() => {
+    if (!chainHeld.current) previousBoard.current = liveBoard;
+  });
 
   useLayoutEffect(() => {
     placedBoxes.current = new Map();
@@ -177,13 +210,12 @@ export function Table({
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    if (!viewport || !layout || !frame) return;
+    if (!viewport || !frame || !liveBoard?.center) return;
     const measure = () => {
+      const handsClear = handClearance(viewport);
+      setClip((current) => (sameInsets(current, handsClear) ? current : handsClear));
       // Hand over keeps the last scale. The sheet must not zoom the chain.
       if (frozen.current && held.current?.hand === handKey) return;
-      // An opponent tile is still flying in from their hand. Once the hand
-      // has a scale, the camera eases only after that glide lands.
-      if (held.current && cameraBlockedByFlight(flightHold.current, view.lastPlay?.seq ?? -1)) return;
       let width = viewport.clientWidth;
       let height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
@@ -216,10 +248,10 @@ export function Table({
       // The felt frame is the fit. Badges, the token, and the side hands are
       // local obstacles: an arm turns before the box in front of it, and the
       // picture zooms only when that turned chain no longer fits the frame.
-      if (!board?.center) return;
+      if (!liveBoard?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
       const solved = settledHandCamera({
-        board,
+        board: liveBoard,
         felt,
         screenWidth,
         frame: frameEdge,
@@ -243,17 +275,6 @@ export function Table({
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
-      setLimits((current) => {
-        if (
-          current
-          && Math.abs(current.width - handLimits.width) < 1
-          && Math.abs(current.height - handLimits.height) < 1
-          && !(current.obstacles && current.obstacles.length > 0)
-        ) {
-          return current;
-        }
-        return handLimits;
-      });
       // Full size until a tile would cross the felt edge, or the thin
       // side-hand strip where that strip is past the frame.
       const frameShift = boardShift(solved.edge);
@@ -264,7 +285,33 @@ export function Table({
         x: centered.x + frameShift.x + solved.nudge.x,
         y: centered.y + frameShift.y + solved.nudge.y,
       };
-      const tileIds = layout.tiles.map((tile) => tile.tileId);
+      const placed = view.lastPlay ? solved.layout.tiles.find((tile) => tile.tileId === view.lastPlay?.tileId) : undefined;
+      if (placed) {
+        const rect = renderedTileRect(felt, placed, zoom, nextShift);
+        const origin = viewport.getBoundingClientRect();
+        cameraAim.current = {
+          left: origin.left + rect.left,
+          top: origin.top + rect.top,
+          width: rect.right - rect.left,
+          height: rect.bottom - rect.top,
+        };
+      }
+      // The tile is still in the air. Remember where it will sit, and ease
+      // the camera only after the glide lands. The chain on the felt stays
+      // the previous one until that ease finishes, so it never draws on the hands.
+      if (held.current && cameraBlockedByFlight(flightHold.current, view.lastPlay?.seq ?? -1)) return;
+      if (!chainHeld.current) setLimits((current) => {
+        if (
+          current
+          && Math.abs(current.width - handLimits.width) < 1
+          && Math.abs(current.height - handLimits.height) < 1
+          && !(current.obstacles && current.obstacles.length > 0)
+        ) {
+          return current;
+        }
+        return handLimits;
+      });
+      const tileIds = solved.layout.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
       // A refold can walk a tile into a token slot without adding a tile.
       // That still has to pull the scale down. Choosing does not.
@@ -291,8 +338,6 @@ export function Table({
       if (heldIds.size > 0) setHeldIds(new Set());
       viewport.dataset.cameraSettling = "false";
       viewport.dataset.zoom = "ease";
-      const none = { top: 0, right: 0, bottom: 0, left: 0 };
-      setClip((current) => (sameInsets(current, none) ? current : none));
       held.current = { hand: handKey, scale: zoom };
       frozen.current = handOver;
       setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
@@ -485,7 +530,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) ? " is-relocating" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
@@ -555,9 +600,16 @@ export function Table({
         lastPlay={view.lastPlay}
         yourId={view.yourId}
         layout={layout}
+        incoming={incoming}
         flightHold={flightHold}
+        cameraAim={cameraAim}
         hands={seatHands}
-        onFlightEnd={() => setFlightDone((n) => n + 1)}
+        onFlightEnd={() => {
+          chainHeld.current = false;
+          setConcealed(view.lastPlay?.tileId ?? null);
+          setFlightDone((n) => n + 1);
+        }}
+        onSettled={() => setConcealed(null)}
       />
       <FeelRipple knock={feel.knock} />
       {popup && pop && popAt ? (
@@ -596,16 +648,22 @@ function Arrival({
   lastPlay,
   yourId,
   layout,
+  incoming,
   flightHold,
+  cameraAim,
   hands,
   onFlightEnd,
+  onSettled,
 }: {
   lastPlay: PlayerView["lastPlay"];
   yourId: string;
   layout: BoardLayout | null;
+  incoming: BoardLayout | null;
   flightHold: { current: { seq: number } | null };
+  cameraAim: { current: SeatBox | null };
   hands: { current: Map<string, SeatBox> };
   onFlightEnd: () => void;
+  onSettled: () => void;
 }) {
   const seq = lastPlay?.seq ?? -1;
   const tileId = lastPlay?.tileId ?? null;
@@ -628,10 +686,14 @@ function Arrival({
   }
   const [box, setBox] = useState<SeatBox | null>(null);
   const [face, setFace] = useState<{ a: number; b: number; orientation: "horizontal" | "vertical" } | null>(null);
-  const layoutRef = useRef(layout);
-  layoutRef.current = layout;
+  const layoutRef = useRef(incoming ?? layout);
+  layoutRef.current = incoming ?? layout;
+  const aimRef = useRef(cameraAim);
+  aimRef.current = cameraAim;
   const endRef = useRef(onFlightEnd);
   endRef.current = onFlightEnd;
+  const settledRef = useRef(onSettled);
+  settledRef.current = onSettled;
 
   useLayoutEffect(() => {
     if (!fly || !tileId || !playerId) return;
@@ -639,21 +701,32 @@ function Arrival({
     let tile: HTMLElement | null = null;
     let frameId = 0;
     let timer = 0;
+    let parkTimer = 0;
     let cancelled = false;
     const mySeq = seq;
-    const release = (landed: boolean) => {
-      if (flightHold.current?.seq !== mySeq) return;
-      flightHold.current = null;
-      if (landed) endRef.current();
+    const releaseCamera = () => {
+      if (flightHold.current?.seq === mySeq) flightHold.current = null;
+    };
+    const finish = () => {
+      if (cancelled) return;
+      if (flightHold.current && flightHold.current.seq !== mySeq) return;
+      releaseCamera();
+      endRef.current();
+      settledRef.current();
+    };
+    const destination = (): SeatBox | null => {
+      const aimed = aimRef.current.current;
+      if (aimed && aimed.width > 2 && aimed.height > 2) return aimed;
+      const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
+      return placed ? projectTile(placed) : null;
     };
     const start = () => {
-      tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
       const origin = from ?? liveHandBox(playerId);
-      if (!tile || !origin) return false;
-      const to = tile.getBoundingClientRect();
-      if (to.width < 2 || to.height < 2) return false;
+      const to = destination();
+      if (!origin || !to) return false;
       const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
-      tile.classList.add("is-arriving");
+      tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
+      tile?.classList.add("is-arriving");
       setFace(
         placed
           ? { a: placed.a, b: placed.b, orientation: placed.orientation }
@@ -661,15 +734,25 @@ function Arrival({
       );
       setBox(origin);
       timer = window.setTimeout(() => {
-        tile?.classList.remove("is-arriving");
-        if (!cancelled) setBox(null);
-        release(true);
+        if (cancelled) return;
+        const parked = destination() ?? to;
+        setBox(parked);
+        // The glide has landed. The camera may ease, and the chain on the
+        // felt updates underneath the parked tile.
+        releaseCamera();
+        endRef.current();
+        parkTimer = window.setTimeout(() => {
+          tile?.classList.remove("is-arriving");
+          if (!cancelled) setBox(null);
+          settledRef.current();
+        }, CAMERA_EASE_MS);
       }, OPPONENT_GLIDE_MS);
       frameId = window.requestAnimationFrame(() => {
         frameId = window.requestAnimationFrame(() => {
-          if (cancelled || !tile) return;
-          const landed = tile.getBoundingClientRect();
-          setBox({ left: landed.left, top: landed.top, width: landed.width, height: landed.height });
+          if (cancelled) return;
+          const next = destination();
+          if (!next) return;
+          setBox({ left: next.left, top: next.top, width: next.width, height: next.height });
         });
       });
       return true;
@@ -679,15 +762,16 @@ function Arrival({
       if (start()) return;
       frameId = window.requestAnimationFrame(() => {
         if (cancelled) return;
-        if (!start()) release(true);
+        if (!start()) finish();
       });
     });
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timer);
+      window.clearTimeout(parkTimer);
       tile?.classList.remove("is-arriving");
-      if (flightHold.current?.seq === mySeq) flightHold.current = null;
+      releaseCamera();
       setBox(null);
     };
   }, [fly, seq, tileId, playerId]);
@@ -699,6 +783,40 @@ function Arrival({
     </div>,
     document.body,
   );
+}
+
+/** Keep chain tiles off the face-down hands. The inset is the sliver stack, in felt pixels. */
+function handClearance(viewport: HTMLElement): AxisInsets {
+  const felt = viewport.getBoundingClientRect();
+  const clear: AxisInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (felt.width < 8 || felt.height < 8) return clear;
+  document.querySelectorAll<HTMLElement>(".rail[data-edge]").forEach((rail) => {
+    const edge = rail.getAttribute("data-edge");
+    const box = rail.querySelector(".edge-slivers")?.getBoundingClientRect();
+    if (!box || box.width < 2 || box.height < 2) return;
+    if (edge === "left") clear.left = Math.max(clear.left, Math.ceil(box.right - felt.left));
+    else if (edge === "right") clear.right = Math.max(clear.right, Math.ceil(felt.right - box.left));
+    else if (edge === "top") clear.top = Math.max(clear.top, Math.ceil(box.bottom - felt.top));
+  });
+  return clear;
+}
+
+function projectTile(box: LayoutBox): SeatBox | null {
+  const stage = document.querySelector<HTMLElement>(".board-stage");
+  if (!stage) return null;
+  const origin = stage.getBoundingClientRect();
+  const width = stage.offsetWidth;
+  const height = stage.offsetHeight;
+  if (width < 2 || height < 2 || origin.width < 2) return null;
+  const scale = origin.width / width;
+  const left = box.x + width / 2;
+  const top = box.y + height / 2;
+  return {
+    left: origin.left + left * scale,
+    top: origin.top + top * scale,
+    width: box.w * scale,
+    height: box.h * scale,
+  };
 }
 
 function liveHandBox(playerId: string): SeatBox | null {
