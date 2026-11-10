@@ -689,7 +689,7 @@ function finish(
     remaining,
     gameWinnerId: wonGame,
     seriesWinnerId,
-    summary,
+    summary: asSentence(summary),
     gameNumber: match.gameNumber,
     handNumber: match.handNumber,
   };
@@ -709,6 +709,20 @@ function finish(
     lastDominoKey: dominoId ? dominoKey : null,
     hand: { ...hand, phase: "complete", result },
   });
+}
+
+/** A lowercase seat name must still open each result sentence. */
+export function asSentence(text: string): string {
+  return text
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => {
+      if (!part) return part;
+      const first = part.charAt(0);
+      if (first === first.toUpperCase()) return part;
+      return first.toUpperCase() + part.slice(1);
+    })
+    .join(" ");
 }
 
 function note(match: MatchState, event: PublicEvent): MatchState {

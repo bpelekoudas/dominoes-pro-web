@@ -16,10 +16,10 @@ const bodies = [
   { seats: 4, height: 560 },
 ];
 
-/** Continue or Play again, plus Leave. */
+/** Hand over is Continue plus Leave. Match over is Play again plus Leave. */
 const actions = [
-  { state: "hand", height: 132 },
-  { state: "match", height: 196 },
+  { state: "hand-over", height: 132 },
+  { state: "match-over", height: 196 },
 ];
 
 describe("match card", () => {

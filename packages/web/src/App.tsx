@@ -1476,7 +1476,7 @@ function HandSummary({
         </div>
       ) : null}
       <ScoreList view={view} />
-      <p>{hand.summary}</p>
+      <p data-summary="true">{hand.summary}</p>
       <p className="round-note">Leftovers round to the nearest 5. A tie rounds each share the same way.</p>
       <ol className="place-list">
         {places.map((place) => (

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyIntent,
+  asSentence,
   arrangeDeck,
   beginHand,
   conservedTiles,
@@ -989,3 +990,23 @@ function metaOf(match: MatchState, youId: string): TableMeta {
     youId,
   };
 }
+
+describe("result sentence", () => {
+  it("capitalizes a lowercase seat name so the line is a sentence", () => {
+    expect(asSentence("card went out and took 15 from the table.")).toBe(
+      "Card went out and took 15 from the table.",
+    );
+    expect(
+      asSentence("card went out and took 15 from the table. card reaches 50 and wins the series, You 0, card 1."),
+    ).toBe("Card went out and took 15 from the table. Card reaches 50 and wins the series, You 0, card 1.");
+  });
+
+  it("leaves a name that already opens with a capital alone", () => {
+    expect(asSentence("Hot End went out and took 20 from the table.")).toBe(
+      "Hot End went out and took 20 from the table.",
+    );
+    expect(asSentence("Locked. Alex had the lightest hand and took 10.")).toBe(
+      "Locked. Alex had the lightest hand and took 10.",
+    );
+  });
+});

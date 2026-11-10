@@ -1614,6 +1614,11 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   flex: 1 1 auto;
   padding-bottom: 8px;
 }
+.hand-summary-scroll p {
+  margin: 8px 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .match-over-actions {
   flex: none;
   z-index: 2;
