@@ -12,6 +12,7 @@ import { seatAround } from "./seats";
 import { playWinSting } from "./sound";
 import { matchLineSeed, winLineFor } from "./win-lines";
 import { Domino } from "./table";
+import { MatchCardFrame } from "./match-card-frame";
 import { FeelCall, FeelTally } from "./feel/overlay";
 import { pulse as feelPulse } from "./feel/haptics";
 import { playFeel } from "./feel/synth";
@@ -980,24 +981,28 @@ export function WinPreview({ mode }: { mode: WinPreviewMode }) {
         ) : null}
         {win.sheet ? (
           match ? (
-            <section className="hand-summary" data-screen="series">
-              <p className="result-kicker">Series over</p>
-              <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
-                Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
-              </p>
-              <div className="winner-row">
-                <h2>{winnerName} won the hand</h2>
+            <MatchCardFrame screen="series">
+              <div className="hand-summary-sheet" data-match-card="true">
+                <div className="hand-summary-scroll">
+                  <p className="result-kicker">Series over</p>
+                  <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded}>
+                    Games {gameTallyText(view.players.map((player) => player.gamesWon))} · first to {view.winsNeeded}
+                  </p>
+                  <div className="winner-row">
+                    <h2>{winnerName} won the hand</h2>
+                  </div>
+                  <p>{view.lastHand?.summary}</p>
+                </div>
+                <div className="match-over-actions">
+                  <button type="button" className="primary" data-action="rematch">
+                    Play again
+                  </button>
+                  <button type="button" className="secondary" data-action="leave-match">
+                    Leave Match
+                  </button>
+                </div>
               </div>
-              <p>{view.lastHand?.summary}</p>
-              <div className="match-over-actions">
-                <button type="button" className="primary" data-action="rematch">
-                  Play again
-                </button>
-                <button type="button" className="secondary" data-action="leave-match">
-                  Leave Match
-                </button>
-              </div>
-            </section>
+            </MatchCardFrame>
           ) : (
             <div className="preview-continue match-over-actions">
               <button type="button" className="primary" data-action="continue">

@@ -1569,56 +1569,65 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   line-height: 1;
   color: #141414;
 }
-.hand-summary, .ended-screen {
+/* The layout viewport runs under the system nav (`viewport-fit=cover`).
+   The frame is pinned to the visual viewport in script. The sheet sits at
+   the bottom of that frame. The standings scroll. The buttons do not. */
+.sheet-frame {
   position: fixed;
   z-index: 40;
-  left: 12px;
-  right: 12px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  padding:
+    max(8px, env(safe-area-inset-top, 0px))
+    max(12px, env(safe-area-inset-right, 0px))
+    env(safe-area-inset-bottom, 0px)
+    max(12px, env(safe-area-inset-left, 0px));
+  pointer-events: none;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+}
+.hand-summary-sheet, .ended-screen, .hand-summary.demo-summary {
   background: #1b1b1b;
   color: var(--paper);
   border: 1px solid rgba(213, 163, 54, 0.7);
-  padding: 16px;
+  padding: 16px 16px 0;
 }
+.hand-summary-sheet, .ended-screen {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.hand-summary-sheet { border-radius: 16px 16px 0 0; }
+.ended-screen { border-radius: 16px; }
 .hand-summary-scroll {
   overflow: auto;
   min-height: 0;
   flex: 1 1 auto;
-}
-.ended-screen {
-  top: 64px;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  max-height: none;
-  border-radius: 16px;
+  padding-bottom: 8px;
 }
 .match-over-actions {
   flex: none;
   z-index: 2;
   display: grid;
   gap: 8px;
-  margin: 12px -16px -16px;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  margin: 12px -16px 0;
+  padding: 12px 16px 12px;
   background: #1b1b1b;
   border-top: 1px solid rgba(213, 163, 54, 0.35);
 }
-.hand-summary .match-over-actions {
-  position: sticky;
-  bottom: 0;
-}
-.match-over-actions .primary {
+.match-over-actions .primary,
+.match-over-actions .secondary {
   min-height: 52px;
   font-size: 1.05rem;
-}
-.hand-summary {
-  top: auto;
-  bottom: 0;
-  overflow: auto;
-  /* A long chain asks for a shorter sheet via --hand-sheet-max so the last
-     tile can stay on the felt instead of the chain climbing the rail. */
-  max-height: min(54dvh, var(--hand-sheet-max, 54dvh));
-  border-radius: 16px 16px 0 0;
 }
 .felt-app.showing-result .hand-tray { visibility: hidden; }
 .winner-row {
@@ -1796,7 +1805,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   font-weight: 700;
 }
 .last-tile-line .domino { width: 36px; height: 72px; flex: none; }
-.hand-summary h2, .ended-screen p { margin: 0 0 8px; }
+.hand-summary-sheet h2, .hand-summary.demo-summary h2, .ended-screen p { margin: 0 0 8px; }
 .ended-screen .result-kicker {
   font-family: "Red Hat Text", sans-serif;
   font-weight: 700;
@@ -2154,7 +2163,17 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   background: #142016;
 }
 .demo-felt .seat-chip { position: relative; left: auto; right: auto; top: auto; max-width: none; opacity: 1; }
-.hand-summary.demo-summary { position: relative; top: auto; bottom: auto; left: auto; right: auto; max-height: none; }
+.hand-summary.demo-summary {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  height: auto;
+  max-height: none;
+  padding: 16px;
+  pointer-events: auto;
+}
 
 .arcade-home {
   min-height: 100dvh;

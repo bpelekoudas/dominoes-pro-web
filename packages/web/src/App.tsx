@@ -11,6 +11,7 @@ import { cuesForPlay, cuesForTurn } from "./cues";
 import { primeMusic } from "./music";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
+import { MatchCardFrame } from "./match-card-frame";
 import { ControlToken, DrawFlight } from "./control-token";
 import { AccountChip, AccountLayer, useAccount, type AccountUser } from "./account";
 import { RankLine, RankRecapView, RankDemo, rankDemoRequested } from "./rank";
@@ -662,21 +663,23 @@ export function Game({
       {status !== "live" ? <p className="banner">Reconnecting…</p> : null}
       {error ? <p className="banner error">{error}</p> : null}
       {view.ended ? (
-        <section className="ended-screen" data-screen="player-left">
-          <div className="hand-summary-scroll">
-            <p className="result-kicker">Game ended - {view.ended.name} left</p>
-            <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded} data-format={view.settings.seriesLength === 1 ? "single" : "series"}>
-              {view.settings.seriesLength === 1 ? "Single game" : `Series · Games ${gameTallyText(view.players.map((player) => player.gamesWon))} · first to ${view.winsNeeded}`}
-            </p>
-            <ScoreList view={view} />
-            {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
+        <MatchCardFrame screen="player-left" className="ended-frame">
+          <div className="ended-screen">
+            <div className="hand-summary-scroll">
+              <p className="result-kicker">Game ended - {view.ended.name} left</p>
+              <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded} data-format={view.settings.seriesLength === 1 ? "single" : "series"}>
+                {view.settings.seriesLength === 1 ? "Single game" : `Series · Games ${gameTallyText(view.players.map((player) => player.gamesWon))} · first to ${view.winsNeeded}`}
+              </p>
+              <ScoreList view={view} />
+              {view.recap ? <RankRecapView recap={view.recap} names={playerNames(view)} faces={playerFaces(view)} /> : null}
+            </div>
+            <div className="match-over-actions">
+              <button type="button" className="primary" data-action="leave-match" onClick={onLeaveMatch}>
+                Leave Match
+              </button>
+            </div>
           </div>
-          <div className="match-over-actions">
-            <button type="button" className="primary" data-action="leave-match" onClick={onLeaveMatch}>
-              Leave Match
-            </button>
-          </div>
-        </section>
+        </MatchCardFrame>
       ) : null}
       {win.sheet && view.lastHand && !view.ended && !feelPlay ? (
         <HandSummary
@@ -1435,8 +1438,12 @@ function HandSummary({
   const last = view.lastPlay;
   const wentOut = hand.reason === "domino";
   const lastFace = last ? faceOf(last.tileId) : null;
+  const screen = seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand";
+  const matchOver = !view.betweenHands && (view.phase === "over" || view.status === "complete");
   return (
-    <section className="hand-summary" data-screen={seriesOver ? "series" : gameOver ? "game" : hand.reason === "locked" && hand.winnerIds.length > 1 ? "tied-lock" : "hand"}>
+    <MatchCardFrame screen={screen}>
+      <div className="hand-summary-sheet" data-match-card="true">
+      <div className="hand-summary-scroll">
       <p className="result-kicker">{view.settings.seriesLength === 1 && (seriesOver || gameOver) ? "Single game" : seriesOver ? "Series over" : gameOver ? "Game over" : "Hand over"}</p>
       <p className="series-tally" data-games-tally={gameTallyText(view.players.map((player) => player.gamesWon))} data-series-target={view.winsNeeded} data-format={view.settings.seriesLength === 1 ? "single" : "series"}>
         {view.settings.seriesLength === 1 ? "Single game" : `Series · Games ${gameTallyText(view.players.map((player) => player.gamesWon))} · first to ${view.winsNeeded}`}
@@ -1495,35 +1502,33 @@ function HandSummary({
           ))}
       </div>
       {gameOver && view.recap ? <RankRecapView recap={view.recap} names={names} faces={playerFaces(view)} /> : null}
-      {view.betweenHands ? (
-        <div className="match-over-actions">
+      </div>
+      <div className="match-over-actions">
+        {view.betweenHands ? (
           <button type="button" className="primary" data-action="continue" onClick={onContinue}>
             Continue{seconds !== null ? ` · ${seconds}` : ""}
           </button>
-        </div>
-      ) : view.phase === "over" || view.status === "complete" ? (
-        <div className="match-over-actions">
-          {view.canRematch ? (
-            <button
-              type="button"
-              className="primary"
-              data-action="rematch"
-              onClick={() => {
-                pulse("rematch");
-                onRematch();
-              }}
-            >
-              Play again
-            </button>
-          ) : view.status === "complete" ? (
-            <p className="hint">Play again is ready when the host starts it and everyone is still here.</p>
-          ) : null}
-          <button type="button" className="secondary" data-action="leave-match" onClick={onLeaveMatch}>
-            Leave Match
+        ) : matchOver && view.canRematch ? (
+          <button
+            type="button"
+            className="primary"
+            data-action="rematch"
+            onClick={() => {
+              pulse("rematch");
+              onRematch();
+            }}
+          >
+            Play again
           </button>
-        </div>
-      ) : null}
-    </section>
+        ) : matchOver && view.status === "complete" ? (
+          <p className="hint">Play again is ready when the host starts it and everyone is still here.</p>
+        ) : null}
+        <button type="button" className="secondary" data-action="leave-match" onClick={onLeaveMatch}>
+          Leave Match
+        </button>
+      </div>
+      </div>
+    </MatchCardFrame>
   );
 }
 

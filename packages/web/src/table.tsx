@@ -392,13 +392,9 @@ export function Table({
     }
     const measure = () => {
       const felt = viewport.getBoundingClientRect();
-      const sheet = document.querySelector(".hand-summary");
+      const sheet = document.querySelector(".hand-summary-sheet");
       let sheetTop: number | null = null;
-      if (sheet) {
-        const cap = window.innerHeight * 0.54;
-        const naturalMax = Math.min(cap, sheet.scrollHeight);
-        sheetTop = window.innerHeight - naturalMax;
-      }
+      if (sheet) sheetTop = sheet.getBoundingClientRect().top;
       const last = lastTileId && layout ? layout.tiles.find((tile) => tile.tileId === lastTileId) : undefined;
       const local = last ? place(last, frame) : null;
       const placement = handOverPlacement({
@@ -416,7 +412,7 @@ export function Table({
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(viewport);
-    const sheet = document.querySelector(".hand-summary");
+      const sheet = document.querySelector(".hand-summary-sheet");
     if (sheet) observer.observe(sheet);
     return () => {
       observer.disconnect();
