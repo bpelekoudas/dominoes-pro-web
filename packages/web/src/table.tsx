@@ -282,10 +282,11 @@ export function Table({
       const handLimits = limitHold.current.limits;
       // Full size until a tile would cross the felt edge, or the thin
       // side-hand strip where that strip is past the frame.
+      // Center the tiles the fit measured. Folding the end caps into that
+      // box slides the tiles out of the frame and onto the copper line.
       const frameShift = boardShift(solved.edge);
-      const fitted = [...solved.layout.tiles, ...solved.layout.ends];
       const zoom = solved.scale;
-      const centered = chainViewShift(fitted, zoom);
+      const centered = chainViewShift(solved.layout.tiles, zoom);
       const nextShift = {
         x: centered.x + frameShift.x + solved.nudge.x,
         y: centered.y + frameShift.y + solved.nudge.y,
