@@ -288,7 +288,7 @@ export function Table({
       const frameShift = boardShift(solved.edge);
       const zoom = Math.min(
         solved.scale,
-        fitFrameScale({ tiles: drawn, felt, screenWidth, frame: frameEdge, previous }),
+        fitFrameScale({ tiles: drawn, felt, screenWidth, frame: solved.edge, previous }),
       );
       const centered = chainViewShift(drawn, zoom);
       const nextShift = {

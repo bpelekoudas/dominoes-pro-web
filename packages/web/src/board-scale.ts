@@ -544,12 +544,34 @@ export function designObstacles(
   return out;
 }
 
+/** Air between a chain tile and a face-down side stack, and the felt edge itself. */
+export const STACK_AIR = 8;
+
 /**
- * The picture after one play has settled. Opponent badges sit off the felt,
- * so they are not an edge. Face-down hands are a thin strip on the felt
- * edge: where that strip is past the frame, the arm stops there. The fit
- * is still that edge, not a smaller copy of the whole table.
+ * How far the face-down stacks reach in from the felt. A stack on the left
+ * reserves the left, plus air, so an arm turns before it instead of sliding
+ * underneath. With no stacks the air is still the minimum inset.
  */
+export function stackInsets(felt: FeltSize, stacks: readonly ScreenBox[], air = STACK_AIR): AxisInsets {
+  const insets: AxisInsets = { left: air, top: air, right: air, bottom: air };
+  for (const box of stacks) {
+    if (box.right - box.left < 2 || box.bottom - box.top < 2) continue;
+    if (box.right <= 0 || box.left >= felt.w || box.bottom <= 0 || box.top >= felt.h) continue;
+    const midX = (Math.max(box.left, 0) + Math.min(box.right, felt.w)) / 2;
+    const midY = (Math.max(box.top, 0) + Math.min(box.bottom, felt.h)) / 2;
+    const fromLeft = midX;
+    const fromRight = felt.w - midX;
+    const fromTop = midY;
+    const fromBottom = felt.h - midY;
+    const nearest = Math.min(fromLeft, fromRight, fromTop, fromBottom);
+    if (nearest === fromLeft) insets.left = Math.max(insets.left, box.right + air);
+    else if (nearest === fromRight) insets.right = Math.max(insets.right, felt.w - box.left + air);
+    else if (nearest === fromTop) insets.top = Math.max(insets.top, box.bottom + air);
+    else insets.bottom = Math.max(insets.bottom, felt.h - box.top + air);
+  }
+  return insets;
+}
+
 export function settledHandCamera(input: {
   board: BoardState;
   felt: FeltSize;
@@ -567,16 +589,23 @@ export function settledHandCamera(input: {
   nudge: { x: number; y: number };
   edge: AxisInsets;
 } {
-  // Side hands are painted on the frame line. The fit stays the felt frame,
-  // the same edge ea81cc4 uses, so a hand does not shrink the whole table.
-  const edge = input.frame;
+  // The copper line, or 8px when it is cropped off, and the side stacks.
+  // An arm turns at whichever line is further in, then the picture zooms
+  // only if that fold still crosses it.
+  const stacks = stackInsets(input.felt, input.keepOuts ?? []);
+  const edge = {
+    left: Math.max(input.frame.left, stacks.left),
+    right: Math.max(input.frame.right, stacks.right),
+    top: Math.max(input.frame.top, stacks.top),
+    bottom: Math.max(input.frame.bottom, stacks.bottom),
+  };
   const solved = feltScale({
     board: input.board,
     felt: input.felt,
     screenWidth: input.screenWidth,
     previous: input.previous,
     newHand: input.previous == null,
-    frame: input.frame,
+    frame: edge,
   });
   let limits = input.heldLimits ?? solved.limits;
   const grew = input.heldLimits != null && (solved.limits.width > input.heldLimits.width + 4 || solved.limits.height > input.heldLimits.height + 4);

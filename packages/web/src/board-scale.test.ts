@@ -27,6 +27,8 @@ import {
   frameInsets,
   keepOutInsets,
   mergeInsets,
+  STACK_AIR,
+  stackInsets,
   settledHandCamera,
   nextFeltSize,
   safeRoom,
@@ -1695,6 +1697,101 @@ describe("charcoal frame", () => {
     expect(nextFeltSize(locked, hand, 412, 628, table)).toEqual({ w: 412, h: 628, resized: true });
   });
 
+  it("keeps a long chain off the felt edge and the side stacks at 360 and on the Fold inner", () => {
+    const scenes = [
+      { name: "360", w: 360, h: 431 },
+      { name: "inner", w: 751, h: 496 },
+    ];
+    for (const scene of scenes) {
+      const felt = { w: scene.w, h: scene.h };
+      const frame = frameInsets(null, felt);
+      const stacks = [
+        { left: 0, top: 60, right: 16, bottom: felt.h - 30 },
+        { left: felt.w - 16, top: 60, right: felt.w, bottom: felt.h - 30 },
+        { left: felt.w / 2 - 40, top: 0, right: felt.w / 2 + 40, bottom: 20 },
+      ];
+      const bytes = Buffer.alloc(32);
+      bytes.writeUInt32BE(scene.name === "360" ? 1 : 6, 0);
+      const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+      let match = beginHand(
+        createMatch(players, { playerCount: 4, boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+        shuffleWithSeed(bytes),
+      );
+      let previous: number | null = null;
+      let held: { width: number; height: number } | null = null;
+      let cam = settledHandCamera({
+        board: match.hand!.board,
+        felt,
+        screenWidth: felt.w,
+        frame,
+        keepOuts: stacks,
+        previous,
+        heldLimits: held,
+      });
+      for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+        const playerId = currentPlayerId(match);
+        if (!playerId) break;
+        const intents = legalIntents(match, playerId);
+        const intent = intents.find((item) => item.type === "play") ?? intents[0];
+        if (!intent) break;
+        const result = applyIntent(match, playerId, intent);
+        expect(result.ok).toBe(true);
+        if (!result.ok) break;
+        match = result.match;
+        if (intent.type !== "play" || !match.hand) continue;
+        cam = settledHandCamera({
+          board: match.hand.board,
+          felt,
+          screenWidth: felt.w,
+          frame,
+          keepOuts: stacks,
+          previous,
+          heldLimits: held,
+        });
+        held = cam.limits;
+        previous = cam.scale;
+      }
+      const scale = cam.scale;
+      const boxes = cam.layout.tiles;
+      const shift = {
+        x: chainViewShift(boxes, scale).x + boardShift(cam.edge).x,
+        y: chainViewShift(boxes, scale).y + boardShift(cam.edge).y,
+      };
+      const edge = cam.edge;
+      expect(boxes.length, scene.name).toBeGreaterThan(12);
+      const rects = boxes.map((tile) => renderedTileRect(felt, tile, scale, shift));
+      rects.forEach((rect, index) => {
+        const label = `${scene.name} ${"tileId" in boxes[index]! && boxes[index] && "tileId" in boxes[index] ? (boxes[index] as { tileId?: string }).tileId : index}`;
+        expect(rect.left, label).toBeGreaterThanOrEqual(8 - 0.6);
+        expect(rect.top, label).toBeGreaterThanOrEqual(8 - 0.6);
+        expect(rect.right, label).toBeLessThanOrEqual(felt.w - 8 + 0.6);
+        expect(rect.bottom, label).toBeLessThanOrEqual(felt.h - 8 + 0.6);
+        expect(rect.left, label).toBeGreaterThanOrEqual(edge.left - 0.6);
+        expect(rect.right, label).toBeLessThanOrEqual(felt.w - edge.right + 0.6);
+        for (const stack of stacks) {
+          const beside = rect.top < stack.bottom && rect.bottom > stack.top && rect.left < stack.right && rect.right > stack.left;
+          expect(beside, label).toBe(false);
+          const gap = rect.right <= stack.left
+            ? stack.left - rect.right
+            : rect.left >= stack.right
+              ? rect.left - stack.right
+              : rect.bottom <= stack.top
+                ? stack.top - rect.bottom
+                : rect.top >= stack.bottom
+                  ? rect.top - stack.bottom
+                  : -1;
+          if (gap >= 0 && gap < 40) expect(gap, label).toBeGreaterThanOrEqual(STACK_AIR - 0.6);
+        }
+      });
+      expect(layoutOverlaps(cam.layout), scene.name).toBe(false);
+      for (let i = 0; i < rects.length; i += 1) {
+        for (let j = i + 1; j < rects.length; j += 1) {
+          expect(rectsMeet(rects[i]!, rects[j]!), `${scene.name} ${boxes[i]!.tileId} overlaps ${boxes[j]!.tileId}`).toBe(false);
+        }
+      }
+    }
+  });
+
   it("keeps eight pixels of air when the copper is cropped off a wide felt", () => {
     const frame = frameInsets("TBL-013", { w: 751, h: 540 });
     expect(frame.top).toBeGreaterThanOrEqual(8);
@@ -1990,7 +2087,14 @@ describe("token slot clearance", () => {
       const nowPlay = firstZoom(seed, felt, screenWidth, frame, open, hands);
       rows.push({ seed, edge: edgePlay, now: nowPlay, delta: nowPlay - edgePlay });
     }
-    expect(rows.every((row) => row.delta === 0)).toBe(true);
+    // A stack that sits on the frame line pulls the fit in by the 8px air.
+    // Badges are not in this list. The chain still has to clear the stacks.
+    for (const row of rows) {
+      expect(row.now, `seed ${row.seed}`).toBeLessThanOrEqual(row.edge);
+    }
+    const edge = stackInsets(felt, hands);
+    expect(edge.left).toBeGreaterThanOrEqual(hands[0]!.right + STACK_AIR);
+    expect(Math.max(frame.left, edge.left)).toBeGreaterThanOrEqual(hands[0]!.right + STACK_AIR);
   });
 
   it("a tile on the frame line does not sit under a side hand", () => {

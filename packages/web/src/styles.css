@@ -369,10 +369,11 @@ input {
   top: auto;
   right: auto;
   width: max-content;
-  max-width: 52px;
+  max-width: none;
   margin: 0;
   padding: 2px 3px 3px;
   border-radius: 12px;
+  overflow: visible;
 }
 .stack-tap {
   flex-direction: column;
@@ -380,10 +381,12 @@ input {
   gap: 1px;
   width: auto;
 }
-.stack-meta { align-items: center; gap: 0; }
+.stack-meta { align-items: center; gap: 0; min-width: max-content; }
 .stack-badge .avatar { width: 26px; height: 26px; }
 .stack-badge .game-pips { height: 12px; padding: 0 3px; font-size: 0.62rem; }
-.stack-badge strong { font-size: 0.72rem; }
+.stack-badge strong { font-size: 0.72rem; white-space: nowrap; }
+.opponent-chip[data-edge="top"] .stack-meta,
+.opponent-chip[data-edge="right"] .stack-meta { align-items: flex-end; }
 .stack-badge .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; margin-top: 1px; }
 .stack-badge .cpu-tag { display: none; }
 .stack-badge .talk-line {
