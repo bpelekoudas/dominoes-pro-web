@@ -2,7 +2,7 @@ import { CANONICAL_ORIGIN } from "./public-url.js";
 import { PUBLIC_NAME, SUPPORT_EMAIL } from "./coins.js";
 
 /** Printed in full once. Later sentences use the company name alone. */
-const ENTITY = "Ironwood Hills, LLC dba Uh-Oh Dominoes";
+const ENTITY = "Ironwood Hills, LLC (a Nevada limited liability company) dba Uh-Oh Dominoes";
 const ENTITY_SHORT = "Ironwood Hills, LLC";
 /**
  * The pages are static HTML, so they cannot learn the merge date on their own.
@@ -71,7 +71,7 @@ function termsBody(): string {
     <p>Settings can delete the account. That removes the nickname, the email, and the sign-in. Wins and rating stay, under the name Deleted. To ask about your data, email ${mailLink()}.</p>
     <h2>The service</h2>
     <p>The game is provided as it is. It can stop, change, or lose a hand when a phone drops. ${escapeHtml(ENTITY_SHORT)} is not liable for that beyond what the law already requires.</p>
-    <p>These terms follow the laws of Utah, without regard to conflict-of-law rules.</p>
+    <p>These terms follow the laws of Nevada, without regard to conflict-of-law rules.</p>
     <p>Questions: ${mailLink()}</p>
   `;
 }

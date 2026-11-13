@@ -484,7 +484,8 @@ describe("legal pages", () => {
       expect(terms.statusCode).toBe(200);
       expect(privacy.statusCode).toBe(200);
       for (const body of [terms.body, privacy.body]) {
-        expect(body).toContain("Ironwood Hills, LLC dba Uh-Oh Dominoes");
+        expect(body).toContain("Ironwood Hills, LLC (a Nevada limited liability company) dba Uh-Oh Dominoes");
+        expect(body).not.toContain("Utah");
         expect(body).toContain("mailto:uhohdominoes@gmail.com");
         expect(body).toContain("November 2026");
         expect(body).not.toMatch(/\[[A-Z][A-Z ]+\]/);
@@ -495,7 +496,7 @@ describe("legal pages", () => {
         expect(body.toLowerCase()).not.toContain("paypal");
         expect(body.toLowerCase()).not.toContain("venmo");
       }
-      expect(terms.body).toContain("Utah");
+      expect(terms.body).toContain("laws of Nevada");
       expect(terms.body).toContain("14 days");
       expect(terms.body).toContain("no cash value");
       expect(terms.body).toContain("not redeemable for money");
