@@ -15,6 +15,7 @@ import {
   CAMERA_EASE_MS,
   cameraEase,
   chainViewShift,
+  clampGhostToFelt,
   containScale,
   fitFrameScale,
   glidePoses,
@@ -1939,6 +1940,19 @@ describe("visible felt clearance", () => {
     expect(hands).toBe(scenes.length * seeds);
     expect(plays).toBeGreaterThan(hands * 8);
   }, 60_000);
+});
+
+describe("play target ghost", () => {
+  it("keeps the ghost 8px inside the bottom edge on a Fold cover felt", () => {
+    const felt = { left: 0, top: 120, right: 344, bottom: 734 };
+    const edge = { left: 20, top: 22, right: 20, bottom: 24 };
+    const ghost = { left: 150, top: 680, width: 36, height: 72 };
+    expect(ghost.top + ghost.height).toBeGreaterThan(felt.bottom - edge.bottom);
+    const clamped = clampGhostToFelt(ghost, felt, edge);
+    expect(clamped.top + clamped.height).toBeLessThanOrEqual(felt.bottom - edge.bottom + 0.01);
+    expect(clamped.left).toBeGreaterThanOrEqual(felt.left + edge.left - 0.01);
+    expect(clamped.left + clamped.width).toBeLessThanOrEqual(felt.right - edge.right + 0.01);
+  });
 });
 
 describe("layout guarantee", () => {

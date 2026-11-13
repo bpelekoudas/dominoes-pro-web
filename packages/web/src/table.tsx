@@ -12,7 +12,9 @@ import {
   cameraHoldStale,
   cameraSettlesOn,
   chainViewShift,
+  clampGhostToFelt,
   fitFrameScale,
+  STACK_AIR,
   frameInsets,
   settledHandCamera,
   nextFeltSize,
@@ -887,16 +889,26 @@ function useScreenBoxes(
       return;
     }
     const origin = stage.getBoundingClientRect();
+    const feltEl = stage.closest(".table-scroll");
+    const felt = feltEl?.getBoundingClientRect();
+    const read = (name: string) => {
+      const value = feltEl instanceof HTMLElement ? Number(feltEl.dataset[name]) : NaN;
+      return Number.isFinite(value) ? value : STACK_AIR;
+    };
+    const edge = { left: read("playLeft"), top: read("playTop"), right: read("playRight"), bottom: read("playBottom") };
     setPlaced(
       boxes.map((box) => {
         const local = place(box, fit);
-        return {
+        const screen = {
           id: box.id,
           left: origin.left + local.left * scale,
           top: origin.top + local.top * scale,
           width: local.width * scale,
           height: local.height * scale,
         };
+        if (!felt) return screen;
+        const clamped = clampGhostToFelt(screen, felt, edge);
+        return { ...screen, left: clamped.left, top: clamped.top };
       }),
     );
   }, [stageRef, fit, scale, key, boxes]);

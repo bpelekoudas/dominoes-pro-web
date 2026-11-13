@@ -413,6 +413,29 @@ export function clearanceInsets(reserve: AxisInsets, floor = CAMERA_EDGE): AxisI
 export const READABLE_PHONE_PX = 34;
 export const READABLE_WIDE_PX = 44;
 
+/**
+ * Pull a play-target ghost back inside the felt edge. The next tile is drawn
+ * past the chain, so a south end near the copper would hang off the bottom.
+ * `edge` is the same inset the camera uses, already including the 8px air.
+ */
+export function clampGhostToFelt(
+  box: { left: number; top: number; width: number; height: number },
+  felt: { left: number; top: number; right: number; bottom: number },
+  edge: AxisInsets,
+): { left: number; top: number; width: number; height: number } {
+  const minLeft = felt.left + edge.left;
+  const minTop = felt.top + edge.top;
+  const maxRight = felt.right - edge.right;
+  const maxBottom = felt.bottom - edge.bottom;
+  let left = box.left;
+  let top = box.top;
+  if (left < minLeft) left = minLeft;
+  if (top < minTop) top = minTop;
+  if (left + box.width > maxRight) left = Math.max(minLeft, maxRight - box.width);
+  if (top + box.height > maxBottom) top = Math.max(minTop, maxBottom - box.height);
+  return { left, top, width: box.width, height: box.height };
+}
+
 /** Move a felt-centered chain into an asymmetric safe rect. */
 export function boardShift(insets: AxisInsets): { x: number; y: number } {
   return { x: (insets.left - insets.right) / 2, y: (insets.top - insets.bottom) / 2 };
