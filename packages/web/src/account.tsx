@@ -464,13 +464,14 @@ export function AccountLayer({ account }: { account: AccountController }) {
           },
           ...(redirect ? { ux_mode: "redirect" as const, login_uri: `${location.origin}/api/auth/google/redirect` } : {}),
         });
+        const row = parent.parentElement?.getBoundingClientRect().width || parent.getBoundingClientRect().width;
         window.google.accounts.id.renderButton(parent, {
           type: "standard",
           theme: "filled_black",
           size: "large",
           text: "signin_with",
           shape: "pill",
-          width: Math.min(parent.clientWidth || 320, 360),
+          width: Math.min(Math.round(row) || 320, 400),
         });
         watch = window.setInterval(() => {
           if (cancel || !painted()) return;
