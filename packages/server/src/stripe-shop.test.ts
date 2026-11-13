@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { describe, expect, it } from "vitest";
 import { TEST_GOLD } from "@uhoh/rules";
-import { COIN_PACKS, SUPPORT_EMAIL, packByLookup } from "./coins.js";
+import { COIN_PACKS, packByLookup } from "./coins.js";
 import { createApp } from "./app.js";
 import { Store } from "./db.js";
 import { CoinShop, checkoutSessionParams, shopFromEnv, type CheckoutInput, type ShopStripe } from "./stripe-shop.js";
@@ -475,7 +475,7 @@ describe("checkout", () => {
 });
 
 describe("legal pages", () => {
-  it("names the company, the refund window, and the support email", async () => {
+  it("leaves the legal names blank and states the coin rules", async () => {
     const store = new Store(":memory:");
     const { app } = await createApp({ store, serveWeb: false });
     try {
@@ -484,10 +484,10 @@ describe("legal pages", () => {
       expect(terms.statusCode).toBe(200);
       expect(privacy.statusCode).toBe(200);
       for (const body of [terms.body, privacy.body]) {
-        expect(body).toContain("Ironwood Hills, LLC");
-        expect(body).toContain("Nevada");
+        expect(body).toContain("[LEGAL ENTITY NAME]");
+        expect(body).toContain("[CONTACT EMAIL]");
+        expect(body).toContain("[EFFECTIVE DATE]");
         expect(body).toContain("UhOh Dominoes");
-        expect(body).toContain(SUPPORT_EMAIL);
         expect(body).toContain("13");
         expect(body.toLowerCase()).not.toContain("gambl");
         expect(body.toLowerCase()).not.toContain("prize");

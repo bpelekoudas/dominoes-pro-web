@@ -2696,12 +2696,18 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
   gap: 18px;
   flex: none;
 }
-.store-legal a, .arcade-legal a {
+.store-legal a, .arcade-legal a, .account-legal a {
   color: inherit;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
   font-size: 0.92rem;
+}
+.account-legal {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 8px;
 }
 .arcade-legal { justify-content: center; }
 .checkout-note {

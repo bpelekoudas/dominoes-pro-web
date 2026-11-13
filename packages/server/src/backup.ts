@@ -31,6 +31,14 @@ export async function writeBackup(db: DatabaseSync, dataDir: string, now = new D
   return dest;
 }
 
+/** Copy one snapshot somewhere else. Same-disk backups do not survive a deleted disk. */
+export function mirrorBackup(sourceFile: string, mirrorDir: string): string {
+  mkdirSync(mirrorDir, { recursive: true });
+  const dest = path.join(mirrorDir, path.basename(sourceFile));
+  copyFileSync(sourceFile, dest);
+  return dest;
+}
+
 export function pruneBackups(dataDir: string, keep = BACKUP_KEEP, budget = BACKUP_BUDGET_BYTES): string[] {
   const files = listBackups(dataDir);
   const removed: string[] = [];
