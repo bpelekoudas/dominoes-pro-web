@@ -158,6 +158,29 @@ The public rating board and the season board show people. Computer accounts stay
 
 `https://uhohdominoes.com/admin` is a private read-only page. It opens for a signed-in account whose email is on the allowlist. The list in the code is enough. Set `ADMIN_EMAILS` on Render only when that list should change, and set the full comma-separated list. A value there replaces the emails in the code. It does not add to them.
 
+The same page lists bug reports and a daily error summary. Open a report to read the description, the room, the build, and the screenshot. Other players never see a report.
+
+To read them from the Render shell without signing in, set `OPS_SECRET` on the service to a long random string, then:
+
+```bash
+curl -sS -H "x-ops-secret: $OPS_SECRET" https://uhohdominoes.com/api/admin/ops
+curl -sS -H "x-ops-secret: $OPS_SECRET" https://uhohdominoes.com/api/admin/ops/bugs/REPORT_ID
+```
+
+Leave `OPS_SECRET` unset and the shell route stays closed. The signed-in admin page still works. Do not put the secret in the app or in git.
+
+`/health` is the Render check. It stays `{ "ok": true }` while the process is taking games, and `503` while a deploy is draining. It does not list errors.
+
+A daily count of stored errors, on the Render shell:
+
+```bash
+node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/var/data/uhoh.sqlite',{readOnly:true}); console.log(db.prepare(\"SELECT day, kind, SUM(n) AS n FROM error_events GROUP BY day, kind ORDER BY day DESC, n DESC LIMIT 40\").all()); console.log(db.prepare(\"SELECT substr(created_at,1,10) AS day, COUNT(*) AS n FROM bug_reports GROUP BY day ORDER BY day DESC LIMIT 14\").all());"
+```
+
+Reports keep the newest 80, and pictures on the newest 20, so the 1 GB disk still has room. A seat can send 8 reports an hour, one address 12, and the server 120. Client errors from one address stop after 30 a minute. The same error on the same day and build counts once and the number goes up. Emails in the text are stored as `[email]`.
+
+No Sentry account is required. Errors stay in this database. If you later want email alerts, Sentry's free Developer plan is a separate signup at [sentry.io](https://sentry.io): create a project and copy the DSN. This build does not send anything there.
+
 ## Counts
 
 Visits, texted invites, play-again taps, and short crash notes are stored in the same game file. A count is a day, a name, and a number. A crash note is one line, with any email removed. No nickname is stored with them. There is no third-party tracker.
@@ -165,7 +188,7 @@ Visits, texted invites, play-again taps, and short crash notes are stored in the
 On the Render shell:
 
 ```bash
-node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/var/data/uhoh.sqlite',{readOnly:true}); console.log(db.prepare('SELECT day,name,n FROM pulses ORDER BY day,name').all()); console.log(db.prepare('SELECT created_at,message FROM client_errors ORDER BY created_at DESC LIMIT 20').all());"
+node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/var/data/uhoh.sqlite',{readOnly:true}); console.log(db.prepare('SELECT day,name,n FROM pulses ORDER BY day,name').all()); console.log(db.prepare('SELECT created_at,message FROM client_errors ORDER BY created_at DESC LIMIT 20').all()); console.log(db.prepare('SELECT day, kind, SUM(n) AS n FROM error_events GROUP BY day, kind ORDER BY day DESC').all());"
 ```
 
 ## What is deliberately not here yet

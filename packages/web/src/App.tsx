@@ -33,6 +33,8 @@ import { WinnerPopLayer } from "./winner-pop-layer";
 import { GamePips } from "./game-pips";
 import { gameTallyText } from "./game-tally.js";
 import { BUILD_SHA } from "./build-sha";
+import { BugReport } from "./bug-report";
+import { clientLog, reportClientFault } from "./client-log";
 
 interface ChatLine {
   id: number;
@@ -113,13 +115,19 @@ export function App() {
       const next = new WebSocket(socketUrl());
       socket = next;
       socketRef.current = next;
+      let opened = false;
       next.onopen = () => {
         if (mine !== attempt) return;
+        opened = true;
         retryMs = 400;
         setStatus("live");
         const currentToken = localStorage.getItem(TOKEN_KEY);
         if (pending) next.send(JSON.stringify(pending));
         else if (currentToken) next.send(JSON.stringify({ type: "reconnect", token: currentToken }));
+      };
+      next.onerror = () => {
+        if (mine !== attempt) return;
+        clientLog("websocket error");
       };
       next.onmessage = (event) => {
         if (mine !== attempt || leaveRef.current) return;
@@ -132,12 +140,16 @@ export function App() {
           if (location.pathname !== url) history.replaceState(null, "", url);
         }
       };
-      next.onclose = () => {
+      next.onclose = (event) => {
         if (mine !== attempt || stopped || leaveRef.current) return;
-        if (!pending && !localStorage.getItem(TOKEN_KEY)) {
+        const retrying = Boolean(pending || localStorage.getItem(TOKEN_KEY));
+        if (!retrying) {
           setStatus("idle");
           return;
         }
+        clientLog(`websocket closed ${event.code}`);
+        if (opened) reportClientFault("ws_disconnect", `socket closed ${event.code}`);
+        else if (attempt > 1) reportClientFault("ws_reconnect_fail", `reconnect failed ${event.code}`);
         setStatus("connecting");
         timer = window.setTimeout(connect, retryMs);
         retryMs = Math.min(retryMs * 2, 4_000);
@@ -627,6 +639,15 @@ export function Game({
             Sign in
           </button>
         )}
+        <BugReport
+          context={{
+            roomCode: view.roomCode,
+            playerId: view.yourId,
+            seat: you?.player.seat ?? null,
+            tableSize: view.settings.playerCount,
+            handNumber: view.handNumber,
+          }}
+        />
         <button
           type="button"
           className="icon-button mobile-only"

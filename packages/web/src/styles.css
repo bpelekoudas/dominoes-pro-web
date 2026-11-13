@@ -4096,3 +4096,87 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
   font-size: 1.05rem;
   line-height: 1.35;
 }
+
+/* Report a bug sits in the header row, beside Talk, so it does not cover tiles or badges. */
+.bug-entry {
+  flex: none;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(213, 163, 54, 0.85);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.bug-entry .bug-long { display: none; }
+.bug-layer {
+  position: fixed;
+  z-index: 92;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(12px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: rgba(0, 0, 0, 0.55);
+}
+.bug-sheet {
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  background: #1c1c1c;
+  color: var(--paper);
+  border-radius: 16px;
+  border: 1px solid rgba(213, 163, 54, 0.45);
+  padding: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.bug-sheet header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bug-sheet h2 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 1.4rem;
+}
+.bug-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+.bug-sheet textarea,
+.bug-sheet input[type="file"] {
+  width: 100%;
+  color: var(--paper);
+  background: #111;
+  border: 1px solid rgba(213, 163, 54, 0.35);
+  border-radius: 12px;
+  padding: 10px;
+  font: inherit;
+}
+.bug-sheet textarea { min-height: 96px; resize: vertical; }
+.bug-note, .bug-status { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.bug-status { color: var(--paper); }
+@media (max-width: 699px) {
+  .playbar > .build-sha { display: none; }
+}
+@media (min-width: 700px) {
+  .bug-entry .bug-short { display: none; }
+  .bug-entry .bug-long { display: inline; }
+}
+@media (max-width: 400px) {
+  .playbar .profile-chip.compact { max-width: 72px; padding-right: 4px; }
+  .bug-entry { padding: 0 6px; }
+}

@@ -16,7 +16,8 @@
     "test:legacy": "node test_logic.js && node test_ai.js",
     "typecheck": "tsc -p packages/rules --noEmit && tsc -p packages/server --noEmit && tsc -p packages/web --noEmit",
     "soak": "node scripts/soak.mjs",
-    "stress": "node scripts/stress.mjs"
+    "stress": "node scripts/stress.mjs",
+    "load-check": "node scripts/load-check.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.18.6",

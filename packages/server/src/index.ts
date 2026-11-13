@@ -1,5 +1,6 @@
 import { writeBackup } from "./backup.js";
 import { createApp, drainServer } from "./app.js";
+import { recordServerFault } from "./ops.js";
 
 const port = Number(process.env.PORT ?? 8787);
 const { app, bots, hub, lifecycle, store, dataDir } = await createApp();
@@ -60,4 +61,24 @@ process.on("SIGTERM", () => {
 });
 process.on("SIGINT", () => {
   void shutdown("SIGINT");
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[server] uncaught", error);
+  recordServerFault(store, {
+    kind: "uncaught_exception",
+    message: error instanceof Error ? error.message : "uncaught",
+    stack: error instanceof Error ? error.stack : undefined,
+  });
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const error = reason instanceof Error ? reason : new Error(typeof reason === "string" ? reason : "unhandled rejection");
+  console.error("[server] unhandledRejection", error);
+  recordServerFault(store, {
+    kind: "unhandled_rejection",
+    message: error.message,
+    stack: error.stack,
+  });
 });

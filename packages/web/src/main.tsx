@@ -7,7 +7,7 @@ import { MOTION } from "../../rules/src/motion.js";
 import { applyA11y } from "./a11y";
 import { App } from "./App";
 import { PortraitOverlay } from "./portrait";
-import { pulse } from "./pulse";
+import { reportClientFault } from "./client-log";
 import "./styles.css";
 
 applyA11y();
@@ -47,11 +47,13 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 }
 
 window.addEventListener("error", (event) => {
-  pulse("error", event.message);
+  const error = event.error;
+  reportClientFault("window.onerror", event.message || "error", error instanceof Error ? error.stack : undefined);
 });
 window.addEventListener("unhandledrejection", (event) => {
   const reason = event.reason;
-  pulse("error", reason instanceof Error ? reason.message : "unhandled");
+  const message = reason instanceof Error ? reason.message : "unhandled";
+  reportClientFault("unhandledrejection", message, reason instanceof Error ? reason.stack : undefined);
 });
 
 const root = document.getElementById("root");

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,22 @@ import {
 import { adminDashboardHtml, adminSignInHtml } from "./admin-page.js";
 import { claimLogin, dailyStatus, previewDaily } from "./daily.js";
 import { attachSocketHeartbeat } from "./socket-life.js";
+import {
+  acceptBugReport,
+  acceptClientError,
+  BUG_BODY_LIMIT,
+  bytesToDataUrl,
+  daysAgo,
+  ensureLoopMonitor,
+  loopSnapshot,
+  markOpsFault,
+  opsAdminAllowed,
+  opsFaultMarked,
+  recordServerFault,
+  resetLoopMonitor,
+  roomFromRequest,
+  serverBuildSha,
+} from "./ops.js";
 
 export interface AppOptions {
   store?: Store;
@@ -43,6 +59,8 @@ export interface AppOptions {
   serveWeb?: boolean;
   /** Tests pass a shop. Production builds one from the environment. */
   shop?: CoinShop;
+  /** Tests only. Registers a route that throws, so the error log can be checked. */
+  faultProbe?: boolean;
 }
 
 /** Shared with the process signal handler. Health fails while this is draining. */
@@ -84,9 +102,11 @@ export async function createApp(options: AppOptions = {}) {
   );
   const bots = new BotLeague(store, hub, cosmetics);
   const lifecycle: ServerLifecycle = { draining: false };
+  ensureLoopMonitor();
   const app = Fastify({
     logger: true,
     trustProxy: true,
+    bodyLimit: 1_048_576,
   });
   await app.register(websocket);
   app.removeContentTypeParser("application/json");
@@ -216,9 +236,36 @@ export async function createApp(options: AppOptions = {}) {
     return { tables: hub.openTables(user?.id ?? null) };
   });
 
-  app.addHook("onResponse", async (_request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
+    const rawStatus = (error as { statusCode?: number }).statusCode;
+    const status = typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600 ? rawStatus : 500;
+    if (status >= 500 && requestPath(request.url) !== "/health") {
+      markOpsFault(request);
+      recordServerFault(store, {
+        kind: "server_exception",
+        message: error instanceof Error ? error.message : "server error",
+        stack: error instanceof Error ? error.stack : undefined,
+        buildSha: serverBuildSha(),
+        roomCode: roomFromRequest(request),
+        path: requestPath(request.url),
+      });
+    }
+    const message =
+      status >= 500 ? "Something went wrong." : error instanceof Error && error.message ? error.message : "That request failed.";
+    return reply.code(status).send({ error: message });
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
     if (reply.statusCode < 500) return;
     noteServerError(store);
+    if (requestPath(request.url) === "/health" || opsFaultMarked(request)) return;
+    recordServerFault(store, {
+      kind: "http_5xx",
+      message: `HTTP ${reply.statusCode}`,
+      buildSha: serverBuildSha(),
+      roomCode: roomFromRequest(request),
+      path: requestPath(request.url),
+    });
   });
 
   app.get("/api/leaderboard", async (request) => {
@@ -414,6 +461,103 @@ export async function createApp(options: AppOptions = {}) {
     return { ok: true };
   });
 
+  app.post("/api/ops/bug", { bodyLimit: BUG_BODY_LIMIT }, async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const user = accounts.userFromCookieHeader(request.headers.cookie);
+    const result = acceptBugReport(store, request.body, { ip: request.ip, userId: user?.id ?? null });
+    if (!result.ok) return reply.code(result.status).send({ error: result.error });
+    return { ok: true };
+  });
+
+  app.post("/api/ops/error", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const result = acceptClientError(store, request.body, { ip: request.ip });
+    if (!result.ok) return reply.code(result.status).send({ error: result.error });
+    return { ok: true, deduped: result.deduped };
+  });
+
+  app.get("/api/admin/ops", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const allowed = opsReader(request, store, accounts);
+    if (allowed !== "ok") {
+      return reply.code(allowed === "forbidden" ? 403 : 401).send({
+        error: allowed === "forbidden" ? "Not allowed." : "Sign in to see this.",
+      });
+    }
+    const since = daysAgo(14);
+    return {
+      generatedAt: new Date().toISOString(),
+      bugs: store.listBugReports(50).map(publicBug),
+      bugsByDay: store.bugCountsByDay(since),
+      errors: store.listErrorEvents(50).map(publicError),
+      errorsByDay: store.errorSummarySince(since),
+    };
+  });
+
+  app.get("/api/admin/ops/bugs/:id", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const allowed = opsReader(request, store, accounts);
+    if (allowed !== "ok") {
+      return reply.code(allowed === "forbidden" ? 403 : 401).send({
+        error: allowed === "forbidden" ? "Not allowed." : "Sign in to see this.",
+      });
+    }
+    const id = (request.params as { id?: string }).id ?? "";
+    const row = store.bugReport(id);
+    if (!row) return reply.code(404).send({ error: "That report was not found." });
+    let logs: string[] = [];
+    try {
+      const parsed = JSON.parse(row.logs_json || "[]") as unknown;
+      logs = Array.isArray(parsed) ? parsed.filter((line): line is string => typeof line === "string") : [];
+    } catch {
+      logs = [];
+    }
+    return {
+      ...publicBug({ ...row, has_screenshot: row.screenshot ? 1 : 0 }),
+      logs,
+      screenshot: bytesToDataUrl(row.screenshot_mime, row.screenshot),
+    };
+  });
+
+  app.get("/api/ops/metrics", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const allowed = opsReader(request, store, accounts);
+    if (allowed !== "ok") return reply.code(allowed === "forbidden" ? 403 : 401).send({ error: "Not allowed." });
+    const started = performance.now();
+    const hands = (store.db.prepare(`SELECT COUNT(*) AS n FROM hands`).get() as { n: number }).n;
+    const errors = (store.db.prepare(`SELECT COALESCE(SUM(n), 0) AS n FROM error_events`).get() as { n: number }).n;
+    const bugs = (store.db.prepare(`SELECT COUNT(*) AS n FROM bug_reports`).get() as { n: number }).n;
+    const queryMs = Math.round(performance.now() - started);
+    let dbBytes: number | null = null;
+    try {
+      dbBytes = statSync(dbFile).size;
+    } catch {
+      dbBytes = null;
+    }
+    const memory = process.memoryUsage();
+    return {
+      ok: true,
+      build: serverBuildSha(),
+      uptimeSeconds: Math.round(process.uptime()),
+      rssMb: Math.round(memory.rss / (1024 * 1024)),
+      heapMb: Math.round(memory.heapUsed / (1024 * 1024)),
+      eventLoop: loopSnapshot(),
+      dbBytes,
+      queryMs,
+      hands,
+      errors,
+      bugs,
+      sockets: hub.liveCensus().sockets,
+    };
+  });
+
+  app.post("/api/ops/metrics/reset", async (request, reply) => {
+    const allowed = opsReader(request, store, accounts);
+    if (allowed !== "ok") return reply.code(allowed === "forbidden" ? 403 : 401).send({ error: "Not allowed." });
+    resetLoopMonitor();
+    return { ok: true };
+  });
+
   app.post("/api/logout", async (request, reply) => {
     if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
     accounts.logout(request.headers.cookie);
@@ -505,6 +649,17 @@ export async function createApp(options: AppOptions = {}) {
         hub.command(session.playerId, message);
       } catch (error) {
         const detail = error instanceof Error ? error.message : "play failed";
+        const seat = store.playerById(session.playerId);
+        const room = seat ? store.room(seat.room_id) : null;
+        recordServerFault(store, {
+          kind: "server_exception",
+          message: detail,
+          stack: error instanceof Error ? error.stack : undefined,
+          buildSha: serverBuildSha(),
+          roomCode: room?.code ?? null,
+          playerId: session.playerId,
+          path: "/ws",
+        });
         console.warn(`A play failed (${detail}).`);
         send({ type: "error", message: "That play didn't land. The hand is still going." });
       }
@@ -514,6 +669,12 @@ export async function createApp(options: AppOptions = {}) {
       if (session) hub.disconnect(session.playerId, session.generation);
     });
   });
+
+  if (options.faultProbe) {
+    app.get("/api/ops/test-fault", async () => {
+      throw new Error("probe failed");
+    });
+  }
 
   if (options.serveWeb !== false) {
     const here = path.dirname(fileURLToPath(import.meta.url));
@@ -559,6 +720,76 @@ export async function drainServer(parts: {
   parts.lifecycle.draining = true;
   parts.hub.closeConnections();
   await parts.app.close();
+}
+
+function opsReader(
+  request: FastifyRequest,
+  store: Store,
+  accounts: Accounts,
+): "ok" | "missing" | "forbidden" {
+  const user = accounts.userFromCookieHeader(request.headers.cookie);
+  const session = !user ? "none" : userIsAdmin(store, user.id) ? "admin" : "stranger";
+  return opsAdminAllowed(request.headers["x-ops-secret"], session);
+}
+
+function publicBug(row: {
+  id: string;
+  created_at: string;
+  description: string;
+  build_sha: string | null;
+  room_code: string | null;
+  seat: number | null;
+  table_size: number | null;
+  hand_number: number | null;
+  user_agent: string | null;
+  viewport: string | null;
+  player_id: string | null;
+  user_id: string | null;
+  has_screenshot: number;
+}) {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    description: row.description,
+    buildSha: row.build_sha,
+    roomCode: row.room_code,
+    seat: row.seat,
+    tableSize: row.table_size,
+    handNumber: row.hand_number,
+    userAgent: row.user_agent,
+    viewport: row.viewport,
+    playerId: row.player_id,
+    userId: row.user_id,
+    hasScreenshot: row.has_screenshot === 1,
+  };
+}
+
+function publicError(row: {
+  id: string;
+  day: string;
+  kind: string;
+  message: string;
+  build_sha: string | null;
+  room_code: string | null;
+  player_id: string | null;
+  first_seen: string;
+  last_seen: string;
+  n: number;
+  detail: string | null;
+}) {
+  return {
+    id: row.id,
+    day: row.day,
+    kind: row.kind,
+    message: row.message,
+    buildSha: row.build_sha,
+    roomCode: row.room_code,
+    playerId: row.player_id,
+    firstSeen: row.first_seen,
+    lastSeen: row.last_seen,
+    n: row.n,
+    detail: row.detail,
+  };
 }
 
 function requestPath(url: string): string {

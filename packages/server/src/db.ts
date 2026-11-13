@@ -558,6 +558,41 @@ export class Store {
         created_at TEXT NOT NULL,
         PRIMARY KEY (user_id, day, challenge_id)
       );
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        description TEXT NOT NULL,
+        build_sha TEXT,
+        room_code TEXT,
+        seat INTEGER,
+        table_size INTEGER,
+        hand_number INTEGER,
+        user_agent TEXT,
+        viewport TEXT,
+        player_id TEXT,
+        user_id TEXT,
+        logs_json TEXT,
+        screenshot_mime TEXT,
+        screenshot BLOB,
+        ip_hash TEXT
+      );
+      CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports (created_at);
+      CREATE TABLE IF NOT EXISTS error_events (
+        id TEXT PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        day TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        message TEXT NOT NULL,
+        build_sha TEXT,
+        room_code TEXT,
+        player_id TEXT,
+        detail TEXT,
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        n INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS error_events_fp_day ON error_events (fingerprint, day);
+      CREATE INDEX IF NOT EXISTS error_events_last ON error_events (last_seen);
     `);
   }
 
@@ -753,6 +788,275 @@ export class Store {
       .all() as Array<{ id: string; message: string }>;
   }
 
+  bugReportCountSince(since: string, filter?: { playerId?: string | null; ipHash?: string | null }): number {
+    if (filter?.playerId) {
+      const row = this.db
+        .prepare(`SELECT COUNT(*) AS n FROM bug_reports WHERE created_at > ? AND player_id = ?`)
+        .get(since, filter.playerId) as { n: number };
+      return row.n;
+    }
+    if (filter?.ipHash) {
+      const row = this.db
+        .prepare(`SELECT COUNT(*) AS n FROM bug_reports WHERE created_at > ? AND ip_hash = ?`)
+        .get(since, filter.ipHash) as { n: number };
+      return row.n;
+    }
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM bug_reports WHERE created_at > ?`).get(since) as { n: number };
+    return row.n;
+  }
+
+  insertBugReport(row: {
+    id: string;
+    createdAt: string;
+    description: string;
+    buildSha: string | null;
+    roomCode: string | null;
+    seat: number | null;
+    tableSize: number | null;
+    handNumber: number | null;
+    userAgent: string | null;
+    viewport: string | null;
+    playerId: string | null;
+    userId: string | null;
+    logsJson: string;
+    screenshotMime: string | null;
+    screenshot: Buffer | null;
+    ipHash: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO bug_reports (
+          id, created_at, description, build_sha, room_code, seat, table_size, hand_number,
+          user_agent, viewport, player_id, user_id, logs_json, screenshot_mime, screenshot, ip_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.id,
+        row.createdAt,
+        row.description,
+        row.buildSha,
+        row.roomCode,
+        row.seat,
+        row.tableSize,
+        row.handNumber,
+        row.userAgent,
+        row.viewport,
+        row.playerId,
+        row.userId,
+        row.logsJson,
+        row.screenshotMime,
+        row.screenshot,
+        row.ipHash,
+      );
+  }
+
+  /** Drop the oldest reports, and drop pictures on all but the newest few, so the disk stays small. */
+  pruneBugReports(keepReports = 80, keepShots = 20): void {
+    const shots = this.db
+      .prepare(`SELECT id FROM bug_reports WHERE screenshot IS NOT NULL ORDER BY created_at DESC, id DESC`)
+      .all() as Array<{ id: string }>;
+    const clear = this.db.prepare(`UPDATE bug_reports SET screenshot = NULL, screenshot_mime = NULL WHERE id = ?`);
+    for (const row of shots.slice(keepShots)) clear.run(row.id);
+    const rows = this.db.prepare(`SELECT id FROM bug_reports ORDER BY created_at DESC, id DESC`).all() as Array<{ id: string }>;
+    const drop = this.db.prepare(`DELETE FROM bug_reports WHERE id = ?`);
+    for (const row of rows.slice(keepReports)) drop.run(row.id);
+  }
+
+  listBugReports(limit: number): Array<{
+    id: string;
+    created_at: string;
+    description: string;
+    build_sha: string | null;
+    room_code: string | null;
+    seat: number | null;
+    table_size: number | null;
+    hand_number: number | null;
+    user_agent: string | null;
+    viewport: string | null;
+    player_id: string | null;
+    user_id: string | null;
+    has_screenshot: number;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT id, created_at, description, build_sha, room_code, seat, table_size, hand_number,
+                user_agent, viewport, player_id, user_id,
+                CASE WHEN screenshot IS NULL THEN 0 ELSE 1 END AS has_screenshot
+         FROM bug_reports ORDER BY created_at DESC, id DESC LIMIT ?`,
+      )
+      .all(limit) as Array<{
+      id: string;
+      created_at: string;
+      description: string;
+      build_sha: string | null;
+      room_code: string | null;
+      seat: number | null;
+      table_size: number | null;
+      hand_number: number | null;
+      user_agent: string | null;
+      viewport: string | null;
+      player_id: string | null;
+      user_id: string | null;
+      has_screenshot: number;
+    }>;
+  }
+
+  bugReport(id: string): {
+    id: string;
+    created_at: string;
+    description: string;
+    build_sha: string | null;
+    room_code: string | null;
+    seat: number | null;
+    table_size: number | null;
+    hand_number: number | null;
+    user_agent: string | null;
+    viewport: string | null;
+    player_id: string | null;
+    user_id: string | null;
+    logs_json: string | null;
+    screenshot_mime: string | null;
+    screenshot: Uint8Array | null;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, created_at, description, build_sha, room_code, seat, table_size, hand_number,
+                user_agent, viewport, player_id, user_id, logs_json, screenshot_mime, screenshot
+         FROM bug_reports WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          id: string;
+          created_at: string;
+          description: string;
+          build_sha: string | null;
+          room_code: string | null;
+          seat: number | null;
+          table_size: number | null;
+          hand_number: number | null;
+          user_agent: string | null;
+          viewport: string | null;
+          player_id: string | null;
+          user_id: string | null;
+          logs_json: string | null;
+          screenshot_mime: string | null;
+          screenshot: Uint8Array | null;
+        }
+      | undefined;
+    return row ?? null;
+  }
+
+  bugCountsByDay(sinceDay: string): Array<{ day: string; n: number }> {
+    return this.db
+      .prepare(
+        `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n
+         FROM bug_reports WHERE substr(created_at, 1, 10) >= ?
+         GROUP BY day ORDER BY day ASC`,
+      )
+      .all(sinceDay) as Array<{ day: string; n: number }>;
+  }
+
+  /**
+   * Same fingerprint on the same day adds to the count instead of a new row.
+   * Returns whether this call inserted a new row.
+   */
+  noteErrorEvent(row: {
+    id: string;
+    fingerprint: string;
+    day: string;
+    kind: string;
+    message: string;
+    buildSha: string | null;
+    roomCode: string | null;
+    playerId: string | null;
+    detail: string | null;
+    at: string;
+  }): { inserted: boolean; n: number } {
+    const existing = this.db
+      .prepare(`SELECT id, n FROM error_events WHERE fingerprint = ? AND day = ?`)
+      .get(row.fingerprint, row.day) as { id: string; n: number } | undefined;
+    if (existing) {
+      const n = existing.n + 1;
+      this.db
+        .prepare(
+          `UPDATE error_events
+           SET n = ?, last_seen = ?, message = ?, build_sha = ?, room_code = ?, player_id = ?, detail = COALESCE(?, detail)
+           WHERE id = ?`,
+        )
+        .run(n, row.at, row.message, row.buildSha, row.roomCode, row.playerId, row.detail, existing.id);
+      return { inserted: false, n };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO error_events (
+          id, fingerprint, day, kind, message, build_sha, room_code, player_id, detail, first_seen, last_seen, n
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(
+        row.id,
+        row.fingerprint,
+        row.day,
+        row.kind,
+        row.message,
+        row.buildSha,
+        row.roomCode,
+        row.playerId,
+        row.detail,
+        row.at,
+        row.at,
+      );
+    return { inserted: true, n: 1 };
+  }
+
+  pruneErrorEvents(keep = 500, oldest = ""): void {
+    if (oldest) this.db.prepare(`DELETE FROM error_events WHERE last_seen < ?`).run(oldest);
+    const rows = this.db.prepare(`SELECT id FROM error_events ORDER BY last_seen DESC, id DESC`).all() as Array<{ id: string }>;
+    const drop = this.db.prepare(`DELETE FROM error_events WHERE id = ?`);
+    for (const row of rows.slice(keep)) drop.run(row.id);
+  }
+
+  listErrorEvents(limit: number): Array<{
+    id: string;
+    day: string;
+    kind: string;
+    message: string;
+    build_sha: string | null;
+    room_code: string | null;
+    player_id: string | null;
+    detail: string | null;
+    first_seen: string;
+    last_seen: string;
+    n: number;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT id, day, kind, message, build_sha, room_code, player_id, detail, first_seen, last_seen, n
+         FROM error_events ORDER BY last_seen DESC, id DESC LIMIT ?`,
+      )
+      .all(limit) as Array<{
+      id: string;
+      day: string;
+      kind: string;
+      message: string;
+      build_sha: string | null;
+      room_code: string | null;
+      player_id: string | null;
+      detail: string | null;
+      first_seen: string;
+      last_seen: string;
+      n: number;
+    }>;
+  }
+
+  errorSummarySince(sinceDay: string): Array<{ day: string; kind: string; n: number }> {
+    return this.db
+      .prepare(
+        `SELECT day, kind, SUM(n) AS n FROM error_events WHERE day >= ?
+         GROUP BY day, kind ORDER BY day DESC, n DESC`,
+      )
+      .all(sinceDay) as Array<{ day: string; kind: string; n: number }>;
+  }
+
   insertReport(row: {
     id: string;
     reporterUserId: string;
@@ -784,6 +1088,7 @@ export class Store {
     this.db.prepare(`DELETE FROM magic_links WHERE user_id = ?`).run(userId);
     for (const email of emails) this.db.prepare(`DELETE FROM magic_links WHERE email = ?`).run(email);
     this.db.prepare(`DELETE FROM player_blocks WHERE user_id = ? OR blocked_user_id = ?`).run(userId, userId);
+    this.db.prepare(`DELETE FROM bug_reports WHERE user_id = ?`).run(userId);
     this.db.prepare(`UPDATE players SET name = 'Deleted' WHERE user_id = ?`).run(userId);
     this.db
       .prepare(

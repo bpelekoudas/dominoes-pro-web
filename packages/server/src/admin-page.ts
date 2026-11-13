@@ -33,6 +33,10 @@ export function adminDashboardHtml(): string {
     .cap.red { background: var(--red); }
     ul { margin: 8px 0 0; padding-left: 18px; }
     .err { color: var(--red); }
+    .ops-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
+    .ops-list button { width: 100%; text-align: left; background: #111; color: var(--paper); border-radius: 12px; }
+    .ops-shot { width: min(100%, 360px); border-radius: 12px; background: #000; }
+    .ops-detail { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }
     @media (max-width: 380px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -45,6 +49,7 @@ export function adminDashboardHtml(): string {
     <p class="when" id="when">Loading…</p>
     <p class="err" id="err" hidden></p>
     <div id="out"></div>
+    <div id="ops"></div>
   </main>
   <script>
     const out = document.getElementById("out");
@@ -177,6 +182,82 @@ export function adminDashboardHtml(): string {
       }
       when.textContent = "Updated " + new Date(data.generatedAt).toLocaleString() + ". Numbers refresh about once a minute.";
       draw(data);
+      void loadOps();
+    }
+    function sumDay(rows, day) {
+      let n = 0;
+      for (const row of rows) if (!day || row.day === day) n += row.n;
+      return n;
+    }
+    async function openBug(id) {
+      const response = await fetch("/api/admin/ops/bugs/" + encodeURIComponent(id), { headers: { accept: "application/json" } });
+      const data = await response.json().catch(() => null);
+      const host = document.getElementById("bug-" + id);
+      if (!host || !data) return;
+      host.replaceChildren();
+      const pre = document.createElement("pre");
+      pre.className = "ops-detail";
+      const lines = [
+        data.description,
+        "Build " + (data.buildSha || "—") + " · room " + (data.roomCode || "—") + " · seat " + (data.seat == null ? "—" : data.seat) + " · table " + (data.tableSize || "—") + " · hand " + (data.handNumber == null ? "—" : data.handNumber),
+        "Player " + (data.playerId || "—") + (data.userId ? " · account " + data.userId : ""),
+        data.viewport || "",
+        data.userAgent || "",
+      ];
+      if (Array.isArray(data.logs) && data.logs.length) lines.push(data.logs.join("\\n"));
+      pre.textContent = lines.filter(Boolean).join("\\n");
+      host.append(pre);
+      if (data.screenshot) {
+        const img = document.createElement("img");
+        img.className = "ops-shot";
+        img.alt = "Screenshot from the report";
+        img.src = data.screenshot;
+        host.append(img);
+      }
+    }
+    async function loadOps() {
+      const response = await fetch("/api/admin/ops", { headers: { accept: "application/json" } });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) return;
+      const today = new Date().toISOString().slice(0, 10);
+      const bugs = document.createElement("div");
+      bugs.className = "grid";
+      bugs.append(stat("Bug reports, 14 days", sumDay(data.bugsByDay || [])), stat("Bug reports today", sumDay(data.bugsByDay || [], today)));
+      const bugList = document.createElement("div");
+      bugList.className = "ops-list";
+      const recentBugs = data.bugs || [];
+      if (!recentBugs.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No bug reports yet.";
+        bugList.append(empty);
+      }
+      for (const bug of recentBugs) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = bug.createdAt + " · " + (bug.roomCode || "no room") + " · " + (bug.buildSha || "no build") + " · " + bug.description.slice(0, 120);
+        const detail = document.createElement("div");
+        detail.id = "bug-" + bug.id;
+        button.addEventListener("click", () => { void openBug(bug.id); });
+        bugList.append(button, detail);
+      }
+      const errorGrid = document.createElement("div");
+      errorGrid.className = "grid";
+      const todayErrors = (data.errorsByDay || []).filter((row) => row.day === today);
+      if (!todayErrors.length) errorGrid.append(stat("Errors today", 0));
+      for (const row of todayErrors) errorGrid.append(stat(row.kind + " today", row.n));
+      const days = document.createElement("ul");
+      for (const row of (data.errorsByDay || []).slice(0, 21)) {
+        const li = document.createElement("li");
+        li.textContent = row.day + " · " + row.kind + " · " + row.n;
+        days.append(li);
+      }
+      if (!days.childElementCount) {
+        const li = document.createElement("li");
+        li.textContent = "No errors recorded yet.";
+        days.append(li);
+      }
+      const ops = document.getElementById("ops");
+      if (ops) ops.replaceChildren(section("Bug reports", bugs, bugList), section("Errors", errorGrid, days));
     }
     document.getElementById("refresh").addEventListener("click", () => { void load(); });
     void load();
