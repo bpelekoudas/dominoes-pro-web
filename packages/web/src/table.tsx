@@ -12,6 +12,7 @@ import {
   cameraHoldStale,
   cameraSettlesOn,
   chainViewShift,
+  fitFrameScale,
   frameInsets,
   settledHandCamera,
   nextFeltSize,
@@ -27,7 +28,7 @@ import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
 import { scoreTier } from "./feel/ladder";
 import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
-import { cameraBlockedByFlight, boardDuringOpponentFlight, departureBox, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
+import { boardDuringOpponentFlight, departureBox, holdCameraForChain, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer } from "./moment.js";
 import {
@@ -280,17 +281,21 @@ export function Table({
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
-      // Full size until a tile would cross the felt edge, or the thin
-      // side-hand strip where that strip is past the frame.
+      // pictureFrom can fall back to a larger fold when the limited one
+      // overlaps. The scale has to fit the chain that will actually be painted.
+      const picture = pictureFrom(liveBoard, handLimits) ?? solved.layout;
+      const drawn = [...picture.tiles, ...picture.ends];
       const frameShift = boardShift(solved.edge);
-      const fitted = [...solved.layout.tiles, ...solved.layout.ends];
-      const zoom = solved.scale;
-      const centered = chainViewShift(fitted, zoom);
+      const zoom = Math.min(
+        solved.scale,
+        fitFrameScale({ tiles: drawn, felt, screenWidth, frame: frameEdge, previous }),
+      );
+      const centered = chainViewShift(drawn, zoom);
       const nextShift = {
         x: centered.x + frameShift.x + solved.nudge.x,
         y: centered.y + frameShift.y + solved.nudge.y,
       };
-      const placed = view.lastPlay ? solved.layout.tiles.find((tile) => tile.tileId === view.lastPlay?.tileId) : undefined;
+      const placed = view.lastPlay ? picture.tiles.find((tile) => tile.tileId === view.lastPlay?.tileId) : undefined;
       if (placed) {
         const rect = renderedTileRect(felt, placed, zoom, nextShift);
         const origin = viewport.getBoundingClientRect();
@@ -304,7 +309,14 @@ export function Table({
       // The tile is still in the air. Remember where it will sit, and ease
       // the camera only after the glide lands. The chain on the felt stays
       // the previous one until that ease finishes, so it never draws on the hands.
-      if (held.current && cameraBlockedByFlight(flightHold.current, view.lastPlay?.seq ?? -1)) return;
+      if (
+        holdCameraForChain({
+          chainHeld: chainHeld.current,
+          flightHold: flightHold.current,
+          liveSeq: view.lastPlay?.seq ?? -1,
+          haveHeldScale: Boolean(held.current),
+        })
+      ) return;
       if (!chainHeld.current) setLimits((current) => {
         if (
           current
@@ -316,7 +328,7 @@ export function Table({
         }
         return handLimits;
       });
-      const tileIds = solved.layout.tiles.map((tile) => tile.tileId);
+      const tileIds = picture.tiles.map((tile) => tile.tileId);
       const landed = settledTiles.current.hand !== handKey || cameraSettlesOn(settledTiles.current.ids, tileIds);
       // A refold can walk a tile into a token slot without adding a tile.
       // That still has to pull the scale down. Choosing does not.
@@ -772,7 +784,12 @@ function Arrival({
       window.clearTimeout(timer);
       window.clearTimeout(parkTimer);
       tile?.classList.remove("is-arriving");
-      releaseCamera();
+      // A new hand can replace this play before the glide ends. Drop the
+      // frozen chain then, or the next camera paints it at the opening size.
+      if (flightHold.current?.seq === mySeq) {
+        flightHold.current = null;
+        endRef.current();
+      }
       setBox(null);
     };
   }, [fly, seq, tileId, playerId]);

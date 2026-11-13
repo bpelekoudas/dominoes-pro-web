@@ -164,13 +164,16 @@ export function frameInsets(tableId: string | null | undefined, felt: FeltSize):
   const bottom = felt.h - (art.bottom * scale - cropY);
   const clamp = (value: number, limit: number) => Math.min(Math.max(0, value), Math.max(0, limit));
   // The stroke is a couple of pixels wide. Sitting on its inner edge paints
-  // the tile across the line, so the fit stops short of it.
+  // the tile across the line, so the fit stops short of it. On a wide felt
+  // the cover crop takes the copper off the screen; the air stays anyway,
+  // or a tile sits on the edge the player can see.
   const air = 8;
+  const inset = (edge: number, limit: number) => clamp(Math.max(air, edge + air), limit);
   return {
-    left: clamp(left + air, felt.w / 2 - 1),
-    top: clamp(top + air, felt.h / 2 - 1),
-    right: clamp(right + air, felt.w / 2 - 1),
-    bottom: clamp(bottom + air, felt.h / 2 - 1),
+    left: inset(left, felt.w / 2 - 1),
+    top: inset(top, felt.h / 2 - 1),
+    right: inset(right, felt.w / 2 - 1),
+    bottom: inset(bottom, felt.h / 2 - 1),
   };
 }
 
@@ -195,6 +198,8 @@ export function fitFrameScale(input: {
 /** A real resize, including the Chrome toolbar, takes a new measurement. A one-pixel jitter does not. */
 export const FELT_WIDTH_LOCK = 32;
 export const FELT_HEIGHT_REFIT = 48;
+/** A shorter felt is the one on screen. Fitting the taller locked box paints tiles across that edge. */
+export const FELT_SHRINK_REFIT = 4;
 
 export function nextFeltSize(
   locked: { hand: string; w: number; h: number; table: string } | null,
@@ -206,9 +211,11 @@ export function nextFeltSize(
   if (!locked || locked.hand !== hand || locked.table !== table) {
     return { w: width, h: height, resized: true };
   }
-  const widthMoved = Math.abs(width - locked.w) >= FELT_WIDTH_LOCK;
-  const heightMoved = Math.abs(height - locked.h) >= FELT_HEIGHT_REFIT;
-  if (!widthMoved && !heightMoved) return { w: locked.w, h: locked.h, resized: false };
+  const grewWide = width - locked.w >= FELT_WIDTH_LOCK;
+  const grewTall = height - locked.h >= FELT_HEIGHT_REFIT;
+  const shrankWide = locked.w - width >= FELT_SHRINK_REFIT;
+  const shrankTall = locked.h - height >= FELT_SHRINK_REFIT;
+  if (!grewWide && !grewTall && !shrankWide && !shrankTall) return { w: locked.w, h: locked.h, resized: false };
   return { w: width, h: height, resized: true };
 }
 

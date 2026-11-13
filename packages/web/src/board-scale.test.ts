@@ -5,6 +5,7 @@ import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } fr
 import { boxesOverlap, FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_GAP, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import { allTiles, tileById } from "../../rules/src/tiles.js";
+import { holdCameraForChain } from "./arrival.js";
 import {
   boardShift,
   CAMERA_EDGE,
@@ -1603,6 +1604,103 @@ describe("charcoal frame", () => {
       expect(rect.top).toBeGreaterThanOrEqual(frame.top - 1);
       expect(rect.bottom).toBeLessThanOrEqual(short.h - frame.bottom + 1);
     }
+  });
+
+  it("keeps a chain that reaches the top and the bottom inside the felt on screen", () => {
+    const table = "TBL-013";
+    const visible = { w: 412, h: 628 };
+    const bytes = Buffer.alloc(32);
+    bytes.writeUInt32BE(6, 0);
+    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    let match = beginHand(
+      createMatch(players, { playerCount: 4, boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+      shuffleWithSeed(bytes),
+    );
+    let previous: number | null = null;
+    let held: { width: number; height: number } | null = null;
+    let layout = settledHandCamera({
+      board: match.hand!.board,
+      felt: visible,
+      screenWidth: visible.w,
+      frame: frameInsets(table, visible),
+      previous,
+      heldLimits: held,
+    }).layout;
+    for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+      const playerId = currentPlayerId(match);
+      if (!playerId) break;
+      const intents = legalIntents(match, playerId);
+      const intent = intents.find((item) => item.type === "play") ?? intents[0];
+      if (!intent) break;
+      const result = applyIntent(match, playerId, intent);
+      expect(result.ok).toBe(true);
+      if (!result.ok) break;
+      match = result.match;
+      if (intent.type !== "play" || !match.hand) continue;
+      const cam = settledHandCamera({
+        board: match.hand.board,
+        felt: visible,
+        screenWidth: visible.w,
+        frame: frameInsets(table, visible),
+        previous,
+        heldLimits: held,
+      });
+      held = cam.limits;
+      previous = cam.scale;
+      layout = cam.layout;
+    }
+    const frame = frameInsets(table, visible);
+    const boxes = [...layout.tiles, ...layout.ends];
+    const heldScale = previous ?? 1;
+    // The next hand wants the opening size. The long chain is still the
+    // picture until its glide is dropped, so the camera has to stay.
+    const keep = holdCameraForChain({ chainHeld: true, flightHold: null, liveSeq: 40, haveHeldScale: true });
+    const open = (OPEN_TILE_FRAC * visible.w) / TILE_SHORT;
+    const scale = keep ? heldScale : open;
+    const shift = {
+      x: chainViewShift(boxes, scale).x + boardShift(frame).x,
+      y: chainViewShift(boxes, scale).y + boardShift(frame).y,
+    };
+    let topSlack = Infinity;
+    let bottomSlack = Infinity;
+    expect(boxes.length).toBeGreaterThan(12);
+    for (const tile of boxes) {
+      const rect = renderedTileRect(visible, tile, scale, shift);
+      topSlack = Math.min(topSlack, rect.top - frame.top);
+      bottomSlack = Math.min(bottomSlack, visible.h - frame.bottom - rect.bottom);
+      const label = "tileId" in tile && tile.tileId ? tile.tileId : "end";
+      expect(rect.left, label).toBeGreaterThanOrEqual(frame.left - 0.6);
+      expect(rect.right, label).toBeLessThanOrEqual(visible.w - frame.right + 0.6);
+      expect(rect.top, label).toBeGreaterThanOrEqual(frame.top - 0.6);
+      expect(rect.bottom, label).toBeLessThanOrEqual(visible.h - frame.bottom + 0.6);
+    }
+    expect(topSlack).toBeLessThan(TILE_LONG);
+    expect(bottomSlack).toBeLessThan(TILE_LONG);
+    const blown = {
+      x: chainViewShift(boxes, open).x + boardShift(frame).x,
+      y: chainViewShift(boxes, open).y + boardShift(frame).y,
+    };
+    const spilled = boxes.some((tile) => {
+      const rect = renderedTileRect(visible, tile, open, blown);
+      return rect.top < frame.top - 0.6 || rect.bottom > visible.h - frame.bottom + 0.6;
+    });
+    expect(spilled).toBe(true);
+  });
+
+  it("fits the felt the player can see when the locked box was taller", () => {
+    const hand = "1:1";
+    const table = "TBL-013";
+    const locked = { hand, w: 412, h: 664, table };
+    expect(nextFeltSize(locked, hand, 412, 663, table).resized).toBe(false);
+    expect(nextFeltSize(locked, hand, 412, 628, table)).toEqual({ w: 412, h: 628, resized: true });
+  });
+
+  it("keeps eight pixels of air when the copper is cropped off a wide felt", () => {
+    const frame = frameInsets("TBL-013", { w: 751, h: 540 });
+    expect(frame.top).toBeGreaterThanOrEqual(8);
+    expect(frame.bottom).toBeGreaterThanOrEqual(8);
+    expect(frame.left).toBeGreaterThanOrEqual(8);
+    expect(frame.right).toBeGreaterThanOrEqual(8);
   });
 });
 

@@ -32,6 +32,11 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
         const look = () => {
           void registration.update();
         };
+        // An open table used to wait until the app was backgrounded. Check
+        // now, and again while the tab stays up, so a stale shell is replaced.
+        look();
+        window.setInterval(look, 15_000);
+        window.addEventListener("pageshow", look);
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") look();
         });

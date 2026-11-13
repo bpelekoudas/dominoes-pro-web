@@ -38,6 +38,21 @@ export function cameraBlockedByFlight(hold: { seq: number } | null, seq: number)
   return hold !== null && hold.seq === seq;
 }
 
+/**
+ * The felt is still showing the previous chain. A new hand can replace the
+ * play seq before that glide is cleared, so the flight check alone lets the
+ * opening scale through and the old chain is cut off at the felt edge.
+ */
+export function holdCameraForChain(input: {
+  chainHeld: boolean;
+  flightHold: { seq: number } | null;
+  liveSeq: number;
+  haveHeldScale: boolean;
+}): boolean {
+  if (input.chainHeld) return true;
+  return input.haveHeldScale && cameraBlockedByFlight(input.flightHold, input.liveSeq);
+}
+
 /** Tiles already on the felt stay where they are while an opponent tile is in the air. */
 export function boardDuringOpponentFlight<T>(previous: T, next: T, flying: boolean): T {
   return flying ? previous : next;
