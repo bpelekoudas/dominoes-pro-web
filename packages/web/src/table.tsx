@@ -353,6 +353,10 @@ export function Table({
       // to the new scale and centre in one motion.
       knownTiles.current = { hand: handKey, ids: new Set(tileIds) };
       if (heldIds.size > 0) setHeldIds(new Set());
+      viewport.dataset.playTop = solved.edge.top.toFixed(0);
+      viewport.dataset.playBottom = solved.edge.bottom.toFixed(0);
+      viewport.dataset.playLeft = solved.edge.left.toFixed(0);
+      viewport.dataset.playRight = solved.edge.right.toFixed(0);
       viewport.dataset.cameraSettling = "false";
       viewport.dataset.zoom = "ease";
       held.current = { hand: handKey, scale: zoom };

@@ -1801,6 +1801,146 @@ describe("charcoal frame", () => {
   });
 });
 
+describe("visible felt clearance", () => {
+  // Felt and side-stack rects measured on the built table at each viewport.
+  const scenes = [
+    {
+      name: "s26-4",
+      felt: { w: 412, h: 611 },
+      stacks: [
+        { left: 0, top: 211, right: 16, bottom: 425 },
+        { left: 8, top: 0, right: 404, bottom: 20 },
+        { left: 396, top: 211, right: 412, bottom: 425 },
+      ],
+    },
+    {
+      name: "iphone-4",
+      felt: { w: 390, h: 563 },
+      stacks: [
+        { left: 0, top: 201, right: 16, bottom: 384 },
+        { left: 8, top: 0, right: 382, bottom: 20 },
+        { left: 374, top: 186, right: 390, bottom: 400 },
+      ],
+    },
+    {
+      name: "small-4",
+      felt: { w: 360, h: 468 },
+      stacks: [
+        { left: 0, top: 152, right: 16, bottom: 335 },
+        { left: 8, top: 0, right: 352, bottom: 20 },
+        { left: 344, top: 136, right: 360, bottom: 350 },
+      ],
+    },
+    {
+      name: "fold-cover-4",
+      felt: { w: 344, h: 614 },
+      stacks: [
+        { left: 0, top: 228, right: 16, bottom: 411 },
+        { left: 8, top: 0, right: 336, bottom: 20 },
+        { left: 328, top: 212, right: 344, bottom: 426 },
+      ],
+    },
+    {
+      name: "fold-inner-4",
+      felt: { w: 751, h: 518 },
+      stacks: [
+        { left: 0, top: 178, right: 16, bottom: 361 },
+        { left: 8, top: 0, right: 743, bottom: 20 },
+        { left: 735, top: 162, right: 751, bottom: 376 },
+      ],
+    },
+    {
+      name: "s26-3",
+      felt: { w: 412, h: 611 },
+      stacks: [
+        { left: 0, top: 211, right: 16, bottom: 425 },
+        { left: 396, top: 226, right: 412, bottom: 409 },
+      ],
+    },
+    {
+      name: "s26-2",
+      felt: { w: 412, h: 645 },
+      stacks: [{ left: 8, top: 0, right: 404, bottom: 20 }],
+    },
+  ] as const;
+
+  it("keeps every late-hand tile 8px inside the felt and off the side stacks for 40 seeds at each size", () => {
+    const seeds = 40;
+    let hands = 0;
+    let plays = 0;
+    for (const scene of scenes) {
+      const frame = frameInsets(null, scene.felt);
+      for (let seed = 1; seed <= seeds; seed += 1) {
+        const bytes = Buffer.alloc(32);
+        bytes.writeUInt32BE(seed, 0);
+        const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+        let match = beginHand(
+          createMatch(players, { playerCount: 4, boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+          shuffleWithSeed(bytes),
+        );
+        let previous: number | null = null;
+        let held: { width: number; height: number } | null = null;
+        hands += 1;
+        for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+          const playerId = currentPlayerId(match);
+          if (!playerId) break;
+          const intents = legalIntents(match, playerId);
+          const intent = intents.find((item) => item.type === "play") ?? intents[0];
+          if (!intent) break;
+          const result = applyIntent(match, playerId, intent);
+          expect(result.ok).toBe(true);
+          if (!result.ok) break;
+          match = result.match;
+          if (intent.type !== "play" || !match.hand) continue;
+          plays += 1;
+          const cam = settledHandCamera({
+            board: match.hand.board,
+            felt: scene.felt,
+            screenWidth: scene.felt.w,
+            frame,
+            keepOuts: scene.stacks,
+            previous,
+            heldLimits: held,
+          });
+          held = cam.limits;
+          previous = cam.scale;
+          if (cam.layout.tiles.length < 8) continue;
+          expect(layoutOverlaps(cam.layout), `${scene.name} seed ${seed}`).toBe(false);
+          const boxes = cam.layout.tiles;
+          const shift = {
+            x: chainViewShift(boxes, cam.scale).x + boardShift(cam.edge).x,
+            y: chainViewShift(boxes, cam.scale).y + boardShift(cam.edge).y,
+          };
+          const rects = boxes.map((tile) => renderedTileRect(scene.felt, tile, cam.scale, shift));
+          for (const [index, rect] of rects.entries()) {
+            const label = `${scene.name} seed ${seed} ${boxes[index]!.tileId}`;
+            expect(rect.left, label).toBeGreaterThanOrEqual(STACK_AIR - 0.6);
+            expect(rect.top, label).toBeGreaterThanOrEqual(STACK_AIR - 0.6);
+            expect(rect.right, label).toBeLessThanOrEqual(scene.felt.w - STACK_AIR + 0.6);
+            expect(rect.bottom, label).toBeLessThanOrEqual(scene.felt.h - STACK_AIR + 0.6);
+            for (const stack of scene.stacks) {
+              const overlapsStack = rect.left < stack.right - 0.6 && rect.right > stack.left + 0.6 && rect.top < stack.bottom - 0.6 && rect.bottom > stack.top + 0.6;
+              expect(overlapsStack, label).toBe(false);
+              const gap = rect.right <= stack.left
+                ? stack.left - rect.right
+                : rect.left >= stack.right
+                  ? rect.left - stack.right
+                  : rect.bottom <= stack.top
+                    ? stack.top - rect.bottom
+                    : rect.top >= stack.bottom
+                      ? rect.top - stack.bottom
+                      : -1;
+              if (gap >= 0 && gap < 48) expect(gap, label).toBeGreaterThanOrEqual(STACK_AIR - 0.6);
+            }
+          }
+        }
+      }
+    }
+    expect(hands).toBe(scenes.length * seeds);
+    expect(plays).toBeGreaterThan(hands * 8);
+  }, 60_000);
+});
+
 describe("layout guarantee", () => {
   it("keeps 500 full matches from covering a tile or leaving the felt", () => {
     const felts = [
