@@ -3,6 +3,7 @@ import { CATALOG } from "../../rules/src/catalog.js";
 import { BUILD_SHA } from "./build-sha";
 import { Leaderboard, ProfileStats, RankLine, type RankFacts } from "./rank";
 import { AvatarFace, AvatarPicker } from "./avatars";
+import { prefersRedirectSignInNow } from "./auth-surface";
 import { readRememberedAge, rememberAge } from "./home-model";
 
 export interface AccountUser extends RankFacts {
@@ -54,6 +55,7 @@ export interface AccountController {
   setAgeChecked: (checked: boolean) => void;
   askAge: () => void;
   deleteAccount: () => Promise<void>;
+  tell: (message: string) => void;
 }
 
 const EMAIL_SIGNIN_UNAVAILABLE = "Email sign-in is temporarily unavailable, try Google or play as guest";
@@ -181,11 +183,23 @@ export function useAccount(): AccountController {
     let stopped = false;
     const load = async () => {
       const params = new URLSearchParams(location.search);
+      const auth = params.get("auth");
+      if (auth === "claimed") {
+        setNotice("That sign-in already belongs to another profile. Stay here, or sign in again and choose Continue.");
+        setSheetOpen(true);
+      } else if (auth === "error") {
+        setNotice(params.get("message") || "That sign-in did not work.");
+        setSheetOpen(true);
+      }
+      if (auth) params.delete("auth");
+      params.delete("message");
       const emailToken = params.get("email-token");
-      if (emailToken) {
-        params.delete("email-token");
+      if (emailToken) params.delete("email-token");
+      if (auth || emailToken) {
         const query = params.toString();
         history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+      }
+      if (emailToken) {
         if (!startedEmailTokens.has(emailToken)) {
           startedEmailTokens.add(emailToken);
           await consumeEmail(emailToken, false);
@@ -245,6 +259,10 @@ export function useAccount(): AccountController {
     },
     setAgeChecked,
     ageChecked,
+    tell: (message: string) => {
+      setNotice(message);
+      setSheetOpen(true);
+    },
     deleteAccount: async () => {
       setBusy(true);
       setError(null);
@@ -397,44 +415,84 @@ export function AccountLayer({ account }: { account: AccountController }) {
   const [draft, setDraft] = useState(account.user?.displayName ?? "");
   const [email, setEmail] = useState("");
   const [googleFailed, setGoogleFailed] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
   const googleClientId = window.__UHOH__?.googleClientId || null;
   const appleClientId = window.__UHOH__?.appleClientId || null;
+  const redirectSignIn = prefersRedirectSignInNow();
+  const [appleState, setAppleState] = useState("");
 
   useEffect(() => {
     if (account.user) setDraft(account.user.displayName);
   }, [account.user]);
 
   useEffect(() => {
-    if (!account.sheetOpen || !googleClientId) return;
+    if (!account.sheetOpen || !redirectSignIn) return;
+    let cancel = false;
+    void fetch("/api/auth/prepare-redirect", { method: "POST", credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { appleState?: string } | null) => {
+        if (!cancel && body?.appleState) setAppleState(body.appleState);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, [account.sheetOpen, redirectSignIn]);
+
+  useEffect(() => {
+    setGoogleReady(false);
+    setGoogleFailed(false);
+    if (!account.sheetOpen || !googleClientId || (!account.user?.ageOk && !account.ageChecked)) return;
     const parent = googleHost.current;
     if (!parent) return;
     let cancel = false;
+    let watch = 0;
+    let giveUp = 0;
     parent.replaceChildren();
+    const painted = () => parent.querySelector("iframe") != null && parent.getBoundingClientRect().height > 20;
     loadScript("https://accounts.google.com/gsi/client")
       .then(() => {
-        if (cancel || !parent || !window.google?.accounts?.id) return;
+        if (cancel || !parent.isConnected || !window.google?.accounts?.id) {
+          if (!cancel) setGoogleFailed(true);
+          return;
+        }
+        const redirect = prefersRedirectSignInNow();
         window.google.accounts.id.initialize({
           client_id: googleClientId,
           callback: (response) => {
             if (response.credential) void signInGoogle.current(response.credential, false);
           },
+          ...(redirect ? { ux_mode: "redirect" as const, login_uri: `${location.origin}/api/auth/google/redirect` } : {}),
         });
+        const row = parent.parentElement?.getBoundingClientRect().width || parent.getBoundingClientRect().width;
         window.google.accounts.id.renderButton(parent, {
           type: "standard",
           theme: "filled_black",
           size: "large",
           text: "signin_with",
           shape: "pill",
-          width: Math.min(parent.clientWidth || 320, 360),
+          width: Math.min(Math.round(row) || 320, 400),
         });
+        watch = window.setInterval(() => {
+          if (cancel || !painted()) return;
+          window.clearInterval(watch);
+          window.clearTimeout(giveUp);
+          setGoogleReady(true);
+        }, 100);
+        giveUp = window.setTimeout(() => {
+          window.clearInterval(watch);
+          if (!cancel && !painted()) setGoogleFailed(true);
+        }, 4_000);
       })
       .catch(() => {
         if (!cancel) setGoogleFailed(true);
       });
     return () => {
       cancel = true;
+      window.clearInterval(watch);
+      window.clearTimeout(giveUp);
     };
-  }, [account.sheetOpen, googleClientId]);
+  }, [account.sheetOpen, googleClientId, account.ageChecked, account.user?.ageOk]);
 
   if (!account.sheetOpen) return null;
 
@@ -446,11 +504,13 @@ export function AccountLayer({ account }: { account: AccountController }) {
     try {
       await loadScript("https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js");
       if (!window.AppleID) throw new Error("Apple sign-in did not load.");
+      const redirect = prefersRedirectSignInNow();
       window.AppleID.auth.init({
         clientId: appleClientId,
         scope: "name email",
-        redirectURI: `${location.origin}/`,
-        usePopup: true,
+        redirectURI: redirect ? `${location.origin}/api/auth/apple/redirect` : `${location.origin}/`,
+        usePopup: !redirect,
+        state: appleState || undefined,
       });
       const result = await window.AppleID.auth.signIn();
       await account.signInApple(result.authorization?.id_token ?? "", false);
@@ -539,13 +599,21 @@ export function AccountLayer({ account }: { account: AccountController }) {
           </label>
         ) : null}
         {account.page === "profile" ? (
-          <div className="provider-list">
-            {googleClientId && !googleFailed ? <div className="google-host" ref={googleHost} /> : null}
+          <div className="provider-list" data-auth-ux={redirectSignIn ? "redirect" : "popup"} data-google={googleFailed ? "failed" : googleReady ? "ready" : googleClientId ? "waiting" : "off"}>
+            {googleClientId && !googleFailed && (account.user?.ageOk || account.ageChecked) ? (
+              <div className="google-host" ref={googleHost} />
+            ) : null}
             <button
               type="button"
               className="provider-button google"
-              hidden={Boolean(googleClientId) && !googleFailed}
-              onClick={() => void account.signInGoogle("", false)}
+              hidden={googleReady && !googleFailed}
+              onClick={() => {
+                if (googleFailed || (googleClientId && !googleReady)) {
+                  account.tell("Google could not open here. Use the email link, or open this site in Safari or Chrome.");
+                  return;
+                }
+                void account.signInGoogle("", false);
+              }}
             >
               Sign in with Google
             </button>
@@ -580,6 +648,10 @@ export function AccountLayer({ account }: { account: AccountController }) {
             Sign out
           </button>
         ) : null}
+        <nav className="account-legal" aria-label="Legal">
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </nav>
         <p className="build-sha" data-build={BUILD_SHA}>
           {BUILD_SHA}
         </p>
@@ -652,7 +724,9 @@ declare global {
         id: {
           initialize: (config: {
             client_id: string;
-            callback: (response: { credential?: string }) => void;
+            callback?: (response: { credential?: string }) => void;
+            ux_mode?: "popup" | "redirect";
+            login_uri?: string;
           }) => void;
           renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void;
         };
@@ -660,7 +734,7 @@ declare global {
     };
     AppleID?: {
       auth: {
-        init: (config: { clientId: string; scope: string; redirectURI: string; usePopup: boolean }) => void;
+        init: (config: { clientId: string; scope: string; redirectURI: string; usePopup?: boolean; state?: string }) => void;
         signIn: () => Promise<{ authorization?: { id_token?: string } }>;
       };
     };
