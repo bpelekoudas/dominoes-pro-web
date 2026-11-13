@@ -415,6 +415,7 @@ export function AccountLayer({ account }: { account: AccountController }) {
   const [draft, setDraft] = useState(account.user?.displayName ?? "");
   const [email, setEmail] = useState("");
   const [googleFailed, setGoogleFailed] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
   const googleClientId = window.__UHOH__?.googleClientId || null;
   const appleClientId = window.__UHOH__?.appleClientId || null;
   const redirectSignIn = prefersRedirectSignInNow();
@@ -439,14 +440,22 @@ export function AccountLayer({ account }: { account: AccountController }) {
   }, [account.sheetOpen, redirectSignIn]);
 
   useEffect(() => {
+    setGoogleReady(false);
+    setGoogleFailed(false);
     if (!account.sheetOpen || !googleClientId || (!account.user?.ageOk && !account.ageChecked)) return;
     const parent = googleHost.current;
     if (!parent) return;
     let cancel = false;
+    let watch = 0;
+    let giveUp = 0;
     parent.replaceChildren();
+    const painted = () => parent.querySelector("iframe") != null && parent.getBoundingClientRect().height > 20;
     loadScript("https://accounts.google.com/gsi/client")
       .then(() => {
-        if (cancel || !parent || !window.google?.accounts?.id) return;
+        if (cancel || !parent.isConnected || !window.google?.accounts?.id) {
+          if (!cancel) setGoogleFailed(true);
+          return;
+        }
         const redirect = prefersRedirectSignInNow();
         window.google.accounts.id.initialize({
           client_id: googleClientId,
@@ -463,12 +472,24 @@ export function AccountLayer({ account }: { account: AccountController }) {
           shape: "pill",
           width: Math.min(parent.clientWidth || 320, 360),
         });
+        watch = window.setInterval(() => {
+          if (cancel || !painted()) return;
+          window.clearInterval(watch);
+          window.clearTimeout(giveUp);
+          setGoogleReady(true);
+        }, 100);
+        giveUp = window.setTimeout(() => {
+          window.clearInterval(watch);
+          if (!cancel && !painted()) setGoogleFailed(true);
+        }, 4_000);
       })
       .catch(() => {
         if (!cancel) setGoogleFailed(true);
       });
     return () => {
       cancel = true;
+      window.clearInterval(watch);
+      window.clearTimeout(giveUp);
     };
   }, [account.sheetOpen, googleClientId, account.ageChecked, account.user?.ageOk]);
 
@@ -577,16 +598,16 @@ export function AccountLayer({ account }: { account: AccountController }) {
           </label>
         ) : null}
         {account.page === "profile" ? (
-          <div className="provider-list" data-auth-ux={redirectSignIn ? "redirect" : "popup"}>
+          <div className="provider-list" data-auth-ux={redirectSignIn ? "redirect" : "popup"} data-google={googleFailed ? "failed" : googleReady ? "ready" : googleClientId ? "waiting" : "off"}>
             {googleClientId && !googleFailed && (account.user?.ageOk || account.ageChecked) ? (
               <div className="google-host" ref={googleHost} />
             ) : null}
             <button
               type="button"
               className="provider-button google"
-              hidden={Boolean(googleClientId) && !googleFailed && (Boolean(account.user?.ageOk) || account.ageChecked)}
+              hidden={googleReady && !googleFailed}
               onClick={() => {
-                if (googleFailed) {
+                if (googleFailed || (googleClientId && !googleReady)) {
                   account.tell("Google could not open here. Use the email link, or open this site in Safari or Chrome.");
                   return;
                 }

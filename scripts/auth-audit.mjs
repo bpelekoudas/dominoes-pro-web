@@ -80,7 +80,9 @@ async function main() {
             await page.goto(`${origin}/privacy`, { waitUntil: "domcontentloaded" });
             await page.screenshot({ path: path.join(outDir, `privacy-${browser.name}-${phone.name}.png`), fullPage: true });
             const privacy = await page.locator("main").innerText();
-            if (!privacy.includes("[LEGAL ENTITY NAME]") || !privacy.includes("13")) throw new Error("Privacy page is missing the draft text.");
+            if (!privacy.includes("Ironwood Hills, LLC") || !privacy.includes("13") || privacy.includes("[LEGAL ENTITY NAME]")) {
+              throw new Error("Privacy page is missing the filled-in draft text.");
+            }
             await page.goto(`${origin}/terms`, { waitUntil: "domcontentloaded" });
             await page.screenshot({ path: path.join(outDir, `terms-${browser.name}-${phone.name}.png`), fullPage: true });
             await page.goto(origin, { waitUntil: "domcontentloaded" });

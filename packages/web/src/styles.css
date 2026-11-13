@@ -1452,7 +1452,8 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   font-weight: 600;
 }
 .provider-button.apple { background: var(--paper); color: #111; }
-.google-host { min-height: 44px; display: flex; justify-content: center; }
+.google-host { display: flex; justify-content: center; }
+.google-host:empty { display: none; }
 .google-host > div { width: 100%; }
 .dev-link { margin: 8px 0; }
 .dev-link a { color: var(--gold); }
