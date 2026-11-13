@@ -3,11 +3,14 @@
  *
  *   npm run build
  *   node scripts/load-check.mjs
- *   node scripts/load-check.mjs --players 100 --seconds 180
+ *   node scripts/load-check.mjs --players 100 --seconds 180 --pace instant
+ *   node scripts/load-check.mjs --players 100 --seconds 120 --pace human
  *
  * Opens a mix of 2-, 3-, and 4-player tables and plays full games (one game to 150)
- * with scripted clients against the built server. Prints CPU, memory, event-loop
- * lag, websocket latency, errors, disconnects, and database load.
+ * with scripted clients against the built server. --pace human waits 2–6 seconds
+ * before each turn. The server is moved into a cgroup at 0.5 CPU and 512 MB when
+ * this machine allows it, which is the $7 Render plan. Prints CPU, memory,
+ * event-loop lag, websocket latency, errors, disconnects, and database load.
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -79,9 +82,9 @@ async function main() {
   let driver = 0;
   try {
     await waitForHealth(origin, 20_000);
-    const capped = capHalfCore(server.pid);
+    const capped = capRenderPlan(server.pid);
     console.log(
-      `Server up on ${origin}. ${plan.length} tables, ${seatCount} players. CPU cap ${capped ? "0.5 core" : "not applied"}.`,
+      `Server up on ${origin}. ${plan.length} tables, ${seatCount} players. Pace ${args.pace}. Cap ${capped.ok ? "0.5 CPU and 512 MB" : "not applied"}.`,
     );
     await post(origin, "/api/ops/metrics/reset");
     const before = await metrics(origin);
@@ -93,7 +96,7 @@ async function main() {
     await post(origin, "/api/ops/metrics/reset");
     const started = Date.now();
     let peakRss = before.rssMb ?? 0;
-    let peakLoop = before.eventLoop?.p95Ms ?? 0;
+    let peakLoop = 0;
     let peakQuery = before.queryMs ?? 0;
     const cpuStart = cpuSnap(server.pid);
     let nextSample = Date.now() + 5_000;
@@ -117,6 +120,7 @@ async function main() {
     }
     const cpuEnd = cpuSnap(server.pid);
     const after = await metrics(origin);
+    if ((after.eventLoop?.p95Ms ?? 0) > peakLoop) peakLoop = after.eventLoop.p95Ms;
     const latencies = tables.flatMap((table) => table.seats.flatMap((seat) => seat.samples));
     const fast = latencies.filter((ms) => ms < 1000);
     const disconnects = tables.reduce((sum, table) => sum + table.seats.reduce((inner, seat) => inner + seat.disconnects, 0), 0);
@@ -127,7 +131,9 @@ async function main() {
     const report = {
       localOnly: true,
       url: origin,
-      cpuCapApplied: capped,
+      pace: args.pace,
+      cpuCapApplied: capped.ok,
+      memoryCapMb: capped.memoryMb,
       plan: "0.5 CPU / 512 MB (render.yaml plan 0.5c-512mb)",
       players: seatCount,
       tables: plan.length,
@@ -215,7 +221,9 @@ function headroom(report) {
   } else if (cpuOfPlan > 0.85 || memoryOfPlan > 0.75 || (report.eventLoopLagMs.peakP95 ?? 0) > 150) {
     recommendation = "The current plan is close to full during this run. Watch the first session, and move to 1 CPU if turns start to lag.";
   }
-  if (!report.cpuCapApplied) {
+  if (report.cpuCapApplied) {
+    recommendation += " This run capped the server at 0.5 CPU and 512 MB, which is the live plan.";
+  } else {
     recommendation += " The process was not capped at half a core, so the live box can be slower than these latency numbers when it is busy.";
   }
   return {
@@ -315,7 +323,7 @@ function nudgeAll(tables) {
 
 function nudge(seat) {
   const view = seat.view;
-  if (seat.pendingAt && performance.now() - seat.pendingAt > 5_000) {
+  if (seat.pendingAt && performance.now() - seat.pendingAt > 8_000) {
     seat.pendingAt = 0;
     seat.sent = "";
   }
@@ -331,6 +339,7 @@ function nudge(seat) {
     if (!seat.host) return;
     const key = `between:${view.gameNumber}:${view.handNumber}`;
     if (seat.sent === key) return;
+    if (!thinkReady(seat, key)) return;
     seat.sent = key;
     seat.actions += 1;
     seat.pendingAt = performance.now();
@@ -354,26 +363,75 @@ function nudge(seat) {
   else if (view.canDraw) intent = { type: "draw" };
   else if (view.canKnock) intent = { type: "knock" };
   if (!intent) return;
+  if (!thinkReady(seat, key)) return;
   seat.sent = key;
   seat.actions += 1;
   seat.pendingAt = performance.now();
   seat.socket.send(JSON.stringify({ type: "intent", intent }));
 }
 
-function capHalfCore(pid) {
-  // A 0.5 CPU Render box is half of one core. Containers often refuse this write.
-  try {
-    const root = "/sys/fs/cgroup";
-    const controllers = readFileSync(`${root}/cgroup.controllers`, "utf8");
-    if (!controllers.split(/\s+/).includes("cpu")) return false;
-    const dir = `${root}/uhoh-load-${pid}`;
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(`${dir}/cpu.max`, "50000 100000");
-    writeFileSync(`${dir}/cgroup.procs`, String(pid));
-    return readFileSync(`${dir}/cpu.max`, "utf8").includes("50000");
-  } catch {
+/** Human seats wait 2–6 seconds after a turn becomes theirs. Instant seats play at once. */
+function thinkReady(seat, key) {
+  if (args.pace !== "human") return true;
+  if (seat.thinkKey !== key) {
+    seat.thinkKey = key;
+    seat.thinkUntil = performance.now() + 2_000 + Math.random() * 4_000;
     return false;
   }
+  return performance.now() >= seat.thinkUntil;
+}
+
+function capRenderPlan(pid) {
+  // The $7 Render service is half a core and 512 MB. Put only the server there.
+  const memoryBytes = 512 * 1024 * 1024;
+  try {
+    const parent = cgroupParent();
+    if (!parent) return { ok: false, memoryMb: null };
+    const subPath = `${parent}/cgroup.subtree_control`;
+    let sub = readFileSync(subPath, "utf8");
+    if (!sub.includes("cpu")) {
+      writeFileSync(subPath, "+cpu");
+      sub = readFileSync(subPath, "utf8");
+    }
+    if (!sub.includes("memory")) {
+      writeFileSync(subPath, "+memory");
+    }
+    const dir = `${parent}/uhoh-load-${pid}`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/cpu.max`, "50000 100000");
+    writeFileSync(`${dir}/memory.max`, String(memoryBytes));
+    writeFileSync(`${dir}/cgroup.procs`, String(pid));
+    const cpu = readFileSync(`${dir}/cpu.max`, "utf8");
+    const memory = Number(readFileSync(`${dir}/memory.max`, "utf8"));
+    const procs = readFileSync(`${dir}/cgroup.procs`, "utf8");
+    const ok = cpu.includes("50000") && memory === memoryBytes && procs.split(/\s+/).includes(String(pid));
+    return { ok, memoryMb: ok ? 512 : null };
+  } catch (error) {
+    console.error(`CPU cap failed (${error instanceof Error ? error.message : error}).`);
+    return { ok: false, memoryMb: null };
+  }
+}
+
+function cgroupParent() {
+  const line = readFileSync("/proc/self/cgroup", "utf8").trim().split("\n").pop() ?? "";
+  const selfPath = line.split(":").pop() ?? "";
+  let dir = `/sys/fs/cgroup${selfPath}`;
+  for (let hop = 0; hop < 8; hop += 1) {
+    if (hostsCapChild(dir)) return dir;
+    const up = dir.slice(0, dir.lastIndexOf("/"));
+    if (!up || up === dir) break;
+    dir = up;
+  }
+  return "";
+}
+
+/** A cgroup can hand out cpu and memory only when it has no processes of its own. */
+function hostsCapChild(dir) {
+  if (!existsSync(`${dir}/cgroup.controllers`) || !existsSync(`${dir}/cgroup.subtree_control`)) return false;
+  const controllers = readFileSync(`${dir}/cgroup.controllers`, "utf8");
+  if (!controllers.includes("cpu") || !controllers.includes("memory")) return false;
+  const procs = readFileSync(`${dir}/cgroup.procs`, "utf8").trim();
+  return procs.length === 0;
 }
 
 async function guest(origin, name) {
@@ -481,12 +539,13 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const out = { players: 100, seconds: 180, port: 8879 };
+  const out = { players: 100, seconds: 180, port: 8879, pace: "instant" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--players") out.players = Number(argv[++index] ?? 100);
     else if (arg === "--seconds") out.seconds = Number(argv[++index] ?? 180);
     else if (arg === "--port") out.port = Number(argv[++index] ?? 8879);
+    else if (arg === "--pace") out.pace = argv[++index] === "human" ? "human" : "instant";
     else if (arg === "--url") {
       const url = argv[++index] ?? "";
       if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(url)) {
@@ -497,5 +556,6 @@ function parseArgs(argv) {
   }
   if (!Number.isFinite(out.players) || out.players < 2) out.players = 100;
   if (!Number.isFinite(out.seconds) || out.seconds < 10) out.seconds = 180;
+  if (out.pace !== "human" && out.pace !== "instant") out.pace = "instant";
   return out;
 }

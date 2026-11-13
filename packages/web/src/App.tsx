@@ -611,74 +611,79 @@ export function Game({
     >
       <div className="felt-column">
       <header className="playbar">
-        <PlayMark />
-        {playing ? (
-          <button type="button" className="code-chip play-code" data-room-code={view.roomCode} onClick={() => copyText(link)}>
-            {view.roomCode}
-          </button>
-        ) : null}
-        <span className="build-sha" data-build={BUILD_SHA}>
-          {BUILD_SHA}
-        </span>
-        <p className="series-line" data-series-target={view.winsNeeded}>
+        <div className="play-id">
+          <PlayMark />
           {playing ? (
-            <>
-              {view.settings.seriesLength === 1
-                ? `Single game · H${view.handNumber} · `
-                : `Bo${view.settings.seriesLength} to ${view.winsNeeded} · G${view.gameNumber} · H${view.handNumber} · `}
-              <SeriesTarget view={view} />
-            </>
+            <button type="button" className="code-chip play-code" data-room-code={view.roomCode} onClick={() => copyText(link)}>
+              {view.roomCode}
+            </button>
+          ) : null}
+          <span className="build-sha" data-build={BUILD_SHA}>
+            {BUILD_SHA}
+          </span>
+          <p className="series-line" data-series-target={view.winsNeeded}>
+            {playing ? (
+              <>
+                {view.settings.seriesLength === 1
+                  ? `Single game · H${view.handNumber} · `
+                  : `Bo${view.settings.seriesLength} to ${view.winsNeeded} · G${view.gameNumber} · H${view.handNumber} · `}
+                <SeriesTarget view={view} />
+              </>
+            ) : (
+              "Lobby"
+            )}
+          </p>
+        </div>
+        <div className="play-actions">
+          {accountUser ? (
+            <AccountChip compact user={accountUser} onOpen={onAccount} />
           ) : (
-            "Lobby"
+            <button type="button" className="text-button play-signin" onClick={onAccount}>
+              Sign in
+            </button>
           )}
-        </p>
-        {accountUser ? (
-          <AccountChip compact user={accountUser} onOpen={onAccount} />
-        ) : (
-          <button type="button" className="text-button play-signin" onClick={onAccount}>
-            Sign in
+          <BugReport
+            context={{
+              roomCode: view.roomCode,
+              playerId: view.yourId,
+              seat: you?.player.seat ?? null,
+              tableSize: view.settings.playerCount,
+              handNumber: view.handNumber,
+            }}
+          />
+          <button
+            type="button"
+            className="icon-button mobile-only"
+            aria-label={chatOpen ? "Close chat" : unread ? "Talk, new messages" : "Talk"}
+            onClick={onToggleChat}
+          >
+            <TalkIcon />
+            {unread ? <span className="unread-dot" data-unread="true" /> : null}
           </button>
-        )}
-        <BugReport
-          context={{
-            roomCode: view.roomCode,
-            playerId: view.yourId,
-            seat: you?.player.seat ?? null,
-            tableSize: view.settings.playerCount,
-            handNumber: view.handNumber,
-          }}
-        />
-        <button
-          type="button"
-          className="icon-button mobile-only"
-          aria-label={chatOpen ? "Close chat" : unread ? "Talk, new messages" : "Talk"}
-          onClick={onToggleChat}
-        >
-          <TalkIcon />
-          {unread ? <span className="unread-dot" data-unread="true" /> : null}
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          aria-label={muted ? "Unmute" : "Mute"}
-          aria-pressed={muted}
-          onClick={() => {
-            const next = !muted;
-            setMuted(next);
-            setMute(next);
-            unlockSound();
-          }}
-        >
-          <SpeakerIcon muted={muted} />
-        </button>
-        <button
-          type="button"
-          className={`icon-button${leaveArmed ? " armed" : ""}`}
-          aria-label={leaveArmed ? "Leave now" : "Leave"}
-          onClick={leaveArmed ? onLeave : onLeaveArm}
-        >
-          {leaveArmed ? "Leave" : <LeaveIcon />}
-        </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={muted ? "Unmute" : "Mute"}
+            aria-pressed={muted}
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setMute(next);
+              unlockSound();
+            }}
+          >
+            <SpeakerIcon muted={muted} />
+          </button>
+          <button
+            type="button"
+            className={`icon-button${leaveArmed ? " armed" : ""}`}
+            aria-label={leaveArmed ? "Leave now" : "Leave"}
+            data-action="leave"
+            onClick={leaveArmed ? onLeave : onLeaveArm}
+          >
+            {leaveArmed ? "Leave" : <LeaveIcon />}
+          </button>
+        </div>
       </header>
 
       {status !== "live" ? <p className="banner">Reconnecting…</p> : null}

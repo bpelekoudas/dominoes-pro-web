@@ -219,7 +219,26 @@ input {
   flex-wrap: nowrap;
   gap: 6px;
   min-height: 44px;
+  min-width: 0;
   padding: env(safe-area-inset-top) 4px 0 8px;
+}
+/* The room and the build stay on the left and may shrink. Leave, mute, talk,
+   and the bug control stay on the right and are never clipped. */
+.play-id {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  container-type: inline-size;
+}
+.play-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+  margin-left: auto;
 }
 .play-mark { width: 16px; height: 24px; flex: none; }
 .play-mark rect { fill: var(--red); }
@@ -283,7 +302,7 @@ input {
   text-align: center;
 }
 @media (max-width: 360px) {
-  .playbar { gap: 2px; padding-left: 2px; padding-right: 0; }
+  .playbar { gap: 2px; padding-left: 2px; padding-right: 2px; }
   .icon-button { width: 36px; height: 36px; min-height: 36px; }
   .play-code { padding: 0 4px; font-size: 0.72rem; }
   .series-line { font-size: 0.7rem; }
@@ -4169,14 +4188,18 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
 .bug-sheet textarea { min-height: 96px; resize: vertical; }
 .bug-note, .bug-status { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .bug-status { color: var(--paper); }
-@media (max-width: 699px) {
-  .playbar > .build-sha { display: none; }
+/* A narrow row used to ellipsize the series line down to "S…". Hide that line
+   until the left cluster can show a real phrase, and keep the 7-character build. */
+@container (max-width: 188px) {
+  .play-id > .series-line { display: none; }
 }
 @media (min-width: 700px) {
   .bug-entry .bug-short { display: none; }
   .bug-entry .bug-long { display: inline; }
 }
-@media (max-width: 400px) {
-  .playbar .profile-chip.compact { max-width: 72px; padding-right: 4px; }
-  .bug-entry { padding: 0 6px; }
+@media (max-width: 430px) {
+  .play-actions .icon-button { width: 34px; height: 34px; min-height: 34px; }
+  .play-actions .play-signin { padding: 0 6px; font-size: 0.75rem; }
+  .play-actions .bug-entry { height: 32px; min-height: 32px; padding: 0 6px; }
+  .play-actions .profile-chip.compact { max-width: 64px; padding-right: 4px; }
 }
