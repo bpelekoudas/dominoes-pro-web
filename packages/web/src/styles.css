@@ -390,13 +390,21 @@ input {
 .stack-badge .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; margin-top: 1px; }
 .stack-badge .cpu-tag { display: none; }
 .stack-badge .talk-line {
-  left: 2px;
-  right: 2px;
+  left: calc(100% + 4px);
+  right: auto;
   top: auto;
-  bottom: 2px;
+  bottom: 0;
+  width: max-content;
+  max-width: 168px;
   transform: none;
-  max-height: 14px;
+  max-height: none;
 }
+.opponent-chip[data-edge="top"] .stack-badge .talk-line,
+.opponent-chip[data-edge="right"] .stack-badge .talk-line {
+  left: auto;
+  right: calc(100% + 4px);
+}
+.stack-badge .game-col { position: relative; z-index: 1; }
 .hand-tray > .opponent-chip[data-edge="right"] {
   position: absolute;
   top: 2px;
