@@ -169,6 +169,7 @@ export function Table({
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
   const [glideT, setGlideT] = useState(1);
+  const [pin, setPin] = useState<{ left: number; top: number } | null>(null);
   const glideCam = useRef<{
     fromScale: number;
     toScale: number;
@@ -472,19 +473,26 @@ export function Table({
     const viewport = viewportRef.current;
     if (!handOver || !viewport) {
       setLift((current) => (current === 0 ? current : 0));
+      setPin((current) => (current == null ? current : null));
       root.style.removeProperty("--hand-sheet-max");
       return;
     }
-    // Leave the scaler where it is. Swapping its transform for a fixed
-    // position eases the whole chain off the felt and back under DOMINO!.
+    // The clip-path on the felt is a containing block, so a fixed scaler
+    // inside it moves when the reveal resizes the table. Lift the picture
+    // onto the body at the rect the player is already looking at.
     window.cancelAnimationFrame(glideTimer.current);
     const stage = viewport.querySelector<HTMLElement>(".board-stage");
+    const scaler = viewport.querySelector<HTMLElement>(".board-scaler");
     const matrix = new DOMMatrix(getComputedStyle(stage ?? viewport).transform);
     const visual = Math.abs(matrix.a) > 0.05 ? Math.abs(matrix.a) : null;
     glideCam.current = null;
     if (visual != null) {
       held.current = { hand: handKey, scale: visual };
       setScale((current) => (Math.abs(current - visual) < 0.001 ? current : visual));
+    }
+    if (scaler) {
+      const rect = scaler.getBoundingClientRect();
+      if (rect.width > 2 && rect.height > 2) setPin({ left: rect.left, top: rect.top });
     }
     setGlideT(1);
     setLift(0);
@@ -585,12 +593,22 @@ export function Table({
       {layout && frame ? (
         <div
           className="board-clip"
-          style={{ clipPath: `inset(${Math.max(clip.top, edgeRef.current?.top ?? 0)}px ${Math.max(clip.right, edgeRef.current?.right ?? 0)}px ${Math.max(clip.bottom, edgeRef.current?.bottom ?? 0)}px ${Math.max(clip.left, edgeRef.current?.left ?? 0)}px)` }}
+          style={pin ? undefined : { clipPath: `inset(${Math.max(clip.top, edgeRef.current?.top ?? 0)}px ${Math.max(clip.right, edgeRef.current?.right ?? 0)}px ${Math.max(clip.bottom, edgeRef.current?.bottom ?? 0)}px ${Math.max(clip.left, edgeRef.current?.left ?? 0)}px)` }}
         >
         <div
           className="board-scaler"
-          data-pinned="false"
-          style={{
+          data-pinned={pin ? "true" : "false"}
+          style={pin ? {
+            position: "fixed",
+            left: pin.left,
+            top: pin.top,
+            margin: 0,
+            zIndex: 2,
+            width: frame.w * shownScale,
+            height: frame.h * shownScale,
+            transform: "none",
+            transition: "none",
+          } : {
             width: frame.w * shownScale,
             height: frame.h * shownScale,
             transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
