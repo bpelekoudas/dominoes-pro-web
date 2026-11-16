@@ -1581,7 +1581,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .timer-ring { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); }
 .avatar { position: relative; }
 .timer-ring circle { fill: none; stroke: rgba(239, 239, 239, 0.25); stroke-width: 3; }
-.timer-arc { stroke: var(--gold) !important; stroke-dasharray: 100; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 18px 18px; }
+.timer-arc { stroke: var(--gold) !important; stroke-dasharray: 100; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transform-box: fill-box; }
 .turn-bar {
   position: relative;
   display: grid;

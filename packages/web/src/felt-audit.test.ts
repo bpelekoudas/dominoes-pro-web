@@ -10,7 +10,9 @@ function failures(report: AuditSizeReport): number {
     + report.tiny
     + report.zoomIn
     + report.jump
-    + report.ghostCut;
+    + report.ghostCut
+    + report.connectGap
+    + report.handEndSnap;
 }
 
 describe("felt stress audit", () => {

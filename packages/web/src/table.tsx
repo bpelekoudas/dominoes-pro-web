@@ -180,6 +180,8 @@ export function Table({
     hide: Set<string>;
   } | null>(null);
   const glideTimer = useRef(0);
+  const feltRef = useRef<{ w: number; h: number } | null>(null);
+  const edgeRef = useRef<AxisInsets | null>(null);
   const glideEase = glideT < 1 ? cameraEase(glideT) : 1;
   const gliding = glideT < 1 && glideCam.current != null;
   const shownScale = (gliding
@@ -241,8 +243,12 @@ export function Table({
     const measure = () => {
       const handsClear = handClearance(viewport);
       setClip((current) => (sameInsets(current, handsClear) ? current : handsClear));
-      // Hand over keeps the last scale. The sheet must not zoom the chain.
-      if (frozen.current && held.current?.hand === handKey) return;
+      // The hand is over. Keep the scale and the fold. A sheet must not
+      // snap the chain to a smaller picture.
+      if (handOver || (frozen.current && held.current?.hand === handKey)) {
+        frozen.current = true;
+        return;
+      }
       let width = viewport.clientWidth;
       let height = viewport.clientHeight;
       if (width < 8 || height < 8) return;
@@ -281,6 +287,7 @@ export function Table({
       // picture zooms only when that turned chain no longer fits the frame.
       if (!liveBoard?.center) return;
       const previous = held.current?.hand === handKey ? held.current.scale : null;
+      feltRef.current = felt;
       const solved = settledHandCamera({
         board: liveBoard,
         felt,
@@ -290,6 +297,7 @@ export function Table({
         previous,
         heldLimits: limitHold.current?.hand === handKey ? limitHold.current.limits : null,
       });
+      edgeRef.current = solved.edge;
       // The readable fold already keeps the previous limits when a new
       // rectangle would not make the tiles larger. Adopt that choice.
       if (!limitHold.current || limitHold.current.hand !== handKey || resized) {
@@ -590,7 +598,7 @@ export function Table({
       {layout && frame ? (
         <div
           className="board-clip"
-          style={{ clipPath: `inset(${clip.top}px ${clip.right}px ${clip.bottom}px ${clip.left}px)` }}
+          style={{ clipPath: `inset(${Math.max(clip.top, edgeRef.current?.top ?? 0)}px ${Math.max(clip.right, edgeRef.current?.right ?? 0)}px ${Math.max(clip.bottom, edgeRef.current?.bottom ?? 0)}px ${Math.max(clip.left, edgeRef.current?.left ?? 0)}px)` }}
         >
         <div
           className="board-scaler"
@@ -608,7 +616,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) || tileCrossesInset(tile, shownScale, shift, feltRef.current, edgeRef.current) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
@@ -809,6 +817,16 @@ function Arrival({
       const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
       return placed ? projectTile(placed) : null;
     };
+    const insideFelt = (box: SeatBox): boolean => {
+      const viewport = document.querySelector<HTMLElement>(".table-scroll");
+      if (!viewport) return true;
+      const felt = viewport.getBoundingClientRect();
+      const inset = (name: string) => Number(viewport.dataset[name] ?? 8);
+      return box.left >= felt.left + inset("playLeft") - 0.6
+        && box.top >= felt.top + inset("playTop") - 0.6
+        && box.left + box.width <= felt.right - inset("playRight") + 0.6
+        && box.top + box.height <= felt.bottom - inset("playBottom") + 0.6;
+    };
     const start = () => {
       const origin = from ?? liveHandBox(playerId);
       const to = destination();
@@ -816,6 +834,18 @@ function Arrival({
       const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
       tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
       tile?.classList.add("is-arriving");
+      // The cell is still past the copper at this camera. Hold the tile off
+      // the felt until the glide has room for it.
+      if (!insideFelt(to)) {
+        releaseCamera();
+        endRef.current();
+        parkTimer = window.setTimeout(() => {
+          tile?.classList.remove("is-arriving");
+          if (!cancelled) setBox(null);
+          settledRef.current();
+        }, CAMERA_EASE_MS);
+        return true;
+      }
       setFace(
         placed
           ? { a: placed.a, b: placed.b, orientation: placed.orientation }
@@ -1208,6 +1238,23 @@ function FlyingScore({
     </p>,
     document.body,
   );
+}
+
+function tileCrossesInset(
+  tile: LayoutBox,
+  scale: number,
+  shift: { x: number; y: number },
+  felt: { w: number; h: number } | null,
+  edge: AxisInsets | null,
+): boolean {
+  if (!felt || felt.w < 8 || felt.h < 8 || !edge || !(scale > 0)) return false;
+  const rect = renderedTileRect(felt, tile, scale, shift);
+  return Math.max(
+    edge.left - rect.left,
+    edge.top - rect.top,
+    rect.right - (felt.w - edge.right),
+    rect.bottom - (felt.h - edge.bottom),
+  ) > 0.6;
 }
 
 function place(box: LayoutBox, fit: LayoutBox): { left: number; top: number; width: number; height: number } {

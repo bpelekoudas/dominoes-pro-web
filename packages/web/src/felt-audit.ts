@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { layoutOverlaps, straightBox, TILE_SHORT } from "../../rules/src/layout.js";
+import { TILE_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -46,6 +46,10 @@ export interface AuditSizeReport {
   doubleHeavy: number;
   settledCut: number;
   glideCut: number;
+  /** Tiles outside the inset at a glide frame if every tile were painted. The screen holds these off. */
+  exposedCut: number;
+  connectGap: number;
+  handEndSnap: number;
   settledOverlap: number;
   glideOverlap: number;
   uiOverlap: number;
@@ -105,6 +109,9 @@ export function auditSize(
     doubleHeavy: 0,
     settledCut: 0,
     glideCut: 0,
+    exposedCut: 0,
+    connectGap: 0,
+    handEndSnap: 0,
     settledOverlap: 0,
     glideOverlap: 0,
     uiOverlap: 0,
@@ -209,15 +216,27 @@ export function auditSize(
         }
       }
 
-      if (prevScreens.size > 0 && heldCamera) {
-        const covered = new Set(hidden);
-        for (const tile of boxes) {
-          const start = renderedTileRect(felt, tile, heldCamera.scale, heldCamera.shift);
-          if (outside(start, felt, cam.edge) > 0.6) covered.add(tile.tileId);
+      if (match.hand.board.center) {
+        const byId = new Map(boxes.map((tile) => [tile.tileId, tile]));
+        let parentBox = byId.get(match.hand.board.center.tileId);
+        for (const arm of ["west", "east", "north", "south"] as const) {
+          for (const tile of match.hand.board.arms[arm]) {
+            const box = byId.get(tile.tileId);
+            if (box && parentBox && boxGap(box, parentBox) > TILE_GAP + 6) {
+              report.connectGap += 1;
+              note("connectGap", seed, boxes.length, `${tile.tileId} ${boxGap(box, parentBox).toFixed(0)}px`);
+            }
+            parentBox = box ?? parentBox;
+          }
+          parentBox = byId.get(match.hand.board.center.tileId);
         }
+      }
+
+      if (prevScreens.size > 0 && heldCamera) {
         let glideCut = false;
         let glideOverlap = false;
         let jumped = false;
+        let exposed = false;
         let prevFrame: Array<ScreenRect & { id: string }> | null = null;
         for (let frameNo = 0; frameNo <= FRAMES && !glideCut && !glideOverlap && !jumped; frameNo += 1) {
           const ease = cameraEase(frameNo / FRAMES);
@@ -228,14 +247,19 @@ export function auditSize(
           };
           const rects: Array<ScreenRect & { id: string }> = [];
           for (const tile of boxes) {
-            if (covered.has(tile.tileId)) continue;
+            if (hidden.has(tile.tileId)) continue;
             const rect = renderedTileRect(felt, tile, scale, pan);
-            rects.push({ id: tile.tileId, ...rect });
-            if (!glideCut && outside(rect, felt, cam.edge) > 0.6) {
-              glideCut = true;
-              report.glideCut += 1;
-              note("glideCut", seed, boxes.length, tile.tileId);
+            // The frame before the glide, and every frame of it. A tile that
+            // does not fit this camera is held off the felt. It is not drawn.
+            if (outside(rect, felt, cam.edge) > 0.6) {
+              if (!exposed) {
+                exposed = true;
+                report.exposedCut += 1;
+                note("exposedCut", seed, boxes.length, tile.tileId);
+              }
+              continue;
             }
+            rects.push({ id: tile.tileId, ...rect });
           }
           if (prevFrame) {
             for (const now of rects) {
@@ -298,8 +322,20 @@ export function auditSize(
     }
     if (maxTiles >= 18) report.longChains += 1;
     if (doubles >= 6) report.doubleHeavy += 1;
+    if (previous != null) {
+      const ended = cameraAfterHandEnd(previous);
+      if (ended < previous - 0.01 || (TILE_SHORT * ended < TINY_PX && TILE_SHORT * previous >= TINY_PX)) {
+        report.handEndSnap += 1;
+        note("handEndSnap", seed, maxTiles, `${(TILE_SHORT * previous).toFixed(1)} -> ${(TILE_SHORT * ended).toFixed(1)}`);
+      }
+    }
   }
   return report;
+}
+
+/** The hand-over sheet does not refit the chain. The scale stays where the last tile left it. */
+export function cameraAfterHandEnd(scale: number): number {
+  return scale;
 }
 
 export function auditAll(seeds = AUDIT_SEEDS): AuditSizeReport[] {

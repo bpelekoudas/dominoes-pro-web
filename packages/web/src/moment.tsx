@@ -180,7 +180,9 @@ export function MomentLayer({
     ? { left: anchor.x, top: anchor.y, width: anchor.w, height: anchor.h }
     : { left: "50%", top: "46%", width: 44, height: 88 };
 
-  const burst = reduced
+  // A plain score shows the points. The full-screen fracture reads as broken
+  // geometry over the chain, so it stays off unless the table cries UH OH.
+  const burst = reduced || !cry
     ? null
     : createPortal(
         <>
