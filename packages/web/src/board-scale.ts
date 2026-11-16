@@ -1,5 +1,5 @@
 import type { BoardState } from "../../rules/src/board.js";
-import { FIT_MARGIN, layoutBoard, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
+import { FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -455,6 +455,22 @@ export function renderedTileRect(
   return { left, top, right: left + tile.w * scale, bottom: top + tile.h * scale };
 }
 
+/** Design box that paints `screen` under this camera. The felt's top-left is the origin. */
+export function designFromScreen(
+  screen: { left: number; top: number; right: number; bottom: number },
+  felt: FeltSize,
+  scale: number,
+  shift: { x: number; y: number },
+): LayoutBox {
+  const safe = Math.max(0.05, scale);
+  return {
+    x: (screen.left - felt.w / 2 - shift.x) / safe,
+    y: (screen.top - felt.h / 2 - shift.y) / safe,
+    w: (screen.right - screen.left) / safe,
+    h: (screen.bottom - screen.top) / safe,
+  };
+}
+
 /** True when the two boxes overlap. `gap` keeps that many pixels of air as overlap too. */
 export function rectsMeet(
   a: { left: number; top: number; right: number; bottom: number },
@@ -599,27 +615,115 @@ export function settledHandCamera(input: {
     top: Math.max(input.frame.top, stacks.top),
     bottom: Math.max(input.frame.bottom, stacks.bottom),
   };
-  const solved = feltScale({
-    board: input.board,
-    felt: input.felt,
-    screenWidth: input.screenWidth,
-    previous: input.previous,
-    newHand: input.previous == null,
-    frame: edge,
-  });
-  let limits = input.heldLimits ?? solved.limits;
-  const grew = input.heldLimits != null && (solved.limits.width > input.heldLimits.width + 4 || solved.limits.height > input.heldLimits.height + 4);
-  const tighter = input.heldLimits != null && (solved.limits.width < input.heldLimits.width - 8 || solved.limits.height < input.heldLimits.height - 8);
-  if (!input.heldLimits || grew || tighter) limits = solved.limits;
-  const layout = layoutBoard(input.board, limits);
-  const scale = fitFrameScale({
-    tiles: layout.tiles,
-    felt: input.felt,
-    screenWidth: input.screenWidth,
-    frame: edge,
-    previous: input.previous,
-  });
-  return { scale, limits, obstacles: [], layout, nudge: { x: 0, y: 0 }, edge };
+  const open = (OPEN_TILE_FRAC * Math.max(1, input.screenWidth)) / TILE_SHORT;
+  const cap = input.previous == null || !Number.isFinite(input.previous) ? open : Math.min(input.previous, open);
+  const room = safeRoom(input.felt, edge);
+  const obstacles = designObstacles(input.felt, boardShift(edge), cap, input.keepOuts ?? [], STACK_AIR);
+  const chosen = chooseReadableLayout(input.board, room, cap, input.heldLimits ?? null, obstacles);
+  const scale = containedScale(
+    [...chosen.layout.tiles, ...chosen.layout.ends],
+    input.felt,
+    edge,
+    Math.min(cap, chosen.scale),
+  );
+  return { scale, limits: chosen.limits, obstacles, layout: chosen.layout, nudge: { x: 0, y: 0 }, edge };
+}
+
+/** Shrink until the centred chain sits inside the frame. The room math can miss by a pixel once the chain is recentered. */
+function containedScale(
+  tiles: readonly LayoutBox[],
+  felt: FeltSize,
+  edge: AxisInsets,
+  scale: number,
+): number {
+  let next = scale;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const shift = {
+      x: chainViewShift(tiles, next).x + boardShift(edge).x,
+      y: chainViewShift(tiles, next).y + boardShift(edge).y,
+    };
+    let over = 0;
+    for (const tile of tiles) {
+      const rect = renderedTileRect(felt, tile, next, shift);
+      over = Math.max(
+        over,
+        edge.left - rect.left,
+        edge.top - rect.top,
+        rect.right - (felt.w - edge.right),
+        rect.bottom - (felt.h - edge.bottom),
+      );
+    }
+    if (over <= 0) return next;
+    const span = Math.min(felt.w - edge.left - edge.right, felt.h - edge.top - edge.bottom);
+    next *= Math.max(0.85, (span - over - 1) / Math.max(1, span));
+  }
+  return next;
+}
+
+/**
+ * Fold the same chain into a few felt sizes and keep the one that stays
+ * largest on screen. A long arm turns into the open side instead of
+ * shrinking the tiles. The scale never goes above the opening size, and
+ * it never goes above the previous zoom.
+ */
+const READABLE_WIDTHS = [0.4, 0.55, 0.75, 1, 1.45, 2.1];
+const READABLE_HEIGHTS = [0.45, 0.7, 1, 1.45, 2.1, 2.9];
+
+export function chooseReadableLayout(
+  board: BoardState,
+  room: FeltSize,
+  cap: number,
+  held: { width: number; height: number } | null,
+  obstacles: LayoutBox[] = [],
+): { limits: { width: number; height: number }; scale: number; layout: ReturnType<typeof layoutBoard> } {
+  const safeCap = Math.max(0.2, cap);
+  const baseW = Math.max(TILE_LONG * 2, room.w / safeCap);
+  const baseH = Math.max(TILE_LONG * 3, room.h / safeCap);
+  const candidates: { width: number; height: number }[] = [];
+  if (held) candidates.push(held);
+  for (const widthFactor of READABLE_WIDTHS) {
+    for (const heightFactor of READABLE_HEIGHTS) {
+      candidates.push({
+        width: Math.max(TILE_LONG * 2, baseW * widthFactor),
+        height: Math.max(TILE_LONG * 3, baseH * heightFactor),
+      });
+    }
+  }
+  let best: { limits: { width: number; height: number }; scale: number; layout: ReturnType<typeof layoutBoard> } | null = null;
+  for (const limits of candidates) {
+    const layout = layoutBoard(board, { ...limits, obstacles });
+    if (layoutOverlaps(layout)) continue;
+    const box = chainBounds(layout.tiles, 0);
+    const fitW = room.w / Math.max(1, box.w);
+    const fitH = room.h / Math.max(1, box.h);
+    const scale = Math.min(safeCap, fitW, fitH);
+    const heldMatch = held != null && Math.abs(limits.width - held.width) < 1 && Math.abs(limits.height - held.height) < 1;
+    const better = best == null || scale > best.scale + 0.008 || (Math.abs(scale - best.scale) <= 0.008 && heldMatch);
+    if (better) best = { limits, scale, layout };
+    if (scale >= safeCap - 0.005) break;
+  }
+  if (best) return best;
+  const layout = layoutBoard(board, { ...(held ?? { width: baseW, height: baseH }), obstacles });
+  const box = chainBounds(layout.tiles, 0);
+  return {
+    limits: held ?? { width: baseW, height: baseH },
+    scale: Math.min(safeCap, room.w / Math.max(1, box.w), room.h / Math.max(1, box.h)),
+    layout,
+  };
+}
+
+/** Pull a play-target ghost back inside the copper inset. The tile stays full size when the room allows. */
+export function clampGhostToFelt(
+  box: { left: number; top: number; width: number; height: number },
+  bounds: { left: number; top: number; right: number; bottom: number },
+): { left: number; top: number; width: number; height: number } {
+  const roomW = Math.max(1, bounds.right - bounds.left);
+  const roomH = Math.max(1, bounds.bottom - bounds.top);
+  const width = Math.min(box.width, roomW);
+  const height = Math.min(box.height, roomH);
+  const left = Math.min(Math.max(box.left, bounds.left), bounds.right - width);
+  const top = Math.min(Math.max(box.top, bounds.top), bounds.bottom - height);
+  return { left, top, width, height };
 }
 
 /**

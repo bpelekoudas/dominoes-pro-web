@@ -11,7 +11,9 @@ import {
   CAMERA_EASE_MS,
   cameraHoldStale,
   cameraSettlesOn,
+  cameraEase,
   chainViewShift,
+  clampGhostToFelt,
   fitFrameScale,
   frameInsets,
   settledHandCamera,
@@ -167,8 +169,29 @@ export function Table({
   const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
-  const shift = { x: pan.x + nudge.x, y: pan.y + nudge.y };
-  const shownScale = scale * nudge.zoom;
+  const [glideT, setGlideT] = useState(1);
+  const glideCam = useRef<{
+    fromScale: number;
+    toScale: number;
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    hide: Set<string>;
+  } | null>(null);
+  const glideTimer = useRef(0);
+  const glideEase = glideT < 1 ? cameraEase(glideT) : 1;
+  const gliding = glideT < 1 && glideCam.current != null;
+  const shownScale = (gliding
+    ? glideCam.current!.fromScale + (glideCam.current!.toScale - glideCam.current!.fromScale) * glideEase
+    : scale) * nudge.zoom;
+  const panNow = gliding
+    ? {
+      x: glideCam.current!.fromX + (glideCam.current!.toX - glideCam.current!.fromX) * glideEase,
+      y: glideCam.current!.fromY + (glideCam.current!.toY - glideCam.current!.fromY) * glideEase,
+    }
+    : pan;
+  const shift = { x: panNow.x + nudge.x, y: panNow.y + nudge.y };
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number; table: string } | null>(null);
@@ -196,6 +219,8 @@ export function Table({
 
   useLayoutEffect(() => {
     placedBoxes.current = new Map();
+    glideCam.current = null;
+    setGlideT(1);
     setRelocating(new Set());
     window.clearTimeout(relocateTimer.current);
   }, [handKey]);
@@ -265,19 +290,14 @@ export function Table({
         previous,
         heldLimits: limitHold.current?.hand === handKey ? limitHold.current.limits : null,
       });
-      // Badges jitter by a pixel and must not refold the snake. A zoom-out
-      // grows the design felt, and that growth is the one change that sticks.
-      const grew =
-        limitHold.current?.hand === handKey &&
-        (solved.limits.width > limitHold.current.limits.width + 4 ||
-          solved.limits.height > limitHold.current.limits.height + 4);
-      // A badge or a longer side hand can pull the turn in. A one-pixel
-      // jitter must not. Eight design pixels is about one pip at phone size.
-      const tighter =
-        limitHold.current?.hand === handKey &&
-        (solved.limits.width < limitHold.current.limits.width - 8 ||
-          solved.limits.height < limitHold.current.limits.height - 8);
-      if (!limitHold.current || limitHold.current.hand !== handKey || grew || tighter || resized) {
+      // The readable fold already keeps the previous limits when a new
+      // rectangle would not make the tiles larger. Adopt that choice.
+      if (!limitHold.current || limitHold.current.hand !== handKey || resized) {
+        limitHold.current = { hand: handKey, limits: solved.limits };
+      } else if (
+        Math.abs(limitHold.current.limits.width - solved.limits.width) > 1
+        || Math.abs(limitHold.current.limits.height - solved.limits.height) > 1
+      ) {
         limitHold.current = { hand: handKey, limits: solved.limits };
       }
       const handLimits = limitHold.current.limits;
@@ -346,6 +366,7 @@ export function Table({
       ) {
         return;
       }
+      const previousShift = anchorHold.current?.hand === handKey ? anchorHold.current.shift : null;
       anchorHold.current = { hand: handKey, shift: nextShift };
       settledTiles.current = { hand: handKey, ids: tileIds };
       const shift = nextShift;
@@ -359,6 +380,45 @@ export function Table({
       viewport.dataset.playRight = solved.edge.right.toFixed(0);
       viewport.dataset.cameraSettling = "false";
       viewport.dataset.zoom = "ease";
+      const prevScale = held.current?.hand === handKey ? held.current.scale : null;
+      const cameraMoves =
+        prevScale == null
+        || Math.abs(prevScale - zoom) > 0.01
+        || previousShift == null
+        || Math.abs(previousShift.x - shift.x) > 1
+        || Math.abs(previousShift.y - shift.y) > 1;
+      const feltNow = { w: width, h: height };
+      if (cameraMoves && prevScale != null && previousShift && !prefersReducedMotion()) {
+        const hide = new Set<string>();
+        for (const tile of picture.tiles) {
+          const start = renderedTileRect(feltNow, tile, prevScale, previousShift);
+          const past = Math.max(
+            solved.edge.left - start.left,
+            solved.edge.top - start.top,
+            start.right - (feltNow.w - solved.edge.right),
+            start.bottom - (feltNow.h - solved.edge.bottom),
+          );
+          if (past > 0.6) hide.add(tile.tileId);
+        }
+        glideCam.current = {
+          fromScale: prevScale,
+          toScale: zoom,
+          fromX: previousShift.x,
+          fromY: previousShift.y,
+          toX: shift.x,
+          toY: shift.y,
+          hide,
+        };
+        setGlideT(0);
+        const started = performance.now();
+        window.cancelAnimationFrame(glideTimer.current);
+        const step = (now: number) => {
+          const t = Math.min(1, (now - started) / CAMERA_EASE_MS);
+          setGlideT(t);
+          if (t < 1) glideTimer.current = window.requestAnimationFrame(step);
+        };
+        glideTimer.current = window.requestAnimationFrame(step);
+      }
       held.current = { hand: handKey, scale: zoom };
       frozen.current = handOver;
       setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
@@ -519,6 +579,7 @@ export function Table({
       data-win-board="true"
       data-camera={cameraArmed ? "armed" : "hold"}
       data-zoom="ease"
+      data-glide={glideT < 1 ? "locked" : "free"}
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
@@ -547,7 +608,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
@@ -601,12 +662,23 @@ export function Table({
       ) : null}
       {slots.map((slot) => {
         const face = ghostFaces.get(slot.id) ?? null;
+        const viewport = viewportRef.current;
+        const felt = viewport?.getBoundingClientRect();
+        const inset = (name: string) => Number(viewport?.dataset[name] ?? 8);
+        const placed = felt
+          ? clampGhostToFelt(slot, {
+            left: felt.left + inset("playLeft"),
+            top: felt.top + inset("playTop"),
+            right: felt.right - inset("playRight"),
+            bottom: felt.bottom - inset("playBottom"),
+          })
+          : slot;
         return createPortal(
           <div
             key={slot.id}
             className="ghost-slot"
             data-end-id={slot.id}
-            style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
+            style={{ left: placed.left, top: placed.top, width: placed.width, height: placed.height }}
           >
             {face ? <Domino a={face.a} b={face.b} orientation={face.orientation} /> : null}
           </div>,

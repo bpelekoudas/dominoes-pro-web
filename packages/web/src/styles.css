@@ -409,12 +409,20 @@ input {
 .stack-badge .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; margin-top: 1px; }
 .stack-badge .cpu-tag { display: none; }
 .stack-badge .talk-line {
-  left: 2px;
-  right: 2px;
+  left: 0;
+  right: auto;
   top: auto;
-  bottom: 2px;
+  bottom: calc(100% + 4px);
   transform: none;
-  max-height: 14px;
+  width: max-content;
+  max-width: 168px;
+  max-height: none;
+  white-space: nowrap;
+}
+.opponent-chip[data-edge="right"] .stack-badge .talk-line,
+.opponent-chip[data-edge="top"] .stack-badge .talk-line {
+  left: auto;
+  right: 0;
 }
 .hand-tray > .opponent-chip[data-edge="right"] {
   position: absolute;
@@ -972,7 +980,11 @@ input {
     height var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
 }
 .table-scroll[data-cam-user="drag"] .board-scaler,
-.table-scroll[data-cam-user="drag"] .board-stage {
+.table-scroll[data-cam-user="drag"] .board-stage,
+.table-scroll[data-glide="locked"] .board-scaler,
+.table-scroll[data-glide="locked"] .board-stage,
+.table-scroll[data-glide="locked"] .board-tile,
+.table-scroll[data-glide="locked"] .end-cap {
   transition: none;
 }
 .cam-edge {
