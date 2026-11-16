@@ -14,14 +14,15 @@ import {
 } from "./board-scale.js";
 
 /** Playable felt inside each phone, after the playbar, badges, and hand. */
+/** Measured `.table-scroll` size at each phone viewport, build 9e0cd2c. */
 export const AUDIT_FELTS = [
-  { name: "360x780", w: 360, h: 508 },
-  { name: "390x844", w: 390, h: 563 },
-  { name: "412x915", w: 412, h: 611 },
-  { name: "430x932", w: 430, h: 628 },
-  { name: "344x882", w: 344, h: 614 },
-  { name: "673x841", w: 673, h: 527 },
-  { name: "375x667", w: 375, h: 387 },
+  { name: "360x780", w: 360, h: 494 },
+  { name: "390x844", w: 390, h: 558 },
+  { name: "412x915", w: 412, h: 628 },
+  { name: "430x932", w: 430, h: 645 },
+  { name: "344x882", w: 344, h: 596 },
+  { name: "673x841", w: 673, h: 555 },
+  { name: "375x667", w: 375, h: 381 },
 ] as const;
 
 export const AUDIT_SEEDS = 200;
