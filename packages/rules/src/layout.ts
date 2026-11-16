@@ -2257,17 +2257,6 @@ function layoutBoardNow(
             center,
           )
           : null;
-        const stepped = feltChoice ?? clearStep(
-          snakeStep(tile, from, arm, center, chain.slice(index), placed, false),
-          from.box,
-          isDoubleTile(tile),
-          blockers(),
-        );
-        const seated = feltChoice ?? seatNewTile(from.box, from.dir, isDoubleTile(tile), placed);
-        const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box)
-          && boxGap(stepped.box, from.box) <= TILE_GAP + 1;
-        const seatedClear = !overlapsPlaced(seated.box, placed) && !boxesOverlap(seated.box, from.box)
-          && boxGap(seated.box, from.box) <= TILE_GAP + 1;
         const choice = feltChoice
           ? {
             box: feltChoice.box,
@@ -2280,16 +2269,31 @@ function layoutBoardNow(
             column: false,
             nextDir: feltChoice.opening ? opposite(from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir) : feltChoice.dir,
           }
-          : steppedClear ? stepped : seatedClear ? {
-            box: seated.box,
-            dir: seated.dir,
-            row: from.row,
-            line: from.line,
-            run: seated.dir === from.dir ? from.run + 1 : 1,
-            opening: seated.dir !== from.dir,
-            fromDouble: false,
-            column: false,
-          } : null;
+          : (() => {
+            const stepped = clearStep(
+              snakeStep(tile, from, arm, center, chain.slice(index), placed, false),
+              from.box,
+              isDoubleTile(tile),
+              blockers(),
+            );
+            const seated = seatNewTile(from.box, from.dir, isDoubleTile(tile), placed);
+            const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box)
+              && boxGap(stepped.box, from.box) <= TILE_GAP + 1;
+            const seatedClear = !overlapsPlaced(seated.box, placed) && !boxesOverlap(seated.box, from.box)
+              && boxGap(seated.box, from.box) <= TILE_GAP + 1;
+            if (steppedClear) return stepped;
+            if (!seatedClear) return null;
+            return {
+              box: seated.box,
+              dir: seated.dir,
+              row: from.row,
+              line: from.line,
+              run: seated.dir === from.dir ? from.run + 1 : 1,
+              opening: seated.dir !== from.dir,
+              fromDouble: false,
+              column: false,
+            };
+          })();
         if (!choice) break;
         const next = toTile(tile, choice.box, choice.dir, arm);
         if (fitBudget) (next as PlacedTile & { join?: LayoutBox }).join = from.box;
