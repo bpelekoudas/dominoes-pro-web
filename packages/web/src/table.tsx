@@ -20,7 +20,6 @@ import {
   nextFeltSize,
   renderedTileRect,
   tilesRelocating,
-  handOverPlacement,
   landedTileBox,
   zoneInsets,
   type AxisInsets,
@@ -170,6 +169,7 @@ export function Table({
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
   const [glideT, setGlideT] = useState(1);
+  const [pin, setPin] = useState<{ left: number; top: number } | null>(null);
   const glideCam = useRef<{
     fromScale: number;
     toScale: number;
@@ -469,40 +469,30 @@ export function Table({
   useLayoutEffect(() => {
     const root = document.documentElement;
     const viewport = viewportRef.current;
-    if (!handOver || !viewport || !frame) {
+    const scaler = viewport?.querySelector<HTMLElement>(".board-scaler");
+    if (!handOver || !viewport || !scaler) {
       setLift((current) => (current === 0 ? current : 0));
+      setPin((current) => (current == null ? current : null));
       root.style.removeProperty("--hand-sheet-max");
       return;
     }
-    const measure = () => {
-      const felt = viewport.getBoundingClientRect();
-      const sheet = document.querySelector(".hand-summary-sheet");
-      let sheetTop: number | null = null;
-      if (sheet) sheetTop = sheet.getBoundingClientRect().top;
-      const last = lastTileId && layout ? layout.tiles.find((tile) => tile.tileId === lastTileId) : undefined;
-      const local = last ? place(last, frame) : null;
-      const placement = handOverPlacement({
-        feltTop: felt.top,
-        feltHeight: felt.height,
-        sheetTop,
-        chainHeight: frame.h * scale,
-        lastTile: local ? { top: local.top * scale, height: local.height * scale } : null,
-      });
-      const next = Math.round(placement.lift);
-      setLift((current) => (current === next ? current : next));
-      if (placement.sheetTop == null) root.style.removeProperty("--hand-sheet-max");
-      else root.style.setProperty("--hand-sheet-max", `${Math.max(120, Math.round(window.innerHeight - placement.sheetTop))}px`);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(viewport);
-      const sheet = document.querySelector(".hand-summary-sheet");
-    if (sheet) observer.observe(sheet);
-    return () => {
-      observer.disconnect();
-      root.style.removeProperty("--hand-sheet-max");
-    };
-  }, [handOver, frame, scale, layout, lastTileId]);
+    // The reveal is an overlay. Freeze the picture where the last tile left
+    // it, including the scale the glide has reached, so a sheet cannot snap it.
+    window.cancelAnimationFrame(glideTimer.current);
+    glideCam.current = null;
+    setGlideT(1);
+    const stage = viewport.querySelector<HTMLElement>(".board-stage");
+    const matrix = new DOMMatrix(getComputedStyle(stage ?? scaler).transform);
+    const visual = Math.abs(matrix.a) > 0.05 ? Math.abs(matrix.a) : null;
+    if (visual != null) {
+      held.current = { hand: handKey, scale: visual };
+      setScale((current) => (Math.abs(current - visual) < 0.001 ? current : visual));
+    }
+    const rect = scaler.getBoundingClientRect();
+    setPin({ left: rect.left, top: rect.top });
+    setLift(0);
+    root.style.removeProperty("--hand-sheet-max");
+  }, [handOver, handKey]);
 
   const focusTile = dragTileId ?? selectedTile;
   const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];
@@ -602,7 +592,16 @@ export function Table({
         >
         <div
           className="board-scaler"
-          style={{
+          data-pinned={pin ? "true" : "false"}
+          style={pin ? {
+            position: "fixed",
+            left: pin.left,
+            top: pin.top,
+            margin: 0,
+            width: frame.w * shownScale,
+            height: frame.h * shownScale,
+            transform: "none",
+          } : {
             width: frame.w * shownScale,
             height: frame.h * shownScale,
             transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
@@ -812,10 +811,12 @@ function Arrival({
       settledRef.current();
     };
     const destination = (): SeatBox | null => {
+      const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
+      const live = placed ? projectTile(placed) : null;
+      if (live && live.width > 2) return live;
       const aimed = aimRef.current.current;
       if (aimed && aimed.width > 2 && aimed.height > 2) return aimed;
-      const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
-      return placed ? projectTile(placed) : null;
+      return null;
     };
     const insideFelt = (box: SeatBox): boolean => {
       const viewport = document.querySelector<HTMLElement>(".table-scroll");
@@ -828,48 +829,42 @@ function Arrival({
         && box.top + box.height <= felt.bottom - inset("playBottom") + 0.6;
     };
     const start = () => {
-      const origin = from ?? liveHandBox(playerId);
-      const to = destination();
-      if (!origin || !to) return false;
       const placed = layoutRef.current?.tiles.find((item) => item.tileId === tileId);
+      const live = placed ? projectTile(placed) : null;
       tile = document.querySelector<HTMLElement>(`[data-board-tile="${CSS.escape(tileId)}"]`);
       tile?.classList.add("is-arriving");
-      // The cell is still past the copper at this camera. Hold the tile off
-      // the felt until the glide has room for it.
-      if (!insideFelt(to)) {
+      // A copy parked at the future camera sits a tile-length off the chain
+      // and stays there. The tile has to be the chain's own tile.
+      if (!live || !insideFelt(live)) {
+        setBox(null);
         releaseCamera();
         endRef.current();
         parkTimer = window.setTimeout(() => {
           tile?.classList.remove("is-arriving");
-          if (!cancelled) setBox(null);
           settledRef.current();
-        }, CAMERA_EASE_MS);
+        }, 32);
         return true;
       }
+      const origin = from ?? liveHandBox(playerId);
+      if (!origin) return false;
       setFace(
         placed
           ? { a: placed.a, b: placed.b, orientation: placed.orientation }
-          : { a: 0, b: 0, orientation: to.width >= to.height ? "horizontal" : "vertical" },
+          : { a: 0, b: 0, orientation: live.width >= live.height ? "horizontal" : "vertical" },
       );
       setBox(origin);
       timer = window.setTimeout(() => {
         if (cancelled) return;
-        const parked = destination() ?? to;
-        setBox(parked);
-        // The glide has landed. The camera may ease, and the chain on the
-        // felt updates underneath the parked tile.
+        tile?.classList.remove("is-arriving");
+        setBox(null);
         releaseCamera();
         endRef.current();
-        parkTimer = window.setTimeout(() => {
-          tile?.classList.remove("is-arriving");
-          if (!cancelled) setBox(null);
-          settledRef.current();
-        }, CAMERA_EASE_MS);
+        settledRef.current();
       }, OPPONENT_GLIDE_MS);
       frameId = window.requestAnimationFrame(() => {
         frameId = window.requestAnimationFrame(() => {
           if (cancelled) return;
-          const next = destination();
+          const next = projectTile(placed!);
           if (!next) return;
           setBox({ left: next.left, top: next.top, width: next.width, height: next.height });
         });

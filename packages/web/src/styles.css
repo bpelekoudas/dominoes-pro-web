@@ -987,6 +987,13 @@ input {
 .table-scroll[data-glide="locked"] .end-cap {
   transition: none;
 }
+/* Tiles share one camera. Moving each tile's box on its own opens a gap
+   between a double and the tile it joins, so only the picture eases. */
+.table-scroll[data-camera="armed"] .board-stage,
+.table-scroll[data-camera="armed"] .board-tile,
+.table-scroll[data-camera="armed"] .end-cap {
+  transition: none;
+}
 .cam-edge {
   position: absolute;
   z-index: 7;

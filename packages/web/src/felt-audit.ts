@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT } from "../../rules/src/layout.js";
+import { TILE_GAP, layoutOverlaps, straightBox, TILE_SHORT } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -218,17 +218,29 @@ export function auditSize(
 
       if (match.hand.board.center) {
         const byId = new Map(boxes.map((tile) => [tile.tileId, tile]));
-        let parentBox = byId.get(match.hand.board.center.tileId);
+        const screenOf = (tileId: string) => {
+          const box = byId.get(tileId);
+          return box ? renderedTileRect(felt, box, cam.scale, shift) : null;
+        };
+        let parentId = match.hand.board.center.tileId;
         for (const arm of ["west", "east", "north", "south"] as const) {
           for (const tile of match.hand.board.arms[arm]) {
-            const box = byId.get(tile.tileId);
-            if (box && parentBox && boxGap(box, parentBox) > TILE_GAP + 6) {
-              report.connectGap += 1;
-              note("connectGap", seed, boxes.length, `${tile.tileId} ${boxGap(box, parentBox).toFixed(0)}px`);
+            const parent = screenOf(parentId);
+            const child = screenOf(tile.tileId);
+            if (parent && child) {
+              const dx = Math.max(child.left - parent.right, parent.left - child.right, 0);
+              const dy = Math.max(child.top - parent.bottom, parent.top - child.bottom, 0);
+              const gap = dx === 0 ? dy : dy === 0 ? dx : Math.hypot(dx, dy);
+              // One camera. A tile painted at the next camera while its parent
+              // is still on the last one is a full tile away on screen.
+              if (gap > TILE_GAP * cam.scale + 8) {
+                report.connectGap += 1;
+                note("connectGap", seed, boxes.length, `${tile.tileId} ${gap.toFixed(0)}px`);
+              }
             }
-            parentBox = box ?? parentBox;
+            parentId = tile.tileId;
           }
-          parentBox = byId.get(match.hand.board.center.tileId);
+          parentId = match.hand.board.center.tileId;
         }
       }
 
