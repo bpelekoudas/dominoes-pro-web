@@ -3,6 +3,7 @@ import { TILE_GAP, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout } f
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
+  chainBounds,
   cameraEase,
   chainHeldAtHandEnd,
   chainViewShift,
@@ -28,6 +29,14 @@ export const AUDIT_FELTS = [
 ] as const;
 
 export const AUDIT_SEEDS = 200;
+
+/** Inclusive rank. p=0 is the minimum, p=0.5 the median, p=1 the maximum. */
+export function percentile(values: readonly number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * (sorted.length - 1))));
+  return sorted[index] ?? 0;
+}
 const TINY_PX = 18;
 /** A smooth 480ms glide across the felt stays under this. A snap does not. */
 const JUMP_PX = 48;
@@ -54,6 +63,12 @@ export interface AuditSizeReport {
   handEndSnap: number;
   /** A tile that was already down moved in chain coordinates. */
   refold: number;
+  /** Plays, with 8 or more tiles, whose short side is under 18px. */
+  tinyPlays: number;
+  /** Tile short side at the end of each hand, in screen pixels. */
+  endPx: number[];
+  /** Chain bbox area divided by the felt area, at the end of each hand. */
+  endFill: number[];
   settledOverlap: number;
   glideOverlap: number;
   uiOverlap: number;
@@ -118,6 +133,9 @@ export function auditSize(
     connectGap: 0,
     handEndSnap: 0,
     refold: 0,
+    tinyPlays: 0,
+    endPx: [],
+    endFill: [],
     settledOverlap: 0,
     glideOverlap: 0,
     uiOverlap: 0,
@@ -206,6 +224,19 @@ export function auditSize(
             note("handEndSnap", seed, painted.tiles.length, "chain tiles moved before the next deal");
           }
         }
+        const endCam = settledHandCamera({
+          board: match.hand.board,
+          felt,
+          screenWidth: felt.w,
+          frame,
+          keepOuts: stacks,
+          previous,
+          heldLimits: held,
+          committed: lockChain ? committed : null,
+        });
+        const endBox = chainBounds(endCam.layout.tiles, 0);
+        report.endPx.push(TILE_SHORT * endCam.scale);
+        report.endFill.push((endBox.w * endCam.scale * endBox.h * endCam.scale) / Math.max(1, felt.w * felt.h));
         break;
       }
       report.plays += 1;
@@ -244,6 +275,7 @@ export function auditSize(
       const hidden = new Set(tilesRelocating(prevPoses, boxes));
       if (boxes.length >= 8 && TILE_SHORT * cam.scale < TINY_PX) {
         report.tiny += 1;
+        report.tinyPlays += 1;
         note("tiny", seed, boxes.length, `${(TILE_SHORT * cam.scale).toFixed(1)}px`);
       }
       if (layoutOverlaps(cam.layout)) {

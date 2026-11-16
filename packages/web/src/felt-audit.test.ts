@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIT_FELTS, AUDIT_SEEDS, auditSize, type AuditSizeReport } from "./felt-audit.js";
+import { AUDIT_FELTS, AUDIT_SEEDS, auditSize, percentile, type AuditSizeReport } from "./felt-audit.js";
 
 function failures(report: AuditSizeReport): number {
   return report.settledCut
@@ -32,9 +32,19 @@ describe("felt stress audit", () => {
         glide: report.glideCut,
         overlap: report.settledOverlap + report.glideOverlap,
         connect: report.connectGap,
-        under18: report.tiny,
+        under18: report.tinyPlays,
         zoomIn: report.zoomIn,
         handEnd: report.handEndSnap,
+        px: {
+          min: +percentile(report.endPx, 0).toFixed(1),
+          p10: +percentile(report.endPx, 0.1).toFixed(1),
+          median: +percentile(report.endPx, 0.5).toFixed(1),
+        },
+        fill: {
+          min: +((percentile(report.endFill, 0)) * 100).toFixed(1),
+          p10: +((percentile(report.endFill, 0.1)) * 100).toFixed(1),
+          median: +((percentile(report.endFill, 0.5)) * 100).toFixed(1),
+        },
       });
       console.log("before", Object.fromEntries(before.map((report) => [report.name, row(report)])));
       console.log("after", Object.fromEntries(reports.map((report) => [report.name, row(report)])));

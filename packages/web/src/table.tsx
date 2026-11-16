@@ -16,6 +16,7 @@ import {
   chainViewShift,
   clampGhostToFelt,
   fitFrameScale,
+  safeRoom,
   frameInsets,
   settledHandCamera,
   nextFeltSize,
@@ -135,15 +136,32 @@ export function Table({
   const handOver = view.phase === "between" || view.phase === "over";
   const chainMemory = useRef<BoardLayout | null>(null);
   const chainMemoryHand = useRef("");
+  const settledChain = useRef<BoardLayout | null>(null);
+  const settledKey = useRef("");
+  const turnBudget = useRef<{ scale: number; roomW: number; roomH: number } | null>(null);
+  const boardKeyNow = board?.center
+    ? [board.center.tileId, ...(["west", "east", "north", "south"] as const).flatMap((arm) => board.arms[arm].map((tile) => tile.tileId))].join(",")
+    : "";
   if (chainMemoryHand.current !== handKey) {
     chainMemory.current = null;
+    settledChain.current = null;
+    settledKey.current = "";
+    turnBudget.current = null;
     chainMemoryHand.current = handKey;
   }
-  const computed = useMemo(() => pictureFrom(board, limits, chainMemory.current), [board, limits, flightDone, handKey]);
-  const incomingComputed = useMemo(() => pictureFrom(liveBoard, limits, chainMemory.current), [liveBoard, limits, handKey]);
-  if (computed && (!chainMemory.current || computed.tiles.length >= chainMemory.current.tiles.length)) {
-    chainMemory.current = computed;
+  if (settledKey.current !== boardKeyNow) {
+    settledChain.current = chainMemory.current;
+    settledKey.current = boardKeyNow;
   }
+  const computed = useMemo(
+    () => pictureFrom(board, limits, settledChain.current, turnBudget.current),
+    [board, limits, flightDone, handKey, boardKeyNow],
+  );
+  const incomingComputed = useMemo(
+    () => pictureFrom(liveBoard, limits, settledChain.current, turnBudget.current),
+    [liveBoard, limits, handKey, boardKeyNow],
+  );
+  if (computed) chainMemory.current = computed;
   const chainRef = useRef<BoardLayout | null>(null);
   const heldChain = useRef<BoardLayout | null>(null);
   if (!handOver) {
@@ -323,7 +341,13 @@ export function Table({
       const handLimits = limitHold.current.limits;
       // pictureFrom can fall back to a larger fold when the limited one
       // overlaps. The scale has to fit the chain that will actually be painted.
-      const picture = pictureFrom(liveBoard, handLimits, chainMemory.current) ?? solved.layout;
+      const roomNow = safeRoom(felt, solved.edge);
+      const budgetNow = turnBudget.current ?? {
+        scale: previous ?? solved.scale,
+        roomW: roomNow.w,
+        roomH: roomNow.h,
+      };
+      const picture = pictureFrom(liveBoard, handLimits, settledChain.current, budgetNow) ?? solved.layout;
       const drawn = [...picture.tiles, ...picture.ends];
       const frameShift = boardShift(solved.edge);
       const zoom = Math.min(
@@ -440,6 +464,7 @@ export function Table({
         glideTimer.current = window.requestAnimationFrame(step);
       }
       held.current = { hand: handKey, scale: zoom };
+      turnBudget.current = { scale: zoom, roomW: roomNow.w, roomH: roomNow.h };
       frozen.current = handOver;
       setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
       setPan((current) => (Math.abs(current.x - shift.x) < 1 && Math.abs(current.y - shift.y) < 1 ? current : shift));

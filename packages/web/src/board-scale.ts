@@ -1,5 +1,5 @@
 import type { BoardState } from "../../rules/src/board.js";
-import { FIT_MARGIN, extendLayout, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits } from "../../rules/src/layout.js";
+import { FIT_MARGIN, extendLayout, extendLayoutFitting, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type BoardLayout, type FitBudget, type LayoutBox, type LayoutLimits } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -684,7 +684,11 @@ export function chooseReadableLayout(
   const baseH = Math.max(TILE_LONG * 3, room.h / safeCap);
   if (committed && committed.tiles.length > 0) {
     const limits = held ?? { width: baseW, height: baseH };
-    const layout = compactExtend(committed, board, limits, obstacles, room);
+    const layout = extendLayoutFitting(committed, board, { ...limits, obstacles }, {
+      scale: safeCap,
+      roomW: room.w,
+      roomH: room.h,
+    });
     const box = chainBounds(layout.tiles, 0);
     return {
       limits,
@@ -876,56 +880,19 @@ export function chainViewShift(
   return { x: -cx * scale, y: -cy * scale };
 }
 
-/**
- * A tile that jumps across the felt, or turns, is not drawn while the picture
- * eases. Sliding it would pass through whatever is in the way. It reappears
- * on its new cell when the glide ends.
- */
-const COMPACT_FACTORS = [1, 0.7, 0.5, 1.35, 0.4, 1.8];
-
-/** Try a few turn-edges for the new tile only, and keep the chain that fits largest. */
-function compactExtend(
-  previous: BoardLayout,
-  board: BoardState,
-  limits: { width: number; height: number },
-  obstacles: LayoutBox[],
-  room: FeltSize,
-): BoardLayout {
-  let best: BoardLayout | null = null;
-  let bestScale = -1;
-  for (const widthFactor of COMPACT_FACTORS) {
-    for (const heightFactor of COMPACT_FACTORS) {
-      const layout = extendLayout(previous, board, {
-        width: Math.max(TILE_LONG * 2, limits.width * widthFactor),
-        height: Math.max(TILE_LONG * 3, limits.height * heightFactor),
-        obstacles,
-      });
-      if (layoutOverlaps(layout)) continue;
-      const box = chainBounds(layout.tiles, 0);
-      const scale = Math.min(room.w / Math.max(1, box.w), room.h / Math.max(1, box.h));
-      if (scale > bestScale) {
-        best = layout;
-        bestScale = scale;
-      }
-    }
-  }
-  return best ?? extendLayout(previous, board, { ...limits, obstacles });
-}
-
 /** The fold the table paints. Tiles already down stay put. A limited fold that overlaps falls back to the open one only for the opening. */
 export function pictureFrom(
   board: BoardState | null | undefined,
   limits?: LayoutLimits | null,
   previous?: BoardLayout | null,
+  budget?: FitBudget | null,
 ): BoardLayout | null {
   if (!board?.center) return null;
   try {
     if (previous && previous.tiles.length > 0) {
-      const base = limits ?? { width: 416, height: 700 };
-      return compactExtend(previous, board, base, limits?.obstacles ?? [], {
-        w: base.width,
-        h: base.height,
-      });
+      return budget
+        ? extendLayoutFitting(previous, board, limits ?? undefined, budget)
+        : extendLayout(previous, board, limits ?? undefined);
     }
     const picture = layoutBoard(board, limits ?? undefined);
     if (!layoutOverlaps(picture)) return picture;
