@@ -91,6 +91,8 @@ export interface BoardLayout {
    * Not part of the fit, so a ghost slot does not shrink the chain.
    */
   previews: Partial<Record<ArmId, LayoutBox>>;
+  /** Where each arm stopped. The next tile continues from here. */
+  cursors?: Partial<Record<ArmId, SnakeCursor>>;
 }
 
 interface Occupant {
@@ -157,6 +159,127 @@ function usableLimit(limits?: LayoutLimits): LayoutLimits {
     return DEFAULT_LIMIT;
   }
   return limits;
+}
+
+/**
+ * Lay `board`, keeping every tile that was already on `previous`.
+ * A new rectangle can turn the next tile. It cannot move a tile that is down.
+ */
+export function extendLayout(previous: BoardLayout | null, board: BoardState, limits?: LayoutLimits): BoardLayout {
+  if (!board.center || !previous || !previous.tiles.some((tile) => tile.tileId === board.center?.tileId)) {
+    return layoutBoard(board, limits);
+  }
+  const pinned = new Map(previous.tiles.map((tile) => [tile.tileId, tile]));
+  return layoutPinned(board, limits, pinned, previous.cursors);
+}
+
+function layoutPinned(
+  board: BoardState,
+  limits: LayoutLimits | undefined,
+  pinned: ReadonlyMap<string, PlacedTile>,
+  cursors?: BoardLayout["cursors"],
+): BoardLayout {
+  let width = usableLimit(limits).width;
+  let height = usableLimit(limits).height;
+  let last: BoardLayout | null = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const layout = withLimit({ width, height, obstacles: limits?.obstacles }, () => layoutBoardNow(board, pinned, cursors));
+    const fixed = pinChain(layout, pinned);
+    if (!layoutOverlaps(fixed)) return fixed;
+    last = fixed;
+    const nextWidth = Math.max(TILE_LONG * 2, width * 0.78);
+    const nextHeight = Math.max(TILE_LONG * 3, height * 0.78);
+    if (nextWidth === width && nextHeight === height) break;
+    width = nextWidth;
+    height = nextHeight;
+  }
+  return last ?? layoutBoard(board, limits);
+}
+
+/** Put every tile that was already down back on its box. */
+function pinChain(layout: BoardLayout, pinned: ReadonlyMap<string, PlacedTile>): BoardLayout {
+  return {
+    ...layout,
+    tiles: layout.tiles.map((tile) => {
+      const held = pinned.get(tile.tileId);
+      return held ? { ...held, arm: tile.arm } : tile;
+    }),
+  };
+}
+
+function outsideLimit(box: LayoutBox): number {
+  const cx = Math.abs(box.x + box.w / 2);
+  const cy = Math.abs(box.y + box.h / 2);
+  return Math.max(0, cx - activeLimit.width / 2) + Math.max(0, cy - activeLimit.height / 2);
+}
+
+/** Put the next tile on the open end. A turn is only for this tile. */
+function seatNewTile(
+  parent: LayoutBox,
+  dir: LayoutDir,
+  isDouble: boolean,
+  placed: readonly LayoutBox[],
+): { box: LayoutBox; dir: LayoutDir } {
+  const order: LayoutDir[] = [];
+  const push = (way: LayoutDir) => {
+    if (!order.includes(way)) order.push(way);
+  };
+  push(dir);
+  push(clockwise(dir));
+  push(clockwise(clockwise(clockwise(dir))));
+  push(opposite(dir));
+  let best: { box: LayoutBox; dir: LayoutDir; score: number } | null = null;
+  for (let index = 0; index < order.length; index += 1) {
+    const way = order[index]!;
+    for (const box of joinedBoxes(parent, dir, way, isDouble)) {
+      if (boxesOverlap(box, parent) || overlapsPlaced(box, placed)) continue;
+      const exits = freeExits(box, way, placed);
+      const score = outsideLimit(box) * 1000 + index * 30 - exits * 80;
+      if (!best || score < best.score) best = { box, dir: way, score };
+    }
+  }
+  if (best) return best;
+  return { box: straightBox(parent, dir, isDouble), dir };
+}
+
+function freeExits(box: LayoutBox, dir: LayoutDir, placed: readonly LayoutBox[]): number {
+  let open = 0;
+  for (const way of [dir, clockwise(dir), clockwise(clockwise(clockwise(dir))), opposite(dir)]) {
+    const next = straightBox(box, way, false);
+    if (!overlapsPlaced(next, placed) && !boxesOverlap(next, box)) open += 1;
+  }
+  return open;
+}
+
+function joinedBoxes(parent: LayoutBox, dir: LayoutDir, way: LayoutDir, isDouble: boolean): LayoutBox[] {
+  const base = isDouble || way === dir ? straightBox(parent, way, isDouble) : bendBox(parent, dir, way, isDouble);
+  if (isDouble) return [base];
+  const boxes = [base];
+  const axis = way === "east" || way === "west" ? "y" : "x";
+  for (let delta = -TILE_LONG; delta <= TILE_LONG; delta += 2) {
+    if (delta === 0) continue;
+    const slid = { ...base, [axis]: base[axis] + delta };
+    const across = axis === "y"
+      ? Math.min(parent.y + parent.h, slid.y + slid.h) - Math.max(parent.y, slid.y)
+      : Math.min(parent.x + parent.w, slid.x + slid.w) - Math.max(parent.x, slid.x);
+    if (across >= TILE_SHORT * 0.5) boxes.push(slid);
+  }
+  return boxes;
+}
+
+function resumeCursor(prev: SnakeCursor | null, laid: PlacedTile, arm: ArmId, isDouble: boolean): SnakeCursor {
+  const turned = prev != null && laid.direction !== prev.dir;
+  return {
+    box: laid,
+    dir: laid.direction,
+    row: turned ? (prev?.row ?? 0) + 1 : (prev?.row ?? 0),
+    line: acrossCenter(laid, arm),
+    run: prev && !turned ? prev.run + 1 : 1,
+    opening: turned && !isDouble,
+    full: prev?.full ?? 0,
+    fromDouble: isDouble && turned,
+    column: false,
+  };
 }
 
 export function layoutBoard(board: BoardState, limits?: LayoutLimits): BoardLayout {
@@ -1691,14 +1814,27 @@ function rebalanceLayout(board: BoardState, failed: BoardLayout): BoardLayout {
   return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews: {} };
 }
 
-function layoutBoardNow(board: BoardState): BoardLayout {
+function layoutBoardNow(
+  board: BoardState,
+  pinned?: ReadonlyMap<string, PlacedTile> | null,
+  priorCursors?: BoardLayout["cursors"],
+): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -40, y: -40, w: 80, h: 80 }, previews: {} };
   }
 
-  const center = centerBox(board.center);
-  const tiles: PlacedTile[] = [centerTile(board.center, center)];
+  const heldCenter = pinned?.get(board.center.tileId);
+  const center = heldCenter
+    ? { x: heldCenter.x, y: heldCenter.y, w: heldCenter.w, h: heldCenter.h }
+    : centerBox(board.center);
+  const tiles: PlacedTile[] = [heldCenter ? { ...heldCenter, arm: null } : centerTile(board.center, center)];
   const placed: LayoutBox[] = [center];
+  if (pinned) {
+    for (const tile of pinned.values()) {
+      if (tile.tileId === board.center.tileId) continue;
+      placed.push(tile);
+    }
+  }
   const cursors = new Map<ArmId, SnakeCursor>();
   // Openings of arms not drawn yet. A column must not sit on one.
   const reserved = new Map<ArmId, LayoutBox>();
@@ -1715,20 +1851,78 @@ function layoutBoardNow(board: BoardState): BoardLayout {
     if (!first) continue;
     reserved.delete(arm);
     const blockers = () => [...placed, ...reserved.values()];
-    const opening = clearStep(
-      snakeStep(
-        first,
-        { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false, full: 0 },
-        arm,
+    const heldFirst = pinned?.get(first.tileId);
+    if (heldFirst) {
+      const laid = { ...heldFirst, arm };
+      tiles.push(laid);
+      placed.push(laid);
+      let cursor = resumeCursor(null, laid, arm, isDoubleTile(first));
+      for (let index = 1; index < chain.length; index += 1) {
+        const tile = chain[index]!;
+        const held = pinned?.get(tile.tileId);
+        if (held) {
+          const next = { ...held, arm };
+          tiles.push(next);
+          placed.push(next);
+          cursor = resumeCursor(cursor, next, arm, isDoubleTile(tile));
+          continue;
+        }
+        const saved = index === chain.length - 1 ? priorCursors?.[arm] : undefined;
+        const from = saved && Math.abs(saved.box.x - cursor.box.x) < 1 && Math.abs(saved.box.y - cursor.box.y) < 1 ? saved : cursor;
+        const stepped = clearStep(
+          snakeStep(tile, from, arm, center, chain.slice(index), placed, false),
+          from.box,
+          isDoubleTile(tile),
+          blockers(),
+        );
+        const seated = seatNewTile(from.box, from.dir, isDoubleTile(tile), placed);
+        const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box);
+        const choice = steppedClear ? stepped : {
+          box: seated.box,
+          dir: seated.dir,
+          row: from.row,
+          line: from.line,
+          run: seated.dir === from.dir ? from.run + 1 : 1,
+          opening: seated.dir !== from.dir,
+          fromDouble: false,
+          column: false,
+        };
+        const next = toTile(tile, choice.box, choice.dir, arm);
+        tiles.push(next);
+        placed.push(next);
+        cursor = {
+          box: next,
+          dir: choice.dir,
+          row: choice.row,
+          line: choice.line,
+          run: choice.run,
+          opening: choice.opening,
+          fromDouble: choice.fromDouble,
+          column: choice.column,
+          full: cursor.row === 0 && choice.row === 0 && choice.dir === arm && !isDoubleTile(tile)
+            ? cursor.full + 1
+            : cursor.full,
+        };
+      }
+      cursors.set(arm, cursor);
+      continue;
+    }
+    const opening = pinned
+      ? { ...seatNewTile(center, arm, isDoubleTile(first), placed), row: 0, line: 0, run: 1, opening: false, fromDouble: false, column: false, full: 1 }
+      : clearStep(
+        snakeStep(
+          first,
+          { box: center, dir: arm, row: 0, line: 0, run: 0, opening: false, fromDouble: false, column: false, full: 0 },
+          arm,
+          center,
+          chain,
+          placed,
+          true,
+        ),
         center,
-        chain,
-        placed,
-        true,
-      ),
-      center,
-      isDoubleTile(first),
-      blockers(),
-    );
+        isDoubleTile(first),
+        blockers(),
+      );
     const laid = toTile(first, opening.box, opening.dir, arm);
     tiles.push(laid);
     placed.push(laid);
@@ -1798,7 +1992,9 @@ function layoutBoardNow(board: BoardState): BoardLayout {
     previews[end.id] = preview;
   }
 
-  return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews };
+  const savedCursors: NonNullable<BoardLayout["cursors"]> = {};
+  for (const [arm, cursor] of cursors) savedCursors[arm] = cursor;
+  return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews, cursors: savedCursors };
 }
 
 /**

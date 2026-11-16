@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ARM_IDS, emptyBoard, openEnds, placeTile, type BoardState } from "../../rules/src/board.js";
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents } from "../../rules/src/engine.js";
-import { boxesOverlap, FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_GAP, TILE_LONG, TILE_SHORT } from "../../rules/src/layout.js";
+import { boxesOverlap, extendLayout, FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_GAP, TILE_LONG, TILE_SHORT, type BoardLayout } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import { allTiles, tileById } from "../../rules/src/tiles.js";
 import { holdCameraForChain } from "./arrival.js";
@@ -2309,6 +2309,42 @@ function firstZoom(
   }
   return plays;
 }
+
+describe("stable chain", () => {
+  it("keeps a placed tile on its box when later tiles are added", () => {
+    const bytes = Buffer.alloc(32);
+    bytes.writeUInt32BE(26, 0);
+    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    let match = beginHand(
+      createMatch(players, { boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
+      shuffleWithSeed(bytes),
+    );
+    let layout: BoardLayout | null = null;
+    const limits = { width: 480, height: 720 };
+    for (let guard = 0; guard < 24 && match.hand && match.hand.phase !== "complete"; guard += 1) {
+      const playerId = currentPlayerId(match);
+      if (!playerId) break;
+      const intents = legalIntents(match, playerId);
+      const intent = intents.find((item) => item.type === "play") ?? intents[0];
+      if (!intent || intent.type !== "play") break;
+      const result = applyIntent(match, playerId, intent);
+      if (!result.ok || !result.match.hand) break;
+      match = result.match;
+      const next = extendLayout(layout, match.hand.board, limits);
+      if (layout) {
+        for (const tile of layout.tiles) {
+          const now = next.tiles.find((item) => item.tileId === tile.tileId);
+          expect(now?.x, tile.tileId).toBe(tile.x);
+          expect(now?.y, tile.tileId).toBe(tile.y);
+          expect(now?.w, tile.tileId).toBe(tile.w);
+          expect(now?.h, tile.tileId).toBe(tile.h);
+        }
+      }
+      layout = next;
+    }
+    expect(layout && layout.tiles.length).toBeGreaterThan(8);
+  });
+});
 
 describe("hand end chain", () => {
   it("keeps every painted tile on its box when the next fold slides the chain", () => {

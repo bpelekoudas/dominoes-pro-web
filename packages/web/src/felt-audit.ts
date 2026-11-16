@@ -52,6 +52,8 @@ export interface AuditSizeReport {
   exposedCut: number;
   connectGap: number;
   handEndSnap: number;
+  /** A tile that was already down moved in chain coordinates. */
+  refold: number;
   settledOverlap: number;
   glideOverlap: number;
   uiOverlap: number;
@@ -100,6 +102,7 @@ export function auditSize(
   felt: { name: string; w: number; h: number },
   seeds: number,
   tableId: string | null = "TBL-013",
+  lockChain = true,
 ): AuditSizeReport {
   const frame = frameInsets(tableId, felt);
   const stacks = stacksFor(felt.w, felt.h);
@@ -114,6 +117,7 @@ export function auditSize(
     exposedCut: 0,
     connectGap: 0,
     handEndSnap: 0,
+    refold: 0,
     settledOverlap: 0,
     glideOverlap: 0,
     uiOverlap: 0,
@@ -142,6 +146,7 @@ export function auditSize(
     let heldCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let prevPoses = new Map<string, { x: number; y: number; w: number; h: number }>();
     let painted: BoardLayout | null = null;
+    let committed: BoardLayout | null = null;
     let paintedCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let doubles = 0;
     let maxTiles = 0;
@@ -158,7 +163,7 @@ export function auditSize(
       if (intent.type !== "play" || !match.hand) continue;
       if (match.hand.phase === "complete") {
         report.plays += 1;
-        const next = pictureFrom(match.hand.board, held);
+        const next = pictureFrom(match.hand.board, held, lockChain ? painted : null);
         const committed = chainHeldAtHandEnd(painted, next, true);
         if (painted && paintedCamera && committed) {
           const byId = new Map(committed.tiles.map((tile) => [tile.tileId, tile]));
@@ -213,6 +218,7 @@ export function auditSize(
         keepOuts: stacks,
         previous,
         heldLimits: held,
+        committed: lockChain ? committed : null,
       });
       if (previous != null && cam.scale > previous + 0.01) {
         report.zoomIn += 1;
@@ -220,6 +226,19 @@ export function auditSize(
       }
       const boxes = cam.layout.tiles;
       maxTiles = Math.max(maxTiles, boxes.length);
+      if (prevPoses.size > 0) {
+        let movedTile = false;
+        for (const tile of boxes) {
+          const old = prevPoses.get(tile.tileId);
+          if (!old) continue;
+          if (Math.abs(old.x - tile.x) > 0.5 || Math.abs(old.y - tile.y) > 0.5 || old.w !== tile.w || old.h !== tile.h) {
+            movedTile = true;
+            note("refold", seed, boxes.length, tile.tileId);
+            break;
+          }
+        }
+        if (movedTile) report.refold += 1;
+      }
       const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale);
       const shift = { x: view.x + boardShift(cam.edge).x, y: view.y + boardShift(cam.edge).y };
       const hidden = new Set(tilesRelocating(prevPoses, boxes));
@@ -380,7 +399,8 @@ export function auditSize(
       prevScreens = settled;
       heldCamera = { scale: cam.scale, shift };
       prevPoses = new Map(boxes.map((item) => [item.tileId, { x: item.x, y: item.y, w: item.w, h: item.h }]));
-      painted = pictureFrom(match.hand.board, cam.limits);
+      painted = pictureFrom(match.hand.board, cam.limits, lockChain ? committed : null);
+      committed = cam.layout;
       paintedCamera = { scale: cam.scale, shift };
       previous = cam.scale;
       held = cam.limits;
@@ -403,6 +423,6 @@ export function cameraAfterHandEnd(scale: number): number {
   return scale;
 }
 
-export function auditAll(seeds = AUDIT_SEEDS): AuditSizeReport[] {
-  return AUDIT_FELTS.map((felt) => auditSize(felt, seeds));
+export function auditAll(seeds = AUDIT_SEEDS, lockChain = true): AuditSizeReport[] {
+  return AUDIT_FELTS.map((felt) => auditSize(felt, seeds, "TBL-013", lockChain));
 }

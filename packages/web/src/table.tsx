@@ -133,8 +133,17 @@ export function Table({
   const [limits, setLimits] = useState<LayoutLimits | null>(null);
   const handKey = `${view.gameNumber}:${view.handNumber}`;
   const handOver = view.phase === "between" || view.phase === "over";
-  const computed = useMemo(() => pictureFrom(board, limits), [board, limits, flightDone]);
-  const incomingComputed = useMemo(() => pictureFrom(liveBoard, limits), [liveBoard, limits]);
+  const chainMemory = useRef<BoardLayout | null>(null);
+  const chainMemoryHand = useRef("");
+  if (chainMemoryHand.current !== handKey) {
+    chainMemory.current = null;
+    chainMemoryHand.current = handKey;
+  }
+  const computed = useMemo(() => pictureFrom(board, limits, chainMemory.current), [board, limits, flightDone, handKey]);
+  const incomingComputed = useMemo(() => pictureFrom(liveBoard, limits, chainMemory.current), [liveBoard, limits, handKey]);
+  if (computed && (!chainMemory.current || computed.tiles.length >= chainMemory.current.tiles.length)) {
+    chainMemory.current = computed;
+  }
   const chainRef = useRef<BoardLayout | null>(null);
   const heldChain = useRef<BoardLayout | null>(null);
   if (!handOver) {
@@ -298,6 +307,7 @@ export function Table({
         keepOuts,
         previous,
         heldLimits: limitHold.current?.hand === handKey ? limitHold.current.limits : null,
+        committed: chainMemory.current,
       });
       edgeRef.current = solved.edge;
       // The readable fold already keeps the previous limits when a new
@@ -313,7 +323,7 @@ export function Table({
       const handLimits = limitHold.current.limits;
       // pictureFrom can fall back to a larger fold when the limited one
       // overlaps. The scale has to fit the chain that will actually be painted.
-      const picture = pictureFrom(liveBoard, handLimits) ?? solved.layout;
+      const picture = pictureFrom(liveBoard, handLimits, chainMemory.current) ?? solved.layout;
       const drawn = [...picture.tiles, ...picture.ends];
       const frameShift = boardShift(solved.edge);
       const zoom = Math.min(
