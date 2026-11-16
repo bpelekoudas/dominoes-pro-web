@@ -1948,7 +1948,7 @@ describe("visible felt clearance", () => {
 });
 
 describe("layout guarantee", () => {
-  it("keeps 500 full matches from covering a tile or leaving the felt", () => {
+  it("keeps 500 full matches from covering a tile or leaving the felt", async () => {
     const felts = [
       { name: "phone", w: 412, h: 707 },
       { name: "s26", w: 412, h: 683 },
@@ -1969,6 +1969,7 @@ describe("layout guarantee", () => {
     let coverChecks = 0;
     for (const [seats, mode] of combos) {
       for (let seed = 1; seed <= 84; seed += 1) {
+        if (seed % 8 === 0) await new Promise((resolve) => setImmediate(resolve));
         matches += 1;
         const players = HAND_PLAYERS[seats].map((player) => ({ ...player }));
         let match = createMatch(players, { boneyardMode: mode, seriesLength: 3, targetScore: 100 });

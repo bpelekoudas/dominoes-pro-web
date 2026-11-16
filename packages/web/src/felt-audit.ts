@@ -118,6 +118,7 @@ export function auditSize(
   seeds: number,
   tableId: string | null = "TBL-013",
   lockChain = true,
+  seedStart = 1,
 ): AuditSizeReport {
   const frame = frameInsets(tableId, felt);
   const stacks = stacksFor(felt.w, felt.h);
@@ -149,7 +150,7 @@ export function auditSize(
     if (report.worst.length < 8) report.worst.push({ kind, seed, play, detail });
   };
 
-  for (let seed = 1; seed <= seeds; seed += 1) {
+  for (let seed = seedStart; seed < seedStart + seeds; seed += 1) {
     const bytes = Buffer.alloc(32);
     bytes.writeUInt32BE(seed, 0);
     const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));

@@ -223,44 +223,6 @@ function pinChain(layout: BoardLayout, pinned: ReadonlyMap<string, PlacedTile>):
     const held = pinned.get(tile.tileId);
     return held ? { ...held, arm: tile.arm } : { ...tile };
   });
-  for (const tile of tiles) {
-    if (pinned.has(tile.tileId)) continue;
-    const others = tiles.filter((other) => other !== tile);
-    if (others.every((other) => !boxesOverlap(tile, other))) continue;
-    const join = (tile as PlacedTile & { join?: LayoutBox }).join;
-    let anchor = others[0]!;
-    let anchorGap = Infinity;
-    for (const other of others) {
-      const gap = join ? Math.hypot(other.x - join.x, other.y - join.y) : boxGap(tile, other);
-      if (gap < anchorGap) {
-        anchorGap = gap;
-        anchor = other;
-      }
-    }
-    let bestX = tile.x;
-    let bestY = tile.y;
-    let bestD = Infinity;
-    let bestGap = Infinity;
-    for (let dx = -160; dx <= 160; dx += 2) {
-      for (let dy = -160; dy <= 160; dy += 2) {
-        const moved = { x: tile.x + dx, y: tile.y + dy, w: tile.w, h: tile.h };
-        if (others.some((other) => boxesOverlap(moved, other))) continue;
-        const gap = boxGap(moved, anchor);
-        if (gap > 14 || gap > bestGap) continue;
-        const dist = dx * dx + dy * dy;
-        if (gap < bestGap || dist < bestD) {
-          bestGap = gap;
-          bestD = dist;
-          bestX = moved.x;
-          bestY = moved.y;
-        }
-      }
-    }
-    if (bestD < Infinity) {
-      tile.x = bestX;
-      tile.y = bestY;
-    }
-  }
   return { ...layout, tiles };
 }
 
@@ -340,7 +302,7 @@ function parallelTooClose(box: LayoutBox, placed: readonly LayoutBox[], parent: 
       ? Math.min(box.x + box.w, other.x + other.w) - Math.max(box.x, other.x)
       : Math.min(box.y + box.h, other.y + other.h) - Math.max(box.y, other.y);
     if (along < TILE_SHORT * 0.4) continue;
-    if (boxGap(box, other) < ARM_GAP - 1) return true;
+    if (boxGap(box, other) < TILE_SHORT + TILE_GAP - 1) return true;
   }
   return false;
 }
@@ -386,8 +348,11 @@ function reservedRunway(
   const out: LayoutBox[] = [...extra];
   for (const [other, cursor] of cursors) {
     if (other === arm) continue;
+    out.push(straightBox(cursor.box, cursor.dir, false));
+    out.push(bendBox(cursor.box, cursor.dir, clockwise(cursor.dir), false));
+    out.push(bendBox(cursor.box, cursor.dir, counterClockwise(cursor.dir), false));
     let box = cursor.box;
-    for (let step = 0; step < 4; step += 1) {
+    for (let step = 0; step < 3; step += 1) {
       const next = straightBox(box, cursor.dir, false);
       out.push(next);
       box = next;
@@ -396,12 +361,54 @@ function reservedRunway(
   return out;
 }
 
+/** A corner's long side faces the new row. The next tile sits on the outer half, a tile plus the gap off the previous row. */
+function outwardStraight(parent: LayoutBox, travel: LayoutDir, isDouble: boolean): LayoutBox {
+  const box = straightBox(parent, travel, isDouble);
+  const facing = (parent as PlacedTile).direction;
+  if (isDouble || !facing || (parent as PlacedTile).arm == null) return box;
+  if (facing === travel || facing === opposite(travel)) return box;
+  const horizontal = travel === "east" || travel === "west";
+  const parentCross = horizontal ? parent.h : parent.w;
+  const childCross = horizontal ? box.h : box.w;
+  if (parentCross <= childCross + 1) return box;
+  const parentLongAcross = horizontal ? parent.w > parent.h : parent.h > parent.w;
+  if (parentLongAcross) return box;
+  const shift = (parentCross - childCross) / 2;
+  if (facing === "south") box.y += shift;
+  else if (facing === "north") box.y -= shift;
+  else if (facing === "east") box.x += shift;
+  else box.x -= shift;
+  return box;
+}
+
+/** Touches the parent on a real edge and misses every tile already down. */
+function legalJoin(box: LayoutBox, parent: LayoutBox, placed: readonly LayoutBox[]): boolean {
+  if (overlapsPlaced(box, placed) || boxesOverlap(box, parent)) return false;
+  if (boxGap(box, parent) > TILE_GAP + 1) return false;
+  const touchX = Math.min(box.x + box.w, parent.x + parent.w) - Math.max(box.x, parent.x);
+  const touchY = Math.min(box.y + box.h, parent.y + parent.h) - Math.max(box.y, parent.y);
+  return touchX >= TILE_SHORT * 0.5 || touchY >= TILE_SHORT * 0.5;
+}
+
+type Seat = { box: LayoutBox; dir: LayoutDir; opening: boolean };
+
 /**
  * The next tile runs straight until it would leave the felt, then corners
- * into the open side and the following tiles run back. A turn that would
- * sit on another arm's next cells is refused while any other cell is free.
- * Nothing already down moves.
+ * into the open side and the following tiles run back. A cell that covers
+ * another tile, or that does not touch its parent, is not a candidate.
+ * Returns null when nothing legal fits at the current scale.
  */
+function inOwnHalf(box: LayoutBox, arm: ArmId, center: LayoutBox): boolean {
+  const midX = center.x + center.w / 2;
+  const midY = center.y + center.h / 2;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  if (arm === "west") return cx <= midX + 1;
+  if (arm === "east") return cx >= midX - 1;
+  if (arm === "north") return cy <= midY + 1;
+  return cy >= midY - 1;
+}
+
 function seatOnFelt(
   parent: LayoutBox,
   travel: LayoutDir,
@@ -411,77 +418,68 @@ function seatOnFelt(
   avoid: readonly LayoutBox[] = [],
   nextDouble = false,
   doubleInTwo = false,
-): { box: LayoutBox; dir: LayoutDir; opening: boolean } {
-  const straight = straightBox(parent, travel, isDouble);
-  const hits = (box: LayoutBox) => overlapsPlaced(box, placed) || boxesOverlap(box, parent);
-  if (lockStraight) {
-    const axis = travel === "east" || travel === "west" ? "y" : "x";
-    const slides = [straight];
-    for (const delta of [8, -8, 16, -16, 24, -24, 32, -32, 40, -40]) {
-      slides.push({ ...straight, [axis]: straight[axis] + delta });
-    }
-    let best: { box: LayoutBox; score: number } | null = null;
-    for (const box of slides) {
-      if (hits(box) || hitsObstacle(box)) continue;
-      const across = axis === "y"
-        ? Math.min(parent.y + parent.h, box.y + box.h) - Math.max(parent.y, box.y)
-        : Math.min(parent.x + parent.w, box.x + box.w) - Math.max(parent.x, box.x);
-      if (box !== straight && across < TILE_SHORT * 0.5) continue;
-      const onFelt = fitsOnFelt([...placed, box]);
-      const clear = avoid.every((held) => !boxesOverlap(box, held));
-      const score = (clear ? 1_000_000 : 0) + (onFelt ? 10_000 : scaleThatFits([...placed, box]) * 100)
-        - Math.abs(box[axis] - straight[axis]);
-      if (!best || score > best.score) best = { box, score };
-    }
-    if (best) return { box: best.box, dir: travel, opening: false };
-    return { box: straight, dir: travel, opening: false };
-  }
-
-  const straightClear = !hits(straight) && !hitsObstacle(straight)
-    && avoid.every((held) => !boxesOverlap(straight, held));
+  home?: ArmId,
+  center?: LayoutBox,
+): Seat | null {
+  const straight = outwardStraight(parent, travel, isDouble);
   const doubleClears = (box: LayoutBox, dir: LayoutDir) => {
     if (nextDouble) {
       const follower = straightBox(box, dir, true);
-      return !hits(follower) && !boxesOverlap(follower, box) && !hitsObstacle(follower)
-        && fitsOnFelt([...placed, box, follower]);
+      return legalJoin(follower, box, [...placed, box]) && fitsOnFelt([...placed, box, follower]);
     }
     if (!doubleInTwo) return true;
     const step = straightBox(box, dir, false);
-    if (hits(step) || boxesOverlap(step, box)) return false;
+    if (!legalJoin(step, box, [...placed, box])) return false;
     const follower = straightBox(step, dir, true);
-    return !hits(follower) && !boxesOverlap(follower, step) && !hitsObstacle(follower);
+    return legalJoin(follower, step, [...placed, box, step]);
   };
-  // Run straight across the felt. Turn before a double that would have to
-  // sit on a tile, and turn when this tile would leave the felt.
-  if (straightClear && fitsOnFelt([...placed, straight]) && doubleClears(straight, travel)) {
+  const hasExit = (box: LayoutBox, dir: LayoutDir) => {
+    const around = [...placed, box];
+    const open = (next: LayoutBox) => legalJoin(next, box, around) && avoid.every((held) => !boxesOverlap(next, held));
+    if (open(straightBox(box, dir, false))) return true;
+    for (const way of [clockwise(dir), counterClockwise(dir), opposite(dir)]) {
+      if (open(bendBox(box, dir, way, false))) return true;
+    }
+    return false;
+  };
+  if (
+    !lockStraight
+    && legalJoin(straight, parent, placed)
+    && !hitsObstacle(straight)
+    && avoid.every((held) => !boxesOverlap(straight, held))
+    && fitsOnFelt([...placed, straight])
+    && doubleClears(straight, travel)
+    && hasExit(straight, travel)
+  ) {
     return { box: straight, dir: travel, opening: false };
   }
 
   type Candidate = { box: LayoutBox; dir: LayoutDir; opening: boolean; slide: number };
   const candidates: Candidate[] = [];
-  const consider = (way: LayoutDir, opening: boolean, reach: number) => {
-    const base = way === travel ? straight : bendBox(parent, travel, way, false);
+  const consider = (way: LayoutDir, opening: boolean, reach: number, asDouble: boolean) => {
+    const base = way === travel
+      ? (asDouble ? straightBox(parent, travel, true) : straight)
+      : bendBox(parent, travel, way, asDouble);
     const axis = way === "east" || way === "west" ? "y" : "x";
-    for (let delta = -reach; delta <= reach; delta += 4) {
+    const steps = reach === 0 ? [0] : [];
+    if (reach > 0) {
+      for (let delta = -reach; delta <= reach; delta += 4) steps.push(delta);
+    }
+    for (const delta of steps) {
       const box = delta === 0 ? base : { ...base, [axis]: base[axis] + delta };
-      if (hits(box)) continue;
-      if (delta !== 0) {
-        const across = axis === "y"
-          ? Math.min(parent.y + parent.h, box.y + box.h) - Math.max(parent.y, box.y)
-          : Math.min(parent.x + parent.w, box.x + box.w) - Math.max(parent.x, box.x);
-        if (across < TILE_SHORT * 0.5) continue;
-        if (boxGap(box, parent) > TILE_GAP + 1) continue;
-      }
-      candidates.push({ box, dir: way, opening, slide: Math.abs(delta) });
+      if (!legalJoin(box, parent, placed)) continue;
+      candidates.push({ box, dir: way, opening: opening && way !== travel, slide: Math.abs(delta) });
     }
   };
-  const rank = (pool: readonly Candidate[]): Candidate | null => {
+  const rank = (pool: readonly Candidate[], requireFelt: boolean): Candidate | null => {
     let best: Candidate | null = null;
     let bestScore = -Infinity;
     for (const candidate of pool) {
       const onFelt = fitsOnFelt([...placed, candidate.box]);
       const clear = avoid.every((held) => !boxesOverlap(candidate.box, held));
-      const stacked = !hitsObstacle(candidate.box);
+      const leaveDir = candidate.opening ? opposite(travel) : candidate.dir;
+      const exits = hasExit(candidate.box, leaveDir);
+      if (requireFelt && (!onFelt || !clear || !exits)) continue;
       const gapped = !candidate.opening || !parallelTooClose(candidate.box, placed, parent);
       const open = runway(
         candidate.box,
@@ -489,14 +487,14 @@ function seatOnFelt(
         placed,
         avoid,
       );
-      // Leave other arms their next cells, stay off the stacks, stay inside
-      // the felt, keep the row gap, then take the longer open run.
-      const score = (clear ? 1e9 : 0)
-        + (stacked ? 1e8 : 0)
+      const score = (exits ? 1e10 : 0)
+        + (clear ? 1e9 : 0)
+        + (hitsObstacle(candidate.box) ? 0 : 1e8)
         + (onFelt ? 1e7 : 0)
         + (doubleClears(candidate.box, candidate.opening ? opposite(travel) : candidate.dir) ? 1e6 : 0)
         + (gapped ? 1e5 : 0)
         + (candidate.opening ? 0 : 1e4)
+        + (home && center && inOwnHalf(candidate.box, home, center) ? 1e3 : 0)
         + open * 1e2
         + scaleThatFits([...placed, candidate.box]) * 10
         - candidate.slide;
@@ -507,44 +505,97 @@ function seatOnFelt(
     }
     return best;
   };
-  consider(clockwise(travel), true, 16);
-  consider(counterClockwise(travel), true, 16);
-  if (straightClear) consider(travel, false, 0);
-  let best = rank(candidates);
-  if (!best) {
-    consider(opposite(travel), true, 16);
-    best = rank(candidates);
+  const ways: LayoutDir[] = lockStraight
+    ? [travel]
+    : [travel, clockwise(travel), counterClockwise(travel), opposite(travel)];
+  for (const way of ways) consider(way, way !== travel, way === travel && !lockStraight ? 0 : 16, lockStraight && way === travel);
+  if (lockStraight) consider(travel, false, 40, true);
+  let best = rank(candidates, true);
+  if (!best && lockStraight) {
+    consider(clockwise(travel), true, TILE_LONG, false);
+    consider(counterClockwise(travel), true, TILE_LONG, false);
+    best = rank(candidates, true);
   }
-  if (!best) {
-    consider(clockwise(travel), true, TILE_LONG);
-    consider(counterClockwise(travel), true, TILE_LONG);
-    consider(travel, false, TILE_LONG);
-    best = rank(candidates);
+  if (!best && !lockStraight) {
+    for (const way of ways) consider(way, way !== travel, TILE_LONG, false);
+    best = rank(candidates, true);
   }
   if (best) return { box: best.box, dir: best.dir, opening: best.opening };
-  const limit = TILE_GAP + (fitBudget && fitBudget.scale > 0 ? 8 / fitBudget.scale : 8) - 1;
-  let rescued: { box: LayoutBox; dir: LayoutDir } | null = null;
-  let rescuedGap = Infinity;
-  for (const [w, h, dir] of [
-    [straight.w, straight.h, travel],
-    [straight.h, straight.w, clockwise(travel)],
-  ] as const) {
-    for (let dx = -TILE_LONG * 2; dx <= TILE_LONG * 2; dx += 2) {
-      for (let dy = -TILE_LONG * 2; dy <= TILE_LONG * 2; dy += 2) {
-        const box = { x: parent.x + dx, y: parent.y + dy, w, h };
-        if (hits(box) || hitsObstacle(box)) continue;
-        const gap = boxGap(box, parent);
-        if (gap > limit || gap >= rescuedGap) continue;
-        const touchX = Math.min(box.x + box.w, parent.x + parent.w) - Math.max(box.x, parent.x);
-        const touchY = Math.min(box.y + box.h, parent.y + parent.h) - Math.max(box.y, parent.y);
-        if (touchX < TILE_SHORT * 0.5 && touchY < TILE_SHORT * 0.5) continue;
-        rescued = { box, dir };
-        rescuedGap = gap;
+  // Nothing on the felt. The caller zooms and asks again. At a tiny scale
+  // every legal cell counts as on the felt, so this still never overlaps.
+  if (fitBudget && fitBudget.scale <= 0.08) {
+    const open = candidates.filter((candidate) => {
+      if (!avoid.every((held) => !boxesOverlap(candidate.box, held))) return false;
+      const leave = candidate.opening ? opposite(travel) : candidate.dir;
+      return hasExit(candidate.box, leave);
+    });
+    const outside = rank(open, false);
+    if (outside) return { box: outside.box, dir: outside.dir, opening: outside.opening };
+    const reserved = candidates.filter((candidate) => {
+      const leave = candidate.opening ? opposite(travel) : candidate.dir;
+      return hasExit(candidate.box, leave);
+    });
+    const fallback = rank(reserved, false);
+    if (fallback) return { box: fallback.box, dir: fallback.dir, opening: fallback.opening };
+    // Last attached cell. Still misses every placed tile. The join may be a
+    // few pixels looser than a normal edge, which stays inside the connect check.
+    let loose: Seat | null = null;
+    let looseGap = Infinity;
+    for (const [w, h, dir] of [
+      [straight.w, straight.h, travel],
+      [straight.h, straight.w, clockwise(travel)],
+    ] as const) {
+      for (let dx = -TILE_LONG * 4; dx <= TILE_LONG * 4; dx += 2) {
+        for (let dy = -TILE_LONG * 4; dy <= TILE_LONG * 4; dy += 2) {
+          const box = { x: parent.x + dx, y: parent.y + dy, w, h };
+          if (overlapsPlaced(box, placed) || boxesOverlap(box, parent)) continue;
+          if (avoid.some((held) => boxesOverlap(box, held))) continue;
+          const gap = boxGap(box, parent);
+          if (gap > TILE_GAP + 6 || gap >= looseGap) continue;
+          const touchX = Math.min(box.x + box.w, parent.x + parent.w) - Math.max(box.x, parent.x);
+          const touchY = Math.min(box.y + box.h, parent.y + parent.h) - Math.max(box.y, parent.y);
+          if (touchX < TILE_SHORT * 0.45 && touchY < TILE_SHORT * 0.45) continue;
+          if (!hasExit(box, dir)) continue;
+          loose = { box, dir, opening: dir !== travel };
+          looseGap = gap;
+        }
       }
     }
+    if (loose) return loose;
   }
-  if (rescued) return { ...rescued, opening: rescued.dir !== travel };
-  return { box: straight, dir: travel, opening: false };
+  return null;
+}
+
+/** Lower the scale until a legal cell fits. Never returns a covering tile. */
+function seatZoomed(
+  parent: LayoutBox,
+  travel: LayoutDir,
+  isDouble: boolean,
+  placed: readonly LayoutBox[],
+  lockStraight: boolean,
+  avoid: readonly LayoutBox[] = [],
+  nextDouble = false,
+  doubleInTwo = false,
+  home?: ArmId,
+  center?: LayoutBox,
+): Seat | null {
+  if (!fitBudget) {
+    return seatOnFelt(parent, travel, isDouble, placed, lockStraight, avoid, nextDouble, doubleInTwo, home, center);
+  }
+  const saved = { ...fitBudget };
+  let scale = saved.scale;
+  try {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      fitBudget = { scale, roomW: saved.roomW, roomH: saved.roomH };
+      const choice = seatOnFelt(parent, travel, isDouble, placed, lockStraight, avoid, nextDouble, doubleInTwo, home, center);
+      if (choice) return choice;
+      scale *= 0.88;
+    }
+    fitBudget = { scale: 0.05, roomW: saved.roomW, roomH: saved.roomH };
+    return seatOnFelt(parent, travel, isDouble, placed, lockStraight, avoid, nextDouble, doubleInTwo, home, center);
+  } finally {
+    fitBudget = saved;
+  }
 }
 
 function freeExits(box: LayoutBox, dir: LayoutDir, placed: readonly LayoutBox[]): number {
@@ -2193,7 +2244,7 @@ function layoutBoardNow(
         const saved = index === chain.length - 1 ? priorCursors?.[arm] : undefined;
         const from = saved && Math.abs(saved.box.x - cursor.box.x) < 1 && Math.abs(saved.box.y - cursor.box.y) < 1 ? saved : cursor;
         const feltChoice = fitBudget
-          ? seatOnFelt(
+          ? seatZoomed(
             from.box,
             from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir,
             isDoubleTile(tile),
@@ -2202,6 +2253,8 @@ function layoutBoardNow(
             reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
             index + 1 < chain.length && isDoubleTile(chain[index + 1]!),
             index + 2 < chain.length && isDoubleTile(chain[index + 2]!),
+            arm,
+            center,
           )
           : null;
         const stepped = feltChoice ?? clearStep(
@@ -2211,7 +2264,10 @@ function layoutBoardNow(
           blockers(),
         );
         const seated = feltChoice ?? seatNewTile(from.box, from.dir, isDoubleTile(tile), placed);
-        const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box);
+        const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box)
+          && boxGap(stepped.box, from.box) <= TILE_GAP + 1;
+        const seatedClear = !overlapsPlaced(seated.box, placed) && !boxesOverlap(seated.box, from.box)
+          && boxGap(seated.box, from.box) <= TILE_GAP + 1;
         const choice = feltChoice
           ? {
             box: feltChoice.box,
@@ -2224,7 +2280,7 @@ function layoutBoardNow(
             column: false,
             nextDir: feltChoice.opening ? opposite(from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir) : feltChoice.dir,
           }
-          : steppedClear ? stepped : {
+          : steppedClear ? stepped : seatedClear ? {
             box: seated.box,
             dir: seated.dir,
             row: from.row,
@@ -2233,7 +2289,8 @@ function layoutBoardNow(
             opening: seated.dir !== from.dir,
             fromDouble: false,
             column: false,
-          };
+          } : null;
+        if (!choice) break;
         const next = toTile(tile, choice.box, choice.dir, arm);
         if (fitBudget) (next as PlacedTile & { join?: LayoutBox }).join = from.box;
         tiles.push(next);
@@ -2257,7 +2314,7 @@ function layoutBoardNow(
       continue;
     }
     const feltOpen = pinned && fitBudget
-      ? seatOnFelt(
+      ? seatZoomed(
         center,
         arm,
         isDoubleTile(first),
@@ -2266,8 +2323,12 @@ function layoutBoardNow(
         reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
         chain.length > 1 && isDoubleTile(chain[1]!),
         chain.length > 2 && isDoubleTile(chain[2]!),
+        arm,
+        center,
       )
       : null;
+    const looseOpen = seatNewTile(center, arm, isDoubleTile(first), placed);
+    const looseOk = legalJoin(looseOpen.box, center, placed);
     const opening = feltOpen
       ? {
         box: feltOpen.box,
@@ -2281,8 +2342,10 @@ function layoutBoardNow(
         full: 1,
         resume: feltOpen.opening ? opposite(arm) : feltOpen.dir,
       }
+      : pinned && looseOk
+      ? { ...looseOpen, row: 0, line: 0, run: 1, opening: false, fromDouble: false, column: false, full: 1 }
       : pinned
-      ? { ...seatNewTile(center, arm, isDoubleTile(first), placed), row: 0, line: 0, run: 1, opening: false, fromDouble: false, column: false, full: 1 }
+      ? null
       : clearStep(
         snakeStep(
           first,
@@ -2297,6 +2360,7 @@ function layoutBoardNow(
         isDoubleTile(first),
         blockers(),
       );
+    if (!opening) continue;
     const laid = toTile(first, opening.box, opening.dir, arm);
     tiles.push(laid);
     placed.push(laid);
@@ -2366,61 +2430,6 @@ function layoutBoardNow(
     previews[end.id] = preview;
   }
 
-  if (pinned) {
-    for (const tile of tiles) {
-      if (pinned.has(tile.tileId)) continue;
-      const others = tiles.filter((other) => other !== tile);
-      if (others.every((other) => !boxesOverlap(tile, other))) continue;
-      const join = (tile as PlacedTile & { join?: LayoutBox }).join;
-      let anchor = others[0]!;
-      let anchorGap = Infinity;
-      for (const other of others) {
-        const gap = join ? Math.hypot(other.x - join.x, other.y - join.y) : boxGap(tile, other);
-        if (gap < anchorGap) {
-          anchorGap = gap;
-          anchor = other;
-        }
-      }
-      let bestX = tile.x;
-      let bestY = tile.y;
-      let bestD = Infinity;
-      for (let dx = -160; dx <= 160; dx += 2) {
-        for (let dy = -160; dy <= 160; dy += 2) {
-          const moved = { x: tile.x + dx, y: tile.y + dy, w: tile.w, h: tile.h };
-          if (others.some((other) => boxesOverlap(moved, other))) continue;
-          if (boxGap(moved, anchor) > TILE_GAP + 8) continue;
-          const dist = dx * dx + dy * dy;
-          if (dist < bestD) {
-            bestD = dist;
-            bestX = moved.x;
-            bestY = moved.y;
-          }
-        }
-      }
-      if (bestD === Infinity) {
-        let bestGap = Infinity;
-        for (let dx = -160; dx <= 160; dx += 2) {
-          for (let dy = -160; dy <= 160; dy += 2) {
-            const moved = { x: tile.x + dx, y: tile.y + dy, w: tile.w, h: tile.h };
-            if (others.some((other) => boxesOverlap(moved, other))) continue;
-            const gap = boxGap(moved, anchor);
-            if (gap > 14 || gap > bestGap) continue;
-            const dist = dx * dx + dy * dy;
-            if (gap < bestGap || dist < bestD) {
-              bestGap = gap;
-              bestD = dist;
-              bestX = moved.x;
-              bestY = moved.y;
-            }
-          }
-        }
-      }
-      if (bestD < Infinity) {
-        tile.x = bestX;
-        tile.y = bestY;
-      }
-    }
-  }
   const savedCursors: NonNullable<BoardLayout["cursors"]> = {};
   for (const [arm, cursor] of cursors) savedCursors[arm] = cursor;
   return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews, cursors: savedCursors };

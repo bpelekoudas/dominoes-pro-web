@@ -15,6 +15,24 @@ function failures(report: AuditSizeReport): number {
     + report.refold;
 }
 
+function merge(left: AuditSizeReport | null, right: AuditSizeReport): AuditSizeReport {
+  if (!left) return right;
+  const sum = { ...left, endPx: [...left.endPx, ...right.endPx], endFill: [...left.endFill, ...right.endFill], worst: [...left.worst, ...right.worst].slice(0, 8) };
+  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut"] as const) {
+    sum[key] += right[key];
+  }
+  return sum;
+}
+
+async function auditChunked(felt: (typeof AUDIT_FELTS)[number], lockChain: boolean): Promise<AuditSizeReport> {
+  let acc: AuditSizeReport | null = null;
+  for (let start = 1; start <= AUDIT_SEEDS; start += 20) {
+    acc = merge(acc, auditSize(felt, Math.min(20, AUDIT_SEEDS - start + 1), "TBL-013", lockChain, start));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return acc!;
+}
+
 describe("felt stress audit", () => {
   it(
     "keeps every tile inside the copper, clear of the other tiles and the chrome, at phone size, across 200 hands",
@@ -22,9 +40,8 @@ describe("felt stress audit", () => {
       const before: AuditSizeReport[] = [];
       const reports: AuditSizeReport[] = [];
       for (const felt of AUDIT_FELTS) {
-        before.push(auditSize(felt, AUDIT_SEEDS, "TBL-013", false));
-        reports.push(auditSize(felt, AUDIT_SEEDS, "TBL-013", true));
-        await new Promise((resolve) => setImmediate(resolve));
+        before.push(await auditChunked(felt, false));
+        reports.push(await auditChunked(felt, true));
       }
       const row = (report: AuditSizeReport) => ({
         refold: report.refold,
