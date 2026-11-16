@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
-import { layoutBoard, layoutOverlaps, PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
+import { PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
 import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
 import { shouldRefitFelt } from "./portrait-lock";
 import { motionMs } from "../../rules/src/motion.js";
@@ -12,12 +12,14 @@ import {
   cameraHoldStale,
   cameraSettlesOn,
   cameraEase,
+  chainHeldAtHandEnd,
   chainViewShift,
   clampGhostToFelt,
   fitFrameScale,
   frameInsets,
   settledHandCamera,
   nextFeltSize,
+  pictureFrom,
   renderedTileRect,
   tilesRelocating,
   landedTileBox,
@@ -77,22 +79,6 @@ function endPoints(plays: Array<{ endId: string; points: number }>, endId: strin
   return points > 0 ? `+${points}` : "0";
 }
 
-function pictureFrom(board: PlayerView["board"], limits: LayoutLimits | null): BoardLayout | null {
-  if (!board?.center) return null;
-  try {
-    const picture = layoutBoard(board, limits ?? undefined);
-    if (!layoutOverlaps(picture)) return picture;
-    const plain = layoutBoard(board);
-    return layoutOverlaps(plain) ? picture : plain;
-  } catch {
-    try {
-      return layoutBoard(board);
-    } catch {
-      return null;
-    }
-  }
-}
-
 export function Table({
   view,
   selectedTile,
@@ -145,8 +131,22 @@ export function Table({
   const board = boardDuringOpponentFlight(frozenBoard.current, liveBoard, chainHeld.current);
   // The felt the chain should fold into, in design pixels, at the readable floor.
   const [limits, setLimits] = useState<LayoutLimits | null>(null);
-  const layout = useMemo(() => pictureFrom(board, limits), [board, limits, flightDone]);
-  const incoming = useMemo(() => pictureFrom(liveBoard, limits), [liveBoard, limits]);
+  const handKey = `${view.gameNumber}:${view.handNumber}`;
+  const handOver = view.phase === "between" || view.phase === "over";
+  const computed = useMemo(() => pictureFrom(board, limits), [board, limits, flightDone]);
+  const incomingComputed = useMemo(() => pictureFrom(liveBoard, limits), [liveBoard, limits]);
+  const chainRef = useRef<BoardLayout | null>(null);
+  const heldChain = useRef<BoardLayout | null>(null);
+  if (!handOver) {
+    chainRef.current = computed;
+    heldChain.current = null;
+  } else if (chainRef.current && !heldChain.current) {
+    // Latch once, from the board the play just made. A later fallback fold
+    // must not replace that chain under DOMINO!.
+    heldChain.current = chainHeldAtHandEnd(chainRef.current, incomingComputed ?? computed, true);
+  }
+  const layout = handOver && heldChain.current ? heldChain.current : computed;
+  const incoming = handOver && heldChain.current ? heldChain.current : incomingComputed;
   const frame = useMemo(() => {
     if (!layout && !liveBoard?.center) return null;
     // The stage stays centred on the spinner so a tile's place does not jump.
@@ -169,7 +169,6 @@ export function Table({
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
   const [glideT, setGlideT] = useState(1);
-  const [pin, setPin] = useState<{ left: number; top: number } | null>(null);
   const glideCam = useRef<{
     fromScale: number;
     toScale: number;
@@ -210,8 +209,6 @@ export function Table({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
-  const handKey = `${view.gameNumber}:${view.handNumber}`;
-  const handOver = view.phase === "between" || view.phase === "over";
   const lastTileId = view.lastPlay?.tileId ?? null;
   const playableKey = view.legalPlays.map((play) => play.endId).sort().join(",");
 
@@ -229,13 +226,17 @@ export function Table({
 
   useLayoutEffect(() => {
     if (!layout) return;
+    if (handOver) {
+      setRelocating((current) => (current.size === 0 ? current : new Set()));
+      return;
+    }
     const hidden = tilesRelocating(placedBoxes.current, layout.tiles);
     placedBoxes.current = new Map(layout.tiles.map((tile) => [tile.tileId, { x: tile.x, y: tile.y, w: tile.w, h: tile.h }]));
     if (hidden.length === 0) return;
     setRelocating(new Set(hidden));
     window.clearTimeout(relocateTimer.current);
     relocateTimer.current = window.setTimeout(() => setRelocating(new Set()), CAMERA_EASE_MS);
-  }, [layout]);
+  }, [layout, handOver]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -469,27 +470,23 @@ export function Table({
   useLayoutEffect(() => {
     const root = document.documentElement;
     const viewport = viewportRef.current;
-    const scaler = viewport?.querySelector<HTMLElement>(".board-scaler");
-    if (!handOver || !viewport || !scaler) {
+    if (!handOver || !viewport) {
       setLift((current) => (current === 0 ? current : 0));
-      setPin((current) => (current == null ? current : null));
       root.style.removeProperty("--hand-sheet-max");
       return;
     }
-    // The reveal is an overlay. Freeze the picture where the last tile left
-    // it, including the scale the glide has reached, so a sheet cannot snap it.
+    // Leave the scaler where it is. Swapping its transform for a fixed
+    // position eases the whole chain off the felt and back under DOMINO!.
     window.cancelAnimationFrame(glideTimer.current);
-    glideCam.current = null;
-    setGlideT(1);
     const stage = viewport.querySelector<HTMLElement>(".board-stage");
-    const matrix = new DOMMatrix(getComputedStyle(stage ?? scaler).transform);
+    const matrix = new DOMMatrix(getComputedStyle(stage ?? viewport).transform);
     const visual = Math.abs(matrix.a) > 0.05 ? Math.abs(matrix.a) : null;
+    glideCam.current = null;
     if (visual != null) {
       held.current = { hand: handKey, scale: visual };
       setScale((current) => (Math.abs(current - visual) < 0.001 ? current : visual));
     }
-    const rect = scaler.getBoundingClientRect();
-    setPin({ left: rect.left, top: rect.top });
+    setGlideT(1);
     setLift(0);
     root.style.removeProperty("--hand-sheet-max");
   }, [handOver, handKey]);
@@ -592,16 +589,8 @@ export function Table({
         >
         <div
           className="board-scaler"
-          data-pinned={pin ? "true" : "false"}
-          style={pin ? {
-            position: "fixed",
-            left: pin.left,
-            top: pin.top,
-            margin: 0,
-            width: frame.w * shownScale,
-            height: frame.h * shownScale,
-            transform: "none",
-          } : {
+          data-pinned="false"
+          style={{
             width: frame.w * shownScale,
             height: frame.h * shownScale,
             transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
@@ -615,7 +604,7 @@ export function Table({
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) || tileCrossesInset(tile, shownScale, shift, feltRef.current, edgeRef.current) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${!handOver && (relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) || tileCrossesInset(tile, shownScale, shift, feltRef.current, edgeRef.current)) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}

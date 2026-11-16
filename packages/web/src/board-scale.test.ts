@@ -33,6 +33,8 @@ import {
   nextFeltSize,
   safeRoom,
   tilesRelocating,
+  chainHeldAtHandEnd,
+  pictureFrom,
   zoomSamples,
   centeredChain,
   chainBounds,
@@ -593,6 +595,8 @@ describe("board scale", () => {
     expect(css).toMatch(/is-camera-hold \{\s*visibility:\s*hidden/);
     expect(css).toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,320}transition:[\s\S]{0,200}var\(--camera-ease\)/);
     expect(css).not.toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,80}transition:\s*none/);
+    expect(css).toMatch(/data-board-frozen="true"\]\[data-camera="armed"\]\[data-zoom="ease"\] \.board-tile[\s\S]{0,220}transition:\s*none/);
+    expect(css).toMatch(/data-board-frozen="true"\]\[data-camera="armed"\]\[data-zoom="ease"\] \.board-scaler[\s\S]{0,400}transition:\s*none/);
     let turns = 0;
     let smallest = Number.POSITIVE_INFINITY;
     for (const table of tables) {
@@ -2305,3 +2309,28 @@ function firstZoom(
   }
   return plays;
 }
+
+describe("hand end chain", () => {
+  it("keeps every painted tile on its box when the next fold slides the chain", () => {
+    const opened = placeTile(emptyBoard(), "lead", tileById("6-6"));
+    const second = placeTile(opened, "west", tileById("5-6"));
+    const painted = pictureFrom(second, { width: 420, height: 640 });
+    expect(painted && painted.tiles.length).toBeGreaterThan(1);
+    const slid = painted && {
+      ...painted,
+      tiles: painted.tiles.map((tile) => ({ ...tile, x: tile.x + 180, y: tile.y - 90 })),
+    };
+    const held = chainHeldAtHandEnd(painted, slid, true);
+    expect(held?.tiles.map((tile) => [tile.tileId, tile.x, tile.y])).toEqual(
+      painted?.tiles.map((tile) => [tile.tileId, tile.x, tile.y]),
+    );
+    const felt = { w: 344, h: 596 };
+    const shift = { x: 12, y: -8 };
+    for (const tile of painted?.tiles ?? []) {
+      const before = renderedTileRect(felt, tile, 0.8, shift);
+      const afterTile = held?.tiles.find((item) => item.tileId === tile.tileId);
+      const after = renderedTileRect(felt, afterTile!, 0.8, shift);
+      expect(after).toEqual(before);
+    }
+  });
+});

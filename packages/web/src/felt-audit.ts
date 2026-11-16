@@ -1,10 +1,12 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, layoutOverlaps, straightBox, TILE_SHORT } from "../../rules/src/layout.js";
+import { TILE_GAP, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
   cameraEase,
+  chainHeldAtHandEnd,
   chainViewShift,
+  pictureFrom,
   clampGhostToFelt,
   frameInsets,
   renderedTileRect,
@@ -139,6 +141,8 @@ export function auditSize(
     let prevScreens = new Map<string, ScreenRect>();
     let heldCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let prevPoses = new Map<string, { x: number; y: number; w: number; h: number }>();
+    let painted: BoardLayout | null = null;
+    let paintedCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let doubles = 0;
     let maxTiles = 0;
 
@@ -152,6 +156,53 @@ export function auditSize(
       if (!result.ok) break;
       match = result.match;
       if (intent.type !== "play" || !match.hand) continue;
+      if (match.hand.phase === "complete") {
+        report.plays += 1;
+        const next = pictureFrom(match.hand.board, held);
+        const committed = chainHeldAtHandEnd(painted, next, true);
+        if (painted && paintedCamera && committed) {
+          const byId = new Map(committed.tiles.map((tile) => [tile.tileId, tile]));
+          let moved = committed.tiles.length < painted.tiles.length;
+          for (const tile of painted.tiles) {
+            if (moved) break;
+            const now = byId.get(tile.tileId);
+            if (!now) {
+              moved = true;
+              break;
+            }
+            const before = renderedTileRect(felt, tile, paintedCamera.scale, paintedCamera.shift);
+            const after = renderedTileRect(felt, now, paintedCamera.scale, paintedCamera.shift);
+            moved = Math.abs(before.left - after.left) > 0.5
+              || Math.abs(before.top - after.top) > 0.5
+              || Math.abs(before.right - after.right) > 0.5
+              || Math.abs(before.bottom - after.bottom) > 0.5;
+          }
+          const again = chainHeldAtHandEnd(committed, next, true);
+          if (!moved && again) {
+            const againById = new Map(again.tiles.map((tile) => [tile.tileId, tile]));
+            if (again.tiles.length !== committed.tiles.length) moved = true;
+            for (const tile of committed.tiles) {
+              if (moved) break;
+              const now = againById.get(tile.tileId);
+              if (!now) {
+                moved = true;
+                break;
+              }
+              const before = renderedTileRect(felt, tile, paintedCamera.scale, paintedCamera.shift);
+              const after = renderedTileRect(felt, now, paintedCamera.scale, paintedCamera.shift);
+              moved = Math.abs(before.left - after.left) > 0.5
+                || Math.abs(before.top - after.top) > 0.5
+                || Math.abs(before.right - after.right) > 0.5
+                || Math.abs(before.bottom - after.bottom) > 0.5;
+            }
+          }
+          if (moved) {
+            report.handEndSnap += 1;
+            note("handEndSnap", seed, painted.tiles.length, "chain tiles moved before the next deal");
+          }
+        }
+        break;
+      }
       report.plays += 1;
       if (intent.tileId.split("-")[0] === intent.tileId.split("-")[1]) doubles += 1;
       const cam = settledHandCamera({
@@ -329,6 +380,8 @@ export function auditSize(
       prevScreens = settled;
       heldCamera = { scale: cam.scale, shift };
       prevPoses = new Map(boxes.map((item) => [item.tileId, { x: item.x, y: item.y, w: item.w, h: item.h }]));
+      painted = pictureFrom(match.hand.board, cam.limits);
+      paintedCamera = { scale: cam.scale, shift };
       previous = cam.scale;
       held = cam.limits;
     }

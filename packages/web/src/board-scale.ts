@@ -1,5 +1,5 @@
 import type { BoardState } from "../../rules/src/board.js";
-import { FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type LayoutBox } from "../../rules/src/layout.js";
+import { FIT_MARGIN, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits } from "../../rules/src/layout.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -868,6 +868,53 @@ export function chainViewShift(
  * eases. Sliding it would pass through whatever is in the way. It reappears
  * on its new cell when the glide ends.
  */
+/** The fold the table paints. A limited fold that overlaps falls back to the open one. */
+export function pictureFrom(board: BoardState | null | undefined, limits?: LayoutLimits | null): BoardLayout | null {
+  if (!board?.center) return null;
+  try {
+    const picture = layoutBoard(board, limits ?? undefined);
+    if (!layoutOverlaps(picture)) return picture;
+    const plain = layoutBoard(board);
+    return layoutOverlaps(plain) ? picture : plain;
+  } catch {
+    try {
+      return layoutBoard(board);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function boxMoved(
+  before: { x: number; y: number; w: number; h: number },
+  after: { x: number; y: number; w: number; h: number },
+): boolean {
+  return before.w !== after.w || before.h !== after.h || Math.abs(before.x - after.x) > 0.5 || Math.abs(before.y - after.y) > 0.5;
+}
+
+/**
+ * The chain stays where the last play left it through DOMINO!, HAND WON,
+ * and the reveal. A fallback fold that slides tiles already on the felt is
+ * ignored. A finishing tile may join only when those tiles keep their boxes.
+ */
+export function chainHeldAtHandEnd(
+  painted: BoardLayout | null,
+  next: BoardLayout | null,
+  hold: boolean,
+): BoardLayout | null {
+  if (!hold || !painted) return next;
+  if (!next) return painted;
+  const byId = new Map(painted.tiles.map((tile) => [tile.tileId, tile]));
+  for (const tile of next.tiles) {
+    const old = byId.get(tile.tileId);
+    if (old && boxMoved(old, tile)) return painted;
+  }
+  for (const tile of painted.tiles) {
+    if (!next.tiles.some((item) => item.tileId === tile.tileId)) return painted;
+  }
+  return next;
+}
+
 export function tilesRelocating(
   previous: ReadonlyMap<string, { x: number; y: number; w: number; h: number }>,
   next: readonly { tileId: string; x: number; y: number; w: number; h: number }[],
