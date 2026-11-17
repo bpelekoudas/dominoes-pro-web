@@ -235,6 +235,7 @@ export function Table({
   const knownTiles = useRef<{ hand: string; ids: Set<string> }>({ hand: "", ids: new Set() });
   const [heldIds, setHeldIds] = useState<ReadonlySet<string>>(new Set());
   const frozen = useRef(false);
+  const handEndFit = useRef<"" | "gliding" | "ready">("");
   const seatHands = useRef(new Map<string, SeatBox>());
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
@@ -249,6 +250,7 @@ export function Table({
   useLayoutEffect(() => {
     placedBoxes.current = new Map();
     glideCam.current = null;
+    handEndFit.current = "";
     setGlideT(1);
     setRelocating(new Set());
     window.clearTimeout(relocateTimer.current);
@@ -274,9 +276,13 @@ export function Table({
     const measure = () => {
       const handsClear = handClearance(viewport);
       setClip((current) => (sameInsets(current, handsClear) ? current : handsClear));
-      // The hand is over. Keep the scale and the fold. A sheet must not
-      // snap the chain to a smaller picture.
-      if (handOver || (frozen.current && held.current?.hand === handKey)) {
+      // The overlay must not zoom the chain again once the last tile is inside
+      // the copper. Until that fit lands, the new tile is still on the old camera.
+      if (handOver && handEndFit.current !== "") {
+        frozen.current = handEndFit.current === "ready";
+        return;
+      }
+      if (!handOver && frozen.current && held.current?.hand === handKey) {
         frozen.current = true;
         return;
       }
@@ -376,7 +382,8 @@ export function Table({
       // the camera only after the glide lands. The chain on the felt stays
       // the previous one until that ease finishes, so it never draws on the hands.
       if (
-        holdCameraForChain({
+        !handOver
+        && holdCameraForChain({
           chainHeld: chainHeld.current,
           flightHold: flightHold.current,
           liveSeq: view.lastPlay?.seq ?? -1,
@@ -410,6 +417,7 @@ export function Table({
           shiftDelta,
         })
       ) {
+        if (handOver) handEndFit.current = "ready";
         return;
       }
       const previousShift = anchorHold.current?.hand === handKey ? anchorHold.current.shift : null;
@@ -463,8 +471,12 @@ export function Table({
           const t = Math.min(1, (now - started) / CAMERA_EASE_MS);
           setGlideT(t);
           if (t < 1) glideTimer.current = window.requestAnimationFrame(step);
+          else handEndFit.current = handOver ? "ready" : handEndFit.current;
         };
         glideTimer.current = window.requestAnimationFrame(step);
+        if (handOver) handEndFit.current = "gliding";
+      } else if (handOver) {
+        handEndFit.current = "ready";
       }
       held.current = { hand: handKey, scale: zoom };
       turnBudget.current = { scale: zoom, roomW: roomNow.w, roomH: roomNow.h };
@@ -509,10 +521,12 @@ export function Table({
   useLayoutEffect(() => {
     const root = document.documentElement;
     const viewport = viewportRef.current;
-    if (!handOver || !viewport) {
-      setLift((current) => (current === 0 ? current : 0));
-      setPin((current) => (current == null ? current : null));
-      root.style.removeProperty("--hand-sheet-max");
+    if (!handOver || !viewport || handEndFit.current !== "ready" || glideT < 1) {
+      if (!handOver) {
+        setLift((current) => (current === 0 ? current : 0));
+        setPin((current) => (current == null ? current : null));
+        root.style.removeProperty("--hand-sheet-max");
+      }
       return;
     }
     // The clip-path on the felt is a containing block, so a fixed scaler
@@ -535,7 +549,7 @@ export function Table({
     setGlideT(1);
     setLift(0);
     root.style.removeProperty("--hand-sheet-max");
-  }, [handOver, handKey]);
+  }, [handOver, handKey, glideT]);
 
   const focusTile = dragTileId ?? selectedTile;
   const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];

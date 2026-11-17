@@ -83,6 +83,44 @@ describe("board scale", () => {
     expect(chainBounds(tiles).w).toBeLessThan(chainBounds([...tiles, ghost]).w);
   });
 
+  it("catches a tile past the copper at the old camera and fits it back inside", () => {
+    const phone = { w: 344, h: 596 };
+    const edge = frameInsets("TBL-013", phone);
+    let board = placeTile(emptyBoard(), "lead", tileById("6-6"));
+    const plays = ["0-6", "0-1", "1-2", "2-3", "3-4", "4-5", "5-5", "2-5", "2-6", "3-6", "1-3", "1-4", "0-4", "0-2", "2-2", "2-4", "4-6", "1-6", "1-5", "3-5", "0-3", "0-5"];
+    board = placeTile(board, "east", tileById("5-6"));
+    for (const id of plays) board = placeTile(board, "west", tileById(id));
+    const open = settledHandCamera({
+      board,
+      felt: phone,
+      screenWidth: phone.w,
+      frame: edge,
+      keepOuts: [],
+      previous: null,
+      heldLimits: null,
+      committed: null,
+    });
+    const oldScale = (0.135 * phone.w) / TILE_SHORT;
+    const oldShift = chainViewShift(open.layout.tiles, oldScale);
+    const past = (scale: number, shift: { x: number; y: number }) => {
+      let worst = 0;
+      for (const tile of open.layout.tiles) {
+        const rect = renderedTileRect(phone, tile, scale, shift);
+        worst = Math.max(
+          worst,
+          edge.left - rect.left,
+          edge.top - rect.top,
+          rect.right - (phone.w - edge.right),
+          rect.bottom - (phone.h - edge.bottom),
+        );
+      }
+      return worst;
+    };
+    expect(past(oldScale, { x: oldShift.x + boardShift(edge).x, y: oldShift.y + boardShift(edge).y })).toBeGreaterThan(0.6);
+    const fittedShift = chainViewShift(open.layout.tiles, open.scale);
+    expect(past(open.scale, { x: fittedShift.x + boardShift(edge).x, y: fittedShift.y + boardShift(edge).y })).toBeLessThanOrEqual(0.6);
+  });
+
   it("shrinks only when the chain grows, and grows again on a new hand", () => {
     const open = scaleForTiles(tiles.slice(0, 2), felt, PHONE_SCALE_CAP);
     const longer = scaleForTiles(tiles, felt, PHONE_SCALE_CAP);

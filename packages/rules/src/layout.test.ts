@@ -1282,7 +1282,7 @@ describe("spinner drop target", () => {
     const center = open.tiles.find((tile) => tile.spinner)!;
     for (const id of ["north", "south"] as const) {
       const cap = open.ends.find((end) => end.id === id)!;
-      expect(cap.w * cap.h).toBeGreaterThanOrEqual(TILE_SHORT * TILE_LONG * 0.8);
+      expect(cap.w * cap.h).toBeGreaterThanOrEqual(TILE_SHORT * TILE_SHORT * 0.8);
       expect(boxesOverlap(cap, center)).toBe(false);
       expect(boxGap(cap, center)).toBeLessThanOrEqual(TILE_GAP + 1);
     }

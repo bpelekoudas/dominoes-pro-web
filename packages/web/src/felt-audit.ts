@@ -241,6 +241,16 @@ export function auditSize(
           heldLimits: held,
           committed: lockChain ? committed : null,
         });
+        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale);
+        const endShift = { x: endView.x + boardShift(endCam.edge).x, y: endView.y + boardShift(endCam.edge).y };
+        for (const tile of endCam.layout.tiles) {
+          const rect = renderedTileRect(felt, tile, endCam.scale, endShift);
+          if (outside(rect, felt, endCam.edge) > 0.6) {
+            report.settledCut += 1;
+            note("settledCut", seed, endCam.layout.tiles.length, tile.tileId);
+            break;
+          }
+        }
         const endBox = chainBounds(endCam.layout.tiles, 0);
         report.endPx.push(TILE_SHORT * endCam.scale);
         report.endFill.push((endBox.w * endCam.scale * endBox.h * endCam.scale) / Math.max(1, felt.w * felt.h));
@@ -325,7 +335,7 @@ export function auditSize(
             && end.y < hub.y + hub.h - 1 && end.y + end.h > hub.y + 1
           );
           const beside = hub != null && end != null && boxGap(end, hub) <= TILE_GAP + 1;
-          const full = end != null && end.w * end.h >= TILE_SHORT * TILE_LONG * 0.8;
+          const full = end != null && end.w * end.h >= TILE_SHORT * TILE_SHORT * 0.8;
           const covered = end != null && boxes.some((tile) => tile.tileId !== boardNow.center?.tileId && (
             tile.x < end.x + end.w - 1 && tile.x + tile.w > end.x + 1
             && tile.y < end.y + end.h - 1 && tile.y + tile.h > end.y + 1

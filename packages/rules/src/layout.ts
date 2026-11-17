@@ -291,6 +291,15 @@ function scaleThatFits(boxes: readonly LayoutBox[]): number {
   return Math.min(fitBudget.scale, fitBudget.roomW / size.w, fitBudget.roomH / size.h);
 }
 
+/** Short side stays about 18px at this scale. A straight run that would go smaller should turn. */
+const READABLE_SCALE = 18 / TILE_SHORT;
+
+function roomScale(boxes: readonly LayoutBox[]): number {
+  if (!fitBudget || !(fitBudget.roomW > 0) || !(fitBudget.roomH > 0)) return 1;
+  const size = chainSize(boxes);
+  return Math.min(fitBudget.roomW / Math.max(1, size.w), fitBudget.roomH / Math.max(1, size.h));
+}
+
 function counterClockwise(dir: LayoutDir): LayoutDir {
   return clockwise(clockwise(clockwise(dir)));
 }
@@ -400,9 +409,16 @@ function legalJoin(box: LayoutBox, parent: LayoutBox, placed: readonly LayoutBox
   return touchX >= TILE_SHORT * 0.5 || touchY >= TILE_SHORT * 0.5;
 }
 
-/** A full tile in the empty space beside the spinner, not a sliver painted on the spinner. */
+/**
+ * The open side beside the spinner. One short side deep, so the drop target
+ * is a real socket and the other arms can still turn without zooming under 18px.
+ */
 function emptySideCap(center: LayoutBox, dir: LayoutDir): LayoutBox {
-  return straightBox(center, dir, false);
+  const depth = TILE_SHORT;
+  if (dir === "west") return { x: center.x - TILE_GAP - depth, y: center.y, w: depth, h: center.h };
+  if (dir === "east") return { x: center.x + center.w + TILE_GAP, y: center.y, w: depth, h: center.h };
+  if (dir === "north") return { x: center.x, y: center.y - TILE_GAP - depth, w: center.w, h: depth };
+  return { x: center.x, y: center.y + center.h + TILE_GAP, w: center.w, h: depth };
 }
 
 type Seat = { box: LayoutBox; dir: LayoutDir; opening: boolean };
@@ -465,6 +481,7 @@ function seatOnFelt(
     && fitsOnFelt([...placed, straight])
     && doubleClears(straight, travel)
     && hasExit(straight, travel)
+    && roomScale([...placed, straight]) >= READABLE_SCALE - 0.02
   ) {
     return { box: straight, dir: travel, opening: false };
   }
@@ -502,7 +519,9 @@ function seatOnFelt(
         placed,
         avoid,
       );
+      const readable = roomScale([...placed, candidate.box]) >= READABLE_SCALE - 0.02;
       const score = (exits ? 1e10 : 0)
+        + (readable ? 5e9 : 0)
         + (clear ? 1e9 : 0)
         + (hitsObstacle(candidate.box) ? 0 : 1e8)
         + (onFelt ? 1e7 : 0)
