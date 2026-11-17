@@ -30,6 +30,13 @@ describe("drop target", () => {
     expect(chooseDropEnd(west.left + 10, past, [west])).toBeNull();
   });
 
+  it("hits the spinner's open side and not the far chain end", () => {
+    const socket = { id: "north", left: 160, top: 40, width: 72, height: 36 };
+    const tip = { id: "west", left: 12, top: 12, width: 36, height: 72 };
+    expect(chooseDropEnd(190, 55, [socket, tip])).toBe("north");
+    expect(chooseDropEnd(30, 40, [socket, tip])).toBe("west");
+  });
+
   it("aims with the tile above the finger, not the fingertip", () => {
     const finger = { x: 75, y: west.top + west.height + GHOST_LIFT + GHOST_HEIGHT / 2 };
     const aim = ghostAimPoint(finger.x, finger.y);

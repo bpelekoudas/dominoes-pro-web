@@ -4,17 +4,19 @@ import {
   asSentence,
   arrangeDeck,
   beginHand,
-  conservedTiles,
   createMatch,
+  conservedTiles,
   currentPlayerId,
   deal,
   legalIntents,
+  legalPlays,
   openingLead,
   replayMatch,
   type Intent,
   type MatchState,
 } from "./engine.js";
-import { openScore } from "./board.js";
+import { openEnds, openScore, placeTile } from "./board.js";
+import { tileById } from "./tiles.js";
 import { deckMatchesSeed, shuffleWithSeed } from "./rng.js";
 import { roundToFive, scoreDomino, scoreLocked, splitShare, winsNeeded } from "./score.js";
 import { allTileIds, handPips, lowestEndKey } from "./tiles.js";
@@ -990,6 +992,34 @@ function metaOf(match: MatchState, youId: string): TableMeta {
     youId,
   };
 }
+
+describe("spinner sides", () => {
+  it("keeps the short ends closed until both long sides have a tile, then lets a matching tile play them", () => {
+    const empty = { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false };
+    let board = placeTile(empty, "lead", tileById("6-6"));
+    board = placeTile(board, "east", tileById("5-6"));
+    expect(openEnds(board).map((end) => end.id).sort()).toEqual(["east", "west"]);
+    const deck = deckFor(["a", "b"], {
+      a: ["1-6", "0-0", "0-1", "0-2", "0-3", "0-4", "0-5"],
+      b: ["2-2", "2-3", "2-4", "3-3", "3-4", "4-4", "4-5"],
+    });
+    const started = start([A, B], deck);
+    const withBoard = (next: typeof board) => ({
+      ...started,
+      hand: {
+        ...started.hand!,
+        board: next,
+        phase: "await_play" as const,
+        turnIndex: started.players.findIndex((player) => player.id === "a"),
+      },
+    });
+    expect(legalPlays(withBoard(board), "a").filter((item) => item.tileId === "1-6").map((item) => item.endId)).toEqual(["west"]);
+    board = placeTile(board, "west", tileById("4-6"));
+    expect(board.spinnerOpen).toBe(true);
+    expect(openEnds(board).map((end) => end.id).sort()).toEqual(["east", "north", "south", "west"]);
+    expect(legalPlays(withBoard(board), "a").filter((item) => item.tileId === "1-6").map((item) => item.endId).sort()).toEqual(["north", "south"]);
+  });
+});
 
 describe("result sentence", () => {
   it("capitalizes a lowercase seat name so the line is a sentence", () => {

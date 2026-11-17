@@ -13,6 +13,7 @@ import {
 } from "./engine.js";
 import {
   ARM_GAP,
+  UNJOINED_GAP,
   boxGap,
   boxesOverlap,
   FIT_MARGIN,
@@ -21,6 +22,7 @@ import {
   insideHard,
   insidePhone,
   layoutBoard,
+  extendLayoutFitting,
   layoutOverlaps,
   PHONE_HEIGHT,
   PHONE_WIDTH,
@@ -100,7 +102,11 @@ function assertLaidOut(board: BoardState, label: string, phone: boolean): void {
   }
   for (const end of layout.ends) {
     const host = layout.tiles.some((tile) => contains(tile, end));
-    expect(host, `${label} end ${end.id} is not on a tile`).toBe(true);
+    if (host) continue;
+    const spinner = layout.tiles.find((tile) => tile.spinner) ?? layout.tiles[0];
+    expect(spinner, `${label} end ${end.id} has no spinner`).toBeTruthy();
+    expect(boxesOverlap(end, spinner!), `${label} end ${end.id} covers the spinner`).toBe(false);
+    expect(boxGap(end, spinner!), `${label} end ${end.id} is not beside the spinner`).toBeLessThanOrEqual(TILE_GAP + 1);
   }
   const limitW = phone ? PHONE_WIDTH : HARD_WIDTH;
   const limitH = phone ? PHONE_HEIGHT : HARD_HEIGHT;
@@ -1259,6 +1265,60 @@ describe("board layout", () => {
           expect(layoutOverlaps(layout), where).toBe(false);
           if (hand.gameNumber === 2 && hand.handNumber === 3) assertJoined(match.hand.board, layout, where);
         }
+      }
+    }
+  });
+});
+
+describe("spinner drop target", () => {
+  it("sits a full tile in the empty space beside an open side, and draws no target for a closed side", () => {
+    const empty = { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false };
+    let board = placeTile(empty, "lead", tileById("6-6"));
+    board = placeTile(board, "east", tileById("5-6"));
+    const closed = layoutBoard(board);
+    expect(closed.ends.map((end) => end.id).sort()).toEqual(["east", "west"]);
+    board = placeTile(board, "west", tileById("4-6"));
+    const open = layoutBoard(board);
+    const center = open.tiles.find((tile) => tile.spinner)!;
+    for (const id of ["north", "south"] as const) {
+      const cap = open.ends.find((end) => end.id === id)!;
+      expect(cap.w * cap.h).toBeGreaterThanOrEqual(TILE_SHORT * TILE_LONG * 0.8);
+      expect(boxesOverlap(cap, center)).toBe(false);
+      expect(boxGap(cap, center)).toBeLessThanOrEqual(TILE_GAP + 1);
+    }
+    const north = open.ends.find((end) => end.id === "north")!;
+    expect(north.y + north.h).toBeLessThanOrEqual(center.y + 1);
+  });
+
+  it("keeps tiles that do not join at least 30% of a short side apart", () => {
+    const empty = { center: null, arms: { west: [], east: [], north: [], south: [] }, spinnerOpen: false };
+    let board = placeTile(empty, "lead", tileById("6-6"));
+    const plays: Array<[ArmId, string]> = [
+      ["west", "5-6"], ["west", "5-5"], ["west", "4-5"], ["west", "3-4"], ["west", "2-3"], ["west", "1-2"], ["west", "0-1"],
+      ["east", "3-6"], ["east", "3-5"], ["east", "2-5"], ["east", "2-6"],
+      ["north", "4-6"], ["north", "1-4"], ["north", "1-1"],
+      ["south", "0-6"], ["south", "0-4"],
+    ];
+    let layout = layoutBoard(board, { width: 412, height: 628 });
+    for (const [arm, id] of plays) {
+      board = placeTile(board, arm, tileById(id));
+      layout = extendLayoutFitting(layout, board, { width: 412, height: 628 }, { scale: 1, roomW: 412, roomH: 628 });
+    }
+    const key = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const joined = new Set<string>();
+    for (const arm of ["west", "east", "north", "south"] as const) {
+      let prev = board.center!.tileId;
+      for (const tile of board.arms[arm]) {
+        joined.add(key(prev, tile.tileId));
+        prev = tile.tileId;
+      }
+    }
+    for (let i = 0; i < layout.tiles.length; i += 1) {
+      for (let j = i + 1; j < layout.tiles.length; j += 1) {
+        const left = layout.tiles[i]!;
+        const right = layout.tiles[j]!;
+        if (joined.has(key(left.tileId, right.tileId))) continue;
+        expect(boxGap(left, right)).toBeGreaterThanOrEqual(UNJOINED_GAP - 0.5);
       }
     }
   });

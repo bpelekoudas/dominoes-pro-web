@@ -10,6 +10,8 @@ function failures(report: AuditSizeReport): number {
     + report.zoomIn
     + report.jump
     + report.ghostCut
+    + report.unjoinedGap
+    + report.spinnerBlind
     + report.connectGap
     + report.handEndSnap
     + report.refold;
@@ -18,7 +20,7 @@ function failures(report: AuditSizeReport): number {
 function merge(left: AuditSizeReport | null, right: AuditSizeReport): AuditSizeReport {
   if (!left) return right;
   const sum = { ...left, endPx: [...left.endPx, ...right.endPx], endFill: [...left.endFill, ...right.endFill], worst: [...left.worst, ...right.worst].slice(0, 8) };
-  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut"] as const) {
+  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut", "unjoinedGap", "spinnerBlind"] as const) {
     sum[key] += right[key];
   }
   return sum;

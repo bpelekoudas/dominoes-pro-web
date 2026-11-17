@@ -31,6 +31,8 @@ import { ARM_IDS, openEnds } from "./board.js";
 export const TILE_SHORT = 36;
 export const TILE_LONG = 72;
 export const TILE_GAP = 2;
+/** Unjoined tiles stay this far apart, about 30% of the short side, so a joint is obvious. */
+export const UNJOINED_GAP = Math.round(TILE_SHORT * 0.3);
 /** Clear space between different chains, and between separate runs of one chain. */
 export const ARM_GAP = TILE_SHORT;
 export const END_CAP = 44;
@@ -381,13 +383,26 @@ function outwardStraight(parent: LayoutBox, travel: LayoutDir, isDouble: boolean
   return box;
 }
 
-/** Touches the parent on a real edge and misses every tile already down. */
+function sameBox(a: LayoutBox, b: LayoutBox): boolean {
+  return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && a.w === b.w && a.h === b.h;
+}
+
+/** Touches the parent on a real edge, and stays clear of every tile it does not join. */
 function legalJoin(box: LayoutBox, parent: LayoutBox, placed: readonly LayoutBox[]): boolean {
   if (overlapsPlaced(box, placed) || boxesOverlap(box, parent)) return false;
   if (boxGap(box, parent) > TILE_GAP + 1) return false;
+  for (const other of placed) {
+    if (sameBox(other, parent)) continue;
+    if (boxGap(box, other) < UNJOINED_GAP - 0.5) return false;
+  }
   const touchX = Math.min(box.x + box.w, parent.x + parent.w) - Math.max(box.x, parent.x);
   const touchY = Math.min(box.y + box.h, parent.y + parent.h) - Math.max(box.y, parent.y);
   return touchX >= TILE_SHORT * 0.5 || touchY >= TILE_SHORT * 0.5;
+}
+
+/** A full tile in the empty space beside the spinner, not a sliver painted on the spinner. */
+function emptySideCap(center: LayoutBox, dir: LayoutDir): LayoutBox {
+  return straightBox(center, dir, false);
 }
 
 type Seat = { box: LayoutBox; dir: LayoutDir; opening: boolean };
@@ -531,12 +546,6 @@ function seatOnFelt(
     });
     const outside = rank(open, false);
     if (outside) return { box: outside.box, dir: outside.dir, opening: outside.opening };
-    const reserved = candidates.filter((candidate) => {
-      const leave = candidate.opening ? opposite(travel) : candidate.dir;
-      return hasExit(candidate.box, leave);
-    });
-    const fallback = rank(reserved, false);
-    if (fallback) return { box: fallback.box, dir: fallback.dir, opening: fallback.opening };
     // Last attached cell. Still misses every placed tile. The join may be a
     // few pixels looser than a normal edge, which stays inside the connect check.
     let loose: Seat | null = null;
@@ -548,7 +557,7 @@ function seatOnFelt(
       for (let dx = -TILE_LONG * 4; dx <= TILE_LONG * 4; dx += 2) {
         for (let dy = -TILE_LONG * 4; dy <= TILE_LONG * 4; dy += 2) {
           const box = { x: parent.x + dx, y: parent.y + dy, w, h };
-          if (overlapsPlaced(box, placed) || boxesOverlap(box, parent)) continue;
+          if (!legalJoin(box, parent, placed)) continue;
           if (avoid.some((held) => boxesOverlap(box, held))) continue;
           const gap = boxGap(box, parent);
           if (gap > TILE_GAP + 6 || gap >= looseGap) continue;
@@ -2164,7 +2173,7 @@ function rebalanceLayout(board: BoardState, failed: BoardLayout): BoardLayout {
   for (const end of openEnds(board)) {
     if (end.id !== "west" && end.id !== "east" && end.id !== "north" && end.id !== "south") continue;
     const cursor = cursors.get(end.id);
-    const cap = cursor ? { ...cursor.box } : capOnCenter(center, end.id);
+    const cap = cursor ? { ...cursor.box } : emptySideCap(center, end.id);
     ends.push({ ...cap, id: end.id, match: end.match, scorePips: end.scorePips });
   }
   return { tiles, ends, fit: fitAround([...tiles, ...ends]), previews: {} };
@@ -2194,9 +2203,11 @@ function layoutBoardNow(
   const cursors = new Map<ArmId, SnakeCursor>();
   // Openings of arms not drawn yet. A column must not sit on one.
   const reserved = new Map<ArmId, LayoutBox>();
+  const spinner = board.center.low === board.center.high;
   for (const arm of LAY_ORDER) {
     const first = board.arms[arm][0];
     if (first) reserved.set(arm, openingBox(center, arm, first));
+    else if (spinner) reserved.set(arm, emptySideCap(center, arm));
   }
   if (pinned) {
     for (const arm of LAY_ORDER) {
@@ -2277,10 +2288,9 @@ function layoutBoardNow(
               blockers(),
             );
             const seated = seatNewTile(from.box, from.dir, isDoubleTile(tile), placed);
-            const steppedClear = !overlapsPlaced(stepped.box, placed) && !boxesOverlap(stepped.box, from.box)
-              && boxGap(stepped.box, from.box) <= TILE_GAP + 1;
-            const seatedClear = !overlapsPlaced(seated.box, placed) && !boxesOverlap(seated.box, from.box)
-              && boxGap(seated.box, from.box) <= TILE_GAP + 1;
+            const missesSocket = (box: LayoutBox) => [...reserved.values()].every((held) => !boxesOverlap(box, held));
+            const steppedClear = legalJoin(stepped.box, from.box, placed) && missesSocket(stepped.box);
+            const seatedClear = legalJoin(seated.box, from.box, placed) && missesSocket(seated.box);
             if (steppedClear) return stepped;
             if (!seatedClear) return null;
             return {
@@ -2332,7 +2342,8 @@ function layoutBoardNow(
       )
       : null;
     const looseOpen = seatNewTile(center, arm, isDoubleTile(first), placed);
-    const looseOk = legalJoin(looseOpen.box, center, placed);
+    const looseOk = legalJoin(looseOpen.box, center, placed)
+      && [...reserved.values()].every((held) => !boxesOverlap(looseOpen.box, held));
     const opening = feltOpen
       ? {
         box: feltOpen.box,
@@ -2381,6 +2392,49 @@ function layoutBoardNow(
     };
     for (let index = 1; index < chain.length; index += 1) {
       const tile = chain[index]!;
+      if (fitBudget) {
+        const from = cursor;
+        const feltChoice = seatZoomed(
+          from.box,
+          from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir,
+          isDoubleTile(tile),
+          placed,
+          isDoubleTile(tile) || from.fromDouble,
+          reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
+          index + 1 < chain.length && isDoubleTile(chain[index + 1]!),
+          index + 2 < chain.length && isDoubleTile(chain[index + 2]!),
+          arm,
+          center,
+        );
+        const stepped = clearStep(
+          snakeStep(tile, from, arm, center, chain.slice(index), placed, false),
+          from.box,
+          isDoubleTile(tile),
+          blockers(),
+        );
+        const missesSocket = (box: LayoutBox) => [...reserved.values()].every((held) => !boxesOverlap(box, held));
+        const choice = feltChoice
+          ? { box: feltChoice.box, dir: feltChoice.dir, row: from.row, line: from.line, run: from.run + 1, opening: false, fromDouble: false, column: false }
+          : legalJoin(stepped.box, from.box, placed) && missesSocket(stepped.box)
+            ? stepped
+            : null;
+        if (!choice) break;
+        const next = toTile(tile, choice.box, choice.dir, arm);
+        tiles.push(next);
+        placed.push(next);
+        cursor = {
+          box: next,
+          dir: choice.dir,
+          row: choice.row,
+          line: choice.line,
+          run: choice.run,
+          opening: choice.opening,
+          fromDouble: choice.fromDouble,
+          column: choice.column,
+          full: cursor.full,
+        };
+        continue;
+      }
       const choice = clearStep(
         snakeStep(tile, cursor, arm, center, chain.slice(index), placed, false),
         cursor.box,
@@ -2411,7 +2465,7 @@ function layoutBoardNow(
   for (const end of openEnds(board)) {
     if (end.id !== "west" && end.id !== "east" && end.id !== "north" && end.id !== "south") continue;
     const cursor = cursors.get(end.id);
-    const cap = cursor ? { ...cursor.box } : capOnCenter(center, end.id);
+    const cap = cursor ? { ...cursor.box } : emptySideCap(center, end.id);
     ends.push({ ...cap, id: end.id, match: end.match, scorePips: end.scorePips });
   }
 
@@ -2974,10 +3028,6 @@ function fits(
     if (boxGap(box, other.box) < ARM_GAP) return false;
   }
   return true;
-}
-
-function sameBox(a: LayoutBox, b: LayoutBox): boolean {
-  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 }
 
 function extents(isDouble: boolean): { along: number; across: number } {

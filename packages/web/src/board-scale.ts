@@ -639,7 +639,7 @@ function containedScale(
   scale: number,
 ): number {
   let next = scale;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     const shift = {
       x: chainViewShift(tiles, next).x + boardShift(edge).x,
       y: chainViewShift(tiles, next).y + boardShift(edge).y,
@@ -655,9 +655,10 @@ function containedScale(
         rect.bottom - (felt.h - edge.bottom),
       );
     }
-    if (over <= 0) return next;
+    if (over <= 0.4) return next;
     const span = Math.min(felt.w - edge.left - edge.right, felt.h - edge.top - edge.bottom);
-    next *= Math.max(0.85, (span - over - 1) / Math.max(1, span));
+    const fitted = (span - over - 1.5) / Math.max(1, span);
+    next *= Math.max(0.85, Math.min(0.985, fitted));
   }
   return next;
 }

@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, layoutOverlaps, straightBox, TILE_SHORT, type BoardLayout } from "../../rules/src/layout.js";
+import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -76,6 +76,10 @@ export interface AuditSizeReport {
   zoomIn: number;
   jump: number;
   ghostCut: number;
+  /** Tiles that do not join and sit closer than about 30% of the short side. */
+  unjoinedGap: number;
+  /** An open spinner side whose drop target is missing or sitting on the spinner. */
+  spinnerBlind: number;
   worst: AuditFailure[];
 }
 
@@ -144,6 +148,8 @@ export function auditSize(
     zoomIn: 0,
     jump: 0,
     ghostCut: 0,
+    unjoinedGap: 0,
+    spinnerBlind: 0,
     worst: [],
   };
   const note = (kind: string, seed: number, play: number, detail: string) => {
@@ -282,6 +288,53 @@ export function auditSize(
       if (layoutOverlaps(cam.layout)) {
         report.settledOverlap += 1;
         note("settledOverlap", seed, boxes.length, "layout");
+      }
+      const boardNow = match.hand.board;
+      const joined = new Set<string>();
+      const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+      if (boardNow.center) {
+        for (const arm of ["west", "east", "north", "south"] as const) {
+          let previousId = boardNow.center.tileId;
+          for (const tile of boardNow.arms[arm]) {
+            joined.add(pairKey(previousId, tile.tileId));
+            previousId = tile.tileId;
+          }
+        }
+      }
+      let crowded = false;
+      for (let i = 0; i < boxes.length && !crowded; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          const left = boxes[i]!;
+          const right = boxes[j]!;
+          if (joined.has(pairKey(left.tileId, right.tileId))) continue;
+          if (boxGap(left, right) < UNJOINED_GAP - 0.5) {
+            crowded = true;
+            report.unjoinedGap += 1;
+            note("unjoinedGap", seed, boxes.length, `${left.tileId} ${right.tileId}`);
+            break;
+          }
+        }
+      }
+      if (boardNow.center?.isSpinner && boardNow.spinnerOpen) {
+        const hub = boxes.find((tile) => tile.tileId === boardNow.center?.tileId);
+        for (const arm of ["west", "east", "north", "south"] as const) {
+          if (boardNow.arms[arm].length > 0) continue;
+          const end = cam.layout.ends.find((item) => item.id === arm);
+          const onHub = hub != null && end != null && (
+            end.x < hub.x + hub.w - 1 && end.x + end.w > hub.x + 1
+            && end.y < hub.y + hub.h - 1 && end.y + end.h > hub.y + 1
+          );
+          const beside = hub != null && end != null && boxGap(end, hub) <= TILE_GAP + 1;
+          const full = end != null && end.w * end.h >= TILE_SHORT * TILE_LONG * 0.8;
+          const covered = end != null && boxes.some((tile) => tile.tileId !== boardNow.center?.tileId && (
+            tile.x < end.x + end.w - 1 && tile.x + tile.w > end.x + 1
+            && tile.y < end.y + end.h - 1 && tile.y + tile.h > end.y + 1
+          ));
+          if (!end || onHub || !beside || !full || covered) {
+            report.spinnerBlind += 1;
+            note("spinnerBlind", seed, boxes.length, arm);
+          }
+        }
       }
       const settled = new Map<string, ScreenRect>();
       let cut = false;

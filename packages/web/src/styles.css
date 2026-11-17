@@ -1050,8 +1050,22 @@ input {
     0 0 0 4px var(--gold),
     0 0 22px 6px rgba(227, 30, 38, 0.9);
 }
-.end-cap {
+.board-tile[data-cross="closed"]::before,
+.board-tile[data-cross="closed"]::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  height: 7px;
+  background: #1c140c;
+  border-radius: 2px;
   z-index: 2;
+  pointer-events: none;
+}
+.board-tile[data-cross="closed"]::before { top: 4px; }
+.board-tile[data-cross="closed"]::after { bottom: 4px; }
+.end-cap {
+  z-index: 4;
   border: 0;
   background: transparent;
   padding: 0;

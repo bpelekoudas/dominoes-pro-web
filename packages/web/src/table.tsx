@@ -207,6 +207,7 @@ export function Table({
     hide: Set<string>;
   } | null>(null);
   const glideTimer = useRef(0);
+  const shownPose = useRef({ scale: 1, x: 0, y: 0 });
   const feltRef = useRef<{ w: number; h: number } | null>(null);
   const edgeRef = useRef<AxisInsets | null>(null);
   const glideEase = glideT < 1 ? cameraEase(glideT) : 1;
@@ -221,6 +222,7 @@ export function Table({
     }
     : pan;
   const shift = { x: panNow.x + nudge.x, y: panNow.y + nudge.y };
+  shownPose.current = { scale: gliding ? shownScale / nudge.zoom : scale, x: panNow.x, y: panNow.y };
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number; table: string } | null>(null);
@@ -432,10 +434,11 @@ export function Table({
         || Math.abs(previousShift.x - shift.x) > 1
         || Math.abs(previousShift.y - shift.y) > 1;
       const feltNow = { w: width, h: height };
-      if (cameraMoves && prevScale != null && previousShift && !prefersReducedMotion()) {
+      const shown = shownPose.current;
+      if (cameraMoves && prevScale != null && previousShift && shown.scale > 0.05 && !prefersReducedMotion()) {
         const hide = new Set<string>();
         for (const tile of picture.tiles) {
-          const start = renderedTileRect(feltNow, tile, prevScale, previousShift);
+          const start = renderedTileRect(feltNow, tile, shown.scale, { x: shown.x, y: shown.y });
           const past = Math.max(
             solved.edge.left - start.left,
             solved.edge.top - start.top,
@@ -445,10 +448,10 @@ export function Table({
           if (past > 0.6) hide.add(tile.tileId);
         }
         glideCam.current = {
-          fromScale: prevScale,
+          fromScale: shown.scale,
           toScale: zoom,
-          fromX: previousShift.x,
-          fromY: previousShift.y,
+          fromX: shown.x,
+          fromY: shown.y,
           toX: shift.x,
           toY: shift.y,
           hide,
@@ -661,6 +664,7 @@ export function Table({
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}
+                data-cross={tile.spinner ? (liveBoard.spinnerOpen ? "open" : "closed") : undefined}
               >
                 <Domino a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
               </div>
