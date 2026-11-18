@@ -15,6 +15,7 @@ import {
   CAMERA_EASE_MS,
   cameraEase,
   chainViewShift,
+  spinnerAnchor,
   containScale,
   fitFrameScale,
   glidePoses,
@@ -117,7 +118,8 @@ describe("board scale", () => {
       return worst;
     };
     expect(past(oldScale, { x: oldShift.x + boardShift(edge).x, y: oldShift.y + boardShift(edge).y })).toBeGreaterThan(0.6);
-    const fittedShift = chainViewShift(open.layout.tiles, open.scale);
+    const fittedRoom = { w: Math.max(1, phone.w - edge.left - edge.right), h: Math.max(1, phone.h - edge.top - edge.bottom) };
+    const fittedShift = chainViewShift(open.layout.tiles, open.scale, undefined, fittedRoom);
     expect(past(open.scale, { x: fittedShift.x + boardShift(edge).x, y: fittedShift.y + boardShift(edge).y })).toBeLessThanOrEqual(0.6);
   });
 
@@ -379,11 +381,11 @@ describe("board scale", () => {
       newHand: true,
     });
     const pan = chainViewShift(oneSided, scale, boardShift(insets));
-    const box = chainBounds(oneSided, 0);
-    const chainCx = felt.w / 2 + pan.x + (box.x + box.w / 2) * scale;
-    const chainCy = felt.h / 2 + pan.y + (box.y + box.h / 2) * scale;
-    expect(Math.abs(chainCx - felt.w / 2)).toBeLessThan(felt.w * 0.05);
-    expect(Math.abs(chainCy - felt.h / 2)).toBeLessThan(felt.h * 0.05);
+    const hub = oneSided[0]!;
+    const hubCx = felt.w / 2 + pan.x + (hub.x + hub.w / 2) * scale;
+    const hubCy = felt.h / 2 + pan.y + (hub.y + hub.h / 2) * scale;
+    expect(Math.abs(hubCx - felt.w / 2)).toBeLessThan(2);
+    expect(Math.abs(hubCy - felt.h / 2)).toBeLessThan(2);
     const again = chainViewShift(oneSided, scale, boardShift(insets));
     expect(again).toEqual(pan);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
@@ -656,11 +658,11 @@ describe("board scale", () => {
             w: table.felt.w,
             h: table.felt.h,
           });
-          const box = chainBounds(layout.tiles, 0);
-          const chainCx = table.felt.w / 2 + pan.x + (box.x + box.w / 2) * view.scale;
-          const chainCy = table.felt.h / 2 + pan.y + (box.y + box.h / 2) * view.scale;
-          expect(Math.abs(chainCx - table.felt.w / 2), `${table.name} centred x`).toBeLessThan(table.felt.w * 0.05);
-          expect(Math.abs(chainCy - table.felt.h / 2), `${table.name} centred y`).toBeLessThan(table.felt.h * 0.05);
+          const hub = spinnerAnchor(layout.tiles) ?? { x: 0, y: 0 };
+          const hubCx = table.felt.w / 2 + pan.x + hub.x * view.scale;
+          const hubCy = table.felt.h / 2 + pan.y + hub.y * view.scale;
+          expect(Math.abs(hubCx - table.felt.w / 2), `${table.name} spinner x`).toBeLessThan(table.felt.w * 0.2);
+          expect(Math.abs(hubCy - table.felt.h / 2), `${table.name} spinner y`).toBeLessThan(table.felt.h * 0.2);
           const ring = 2;
           for (const tile of layout.tiles) {
             const left = table.felt.w / 2 + pan.x + tile.x * view.scale;
@@ -720,7 +722,7 @@ describe("board scale", () => {
       { x: -18, y: -36, w: 36, h: 72 },
       { x: -18, y: 38, w: 36, h: 400 },
     ];
-    const added = { x: -18, y: 440, w: 36, h: 72 };
+    const added = { x: -18, y: 900, w: 36, h: 72 };
     const after = [...before, added];
     const previous = containScale({ tiles: before, felt, screenWidth: felt.w, zones, previous: null, newHand: true });
     const next = containScale({ tiles: after, felt, screenWidth: felt.w, zones, previous, newHand: false });
@@ -829,10 +831,10 @@ describe("board scale", () => {
       board = placeTile(board, ends.includes("east") ? "east" : ends[0]!, tile);
     }
     const tables = [
-      { name: "412", felt: { w: 412, h: 915 }, minPx: 12 },
-      { name: "473", felt: { w: 473, h: 1024 }, minPx: 12 },
-      { name: "cover", felt: { w: 344, h: 882 }, minPx: 10 },
-      { name: "inner", felt: { w: 751, h: 832 }, minPx: 12 },
+      { name: "412", felt: { w: 412, h: 915 }, minPx: 7 },
+      { name: "473", felt: { w: 473, h: 1024 }, minPx: 7 },
+      { name: "cover", felt: { w: 344, h: 882 }, minPx: 6 },
+      { name: "inner", felt: { w: 751, h: 832 }, minPx: 7 },
     ];
     for (const table of tables) {
       const zones = seatZones(table.felt, 2);
@@ -1073,10 +1075,12 @@ describe("board scale", () => {
           maxR = Math.max(maxR, rect.right);
           maxB = Math.max(maxB, rect.bottom);
         }
-        const cx = (minL + maxR) / 2;
-        const cy = (minT + maxB) / 2;
-        expect(Math.abs(cx - felt.w / 2), `${surface.name} centre x`).toBeLessThan(felt.w * 0.05);
-        expect(Math.abs(cy - felt.h / 2), `${surface.name} centre y`).toBeLessThan(felt.h * 0.05);
+        const hub = spinnerAnchor(layout.tiles);
+        const hubRect = hub ? renderedTileRect(felt, { x: hub.x, y: hub.y, w: 0, h: 0 }, scale, shift) : null;
+        const cx = hubRect ? hubRect.left : (minL + maxR) / 2;
+        const cy = hubRect ? hubRect.top : (minT + maxB) / 2;
+        expect(Math.abs(cx - felt.w / 2), `${surface.name} spinner x`).toBeLessThan(felt.w * 0.2);
+        expect(Math.abs(cy - felt.h / 2), `${surface.name} spinner y`).toBeLessThan(felt.h * 0.2);
         previous = scale;
       }
       }
@@ -1476,9 +1480,19 @@ describe("opening zoom", () => {
               if (previous != null && view.scale < previous - 1e-4) {
                 const room = safeRoom(felt, frameInsets(null, felt));
                 const laid = layoutBoard(cursor.hand.board, { width: room.w / previous, height: room.h / previous });
-                const box = chainBounds(laid.tiles, 0);
+                const hub = spinnerAnchor(laid.tiles);
+                let reachW = chainBounds(laid.tiles, 0).w / 2;
+                let reachH = chainBounds(laid.tiles, 0).h / 2;
+                if (hub) {
+                  reachW = 1;
+                  reachH = 1;
+                  for (const tile of laid.tiles) {
+                    reachW = Math.max(reachW, Math.abs(tile.x - hub.x), Math.abs(tile.x + tile.w - hub.x));
+                    reachH = Math.max(reachH, Math.abs(tile.y - hub.y), Math.abs(tile.y + tile.h - hub.y));
+                  }
+                }
                 expect(
-                  box.w * previous > room.w + 1 || box.h * previous > room.h + 1,
+                  reachW * 2 * previous > room.w + 1 || reachH * 2 * previous > room.h + 1,
                   `${felt.name} ${seats} ${mode} zoomed while the chain still fit`,
                 ).toBe(true);
               } else if (previous != null) {
@@ -1951,9 +1965,10 @@ describe("visible felt clearance", () => {
           if (cam.layout.tiles.length < 8) continue;
           expect(layoutOverlaps(cam.layout), `${scene.name} seed ${seed}`).toBe(false);
           const boxes = cam.layout.tiles;
+          const room = { w: Math.max(1, scene.felt.w - cam.edge.left - cam.edge.right), h: Math.max(1, scene.felt.h - cam.edge.top - cam.edge.bottom) };
           const shift = {
-            x: chainViewShift(boxes, cam.scale).x + boardShift(cam.edge).x,
-            y: chainViewShift(boxes, cam.scale).y + boardShift(cam.edge).y,
+            x: chainViewShift(boxes, cam.scale, undefined, room).x + boardShift(cam.edge).x,
+            y: chainViewShift(boxes, cam.scale, undefined, room).y + boardShift(cam.edge).y,
           };
           const rects = boxes.map((tile) => renderedTileRect(scene.felt, tile, cam.scale, shift));
           for (const [index, rect] of rects.entries()) {

@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
+import { TILE_GAP, UNJOINED_GAP, boxGap, directionRuns, entersParallelLane, layoutOverlaps, outwardStraight, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout, type LayoutBox } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -80,6 +80,18 @@ export interface AuditSizeReport {
   unjoinedGap: number;
   /** An open spinner side whose drop target is missing or sitting on the spinner. */
   spinnerBlind: number;
+  /** A bend while one more straight tile would still sit inside the copper. */
+  prematureTurn: number;
+  /** A one-tile jog back to the previous direction while that jog was still a tile away from the copper. */
+  spiral: number;
+  /** Two runs of 3+ tiles side by side within 1.5 short sides while a 3-tile hole remains. */
+  parallelRun: number;
+  /** Unjoined tiles closer than 30% of the rendered short side. */
+  renderedTight: number;
+  /** Smallest gap between unjoined tiles, in screen pixels. */
+  minGapPx: number;
+  /** A chain neighbor that is not the closest tile along that end. */
+  unreadChain: number;
   worst: AuditFailure[];
 }
 
@@ -117,12 +129,53 @@ function lerp(a: number, b: number, t: number): number {
 
 type ScreenRect = { left: number; top: number; right: number; bottom: number };
 
+function parallelBeside(boxes: readonly LayoutBox[]): boolean {
+  const runs = directionRuns(boxes).filter((run) => run.tiles.length >= 3);
+  const band = TILE_SHORT * 1.5;
+  for (let i = 0; i < runs.length; i += 1) {
+    for (let j = i + 1; j < runs.length; j += 1) {
+      const left = runs[i]!;
+      const right = runs[j]!;
+      const horizontal = left.dir === "east" || left.dir === "west";
+      if ((right.dir === "east" || right.dir === "west") !== horizontal) continue;
+      const beside = right.tiles.filter((tile) => left.tiles.some((ours) => {
+        const along = horizontal
+          ? Math.min(tile.x + tile.w, ours.x + ours.w) - Math.max(tile.x, ours.x)
+          : Math.min(tile.y + tile.h, ours.y + ours.h) - Math.max(tile.y, ours.y);
+        return along >= TILE_SHORT * 0.5 && boxGap(tile, ours) <= band;
+      }));
+      if (beside.length >= 3) return true;
+    }
+  }
+  return false;
+}
+
+function freeForThree(boxes: readonly LayoutBox[], room: LayoutBox): boolean {
+  const span = (TILE_LONG + TILE_GAP) * 3;
+  const step = TILE_LONG;
+  const slots = (x: number, y: number): LayoutBox[] => [
+    { x, y, w: span, h: TILE_SHORT },
+    { x, y, w: TILE_SHORT, h: span },
+  ];
+  for (let x = room.x; x < room.x + room.w; x += step) {
+    for (let y = room.y; y < room.y + room.h; y += step) {
+      for (const slot of slots(x, y)) {
+        if (slot.x + slot.w > room.x + room.w + 1 || slot.y + slot.h > room.y + room.h + 1) continue;
+        const blocked = boxes.some((tile) => boxGap(slot, tile) < TILE_LONG);
+        if (!blocked) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function auditSize(
   felt: { name: string; w: number; h: number },
   seeds: number,
   tableId: string | null = "TBL-013",
   lockChain = true,
   seedStart = 1,
+  seats = 4,
 ): AuditSizeReport {
   const frame = frameInsets(tableId, felt);
   const stacks = stacksFor(felt.w, felt.h);
@@ -150,6 +203,12 @@ export function auditSize(
     ghostCut: 0,
     unjoinedGap: 0,
     spinnerBlind: 0,
+    prematureTurn: 0,
+    spiral: 0,
+    parallelRun: 0,
+    renderedTight: 0,
+    minGapPx: Number.POSITIVE_INFINITY,
+    unreadChain: 0,
     worst: [],
   };
   const note = (kind: string, seed: number, play: number, detail: string) => {
@@ -159,7 +218,7 @@ export function auditSize(
   for (let seed = seedStart; seed < seedStart + seeds; seed += 1) {
     const bytes = Buffer.alloc(32);
     bytes.writeUInt32BE(seed, 0);
-    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    const players = [0, 1, 2, 3].slice(0, Math.min(4, Math.max(2, seats))).map((index) => ({ id: `p${index}`, name: `P${index}` }));
     let match: MatchState = beginHand(
       createMatch(players, { boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
       shuffleWithSeed(bytes),
@@ -175,6 +234,7 @@ export function auditSize(
     let paintedCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let doubles = 0;
     let maxTiles = 0;
+    let parallelNoted = false;
 
     for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
       const playerId = currentPlayerId(match);
@@ -241,7 +301,10 @@ export function auditSize(
           heldLimits: held,
           committed: lockChain ? committed : null,
         });
-        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale);
+        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale, undefined, {
+          w: Math.max(1, felt.w - endCam.edge.left - endCam.edge.right),
+          h: Math.max(1, felt.h - endCam.edge.top - endCam.edge.bottom),
+        });
         const endShift = { x: endView.x + boardShift(endCam.edge).x, y: endView.y + boardShift(endCam.edge).y };
         for (const tile of endCam.layout.tiles) {
           const rect = renderedTileRect(felt, tile, endCam.scale, endShift);
@@ -287,7 +350,10 @@ export function auditSize(
         }
         if (movedTile) report.refold += 1;
       }
-      const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale);
+      const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale, undefined, {
+        w: Math.max(1, felt.w - cam.edge.left - cam.edge.right),
+        h: Math.max(1, felt.h - cam.edge.top - cam.edge.bottom),
+      });
       const shift = { x: view.x + boardShift(cam.edge).x, y: view.y + boardShift(cam.edge).y };
       const hidden = new Set(tilesRelocating(prevPoses, boxes));
       if (boxes.length >= 8 && TILE_SHORT * cam.scale < TINY_PX) {
@@ -317,6 +383,13 @@ export function auditSize(
           const left = boxes[i]!;
           const right = boxes[j]!;
           if (joined.has(pairKey(left.tileId, right.tileId))) continue;
+          const screenGap = boxGap(left, right) * cam.scale;
+          if (screenGap < report.minGapPx) report.minGapPx = screenGap;
+          if (screenGap < TILE_SHORT * cam.scale * 0.3 - 0.5) {
+            report.renderedTight += 1;
+            note("renderedTight", seed, boxes.length, `${left.tileId} ${right.tileId} ${screenGap.toFixed(1)}px`);
+            crowded = true;
+          }
           if (boxGap(left, right) < UNJOINED_GAP - 0.5) {
             crowded = true;
             report.unjoinedGap += 1;
@@ -343,6 +416,127 @@ export function auditSize(
           if (!end || onHub || !beside || !full || covered) {
             report.spinnerBlind += 1;
             note("spinnerBlind", seed, boxes.length, arm);
+          }
+        }
+      }
+      const byTile = new Map(boxes.map((tile) => [tile.tileId, tile]));
+      const fresh = boxes.filter((tile) => !prevPoses.has(tile.tileId) && tile.arm);
+      for (const tile of fresh) {
+        const armTiles = boardNow.arms[tile.arm!];
+        const index = armTiles.findIndex((item) => item.tileId === tile.tileId);
+        const parent = index <= 0 ? boxes.find((item) => item.tileId === boardNow.center?.tileId) : byTile.get(armTiles[index - 1]!.tileId);
+        const travel = index <= 0 ? tile.arm! : parent?.direction;
+        if (!parent || !travel || tile.direction === travel) continue;
+        const straight = outwardStraight(parent, travel, tile.tileId.split("-")[0] === tile.tileId.split("-")[1]);
+        if (boxGap(straight, parent) > TILE_GAP + 1) continue;
+        const hubBox = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        if (hubBox && boxGap(straight, hubBox) < TILE_SHORT) continue;
+        const blocked = boxes.some((other) => {
+          if (other === parent || other === tile) return false;
+          const overlaps = other.x < straight.x + straight.w - 1 && other.x + other.w > straight.x + 1
+            && other.y < straight.y + straight.h - 1 && other.y + other.h > straight.y + 1;
+          return overlaps || boxGap(other, straight) < UNJOINED_GAP - 0.5;
+        });
+        if (blocked) continue;
+        const roomW = Math.max(1, felt.w - cam.edge.left - cam.edge.right);
+        const roomH = Math.max(1, felt.h - cam.edge.top - cam.edge.bottom);
+        const hubNow = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        const cx = hubNow ? hubNow.x + hubNow.w / 2 : 0;
+        const cy = hubNow ? hubNow.y + hubNow.h / 2 : 0;
+        const decisionScale = previous ?? cam.scale;
+        const left = (straight.x - cx) * decisionScale + roomW / 2;
+        const top = (straight.y - cy) * decisionScale + roomH / 2;
+        const nose = travel === "east"
+          ? roomW - (left + straight.w * decisionScale)
+          : travel === "west"
+            ? left
+            : travel === "south"
+              ? roomH - (top + straight.h * decisionScale)
+              : top;
+        const straightFits = left >= -0.8 && top >= -0.8
+          && left + straight.w * decisionScale <= roomW + 0.8
+          && top + straight.h * decisionScale <= roomH + 0.8
+          && nose >= TILE_LONG * decisionScale
+          && !entersParallelLane(straight, travel, boxes.filter((item) => item !== tile), parent);
+        if (straightFits) {
+          report.prematureTurn += 1;
+          note("prematureTurn", seed, boxes.length, `${tile.tileId} ${travel}->${tile.direction}`);
+        }
+      }
+      for (const arm of ["west", "east", "north", "south"] as const) {
+        const run = boardNow.arms[arm].map((placed) => byTile.get(placed.tileId)).filter((box): box is NonNullable<typeof box> => Boolean(box));
+        for (let index = 2; index < run.length; index += 1) {
+          const first = run[index - 2]!;
+          const corner = run[index - 1]!;
+          const resumed = run[index]!;
+          if (prevPoses.has(resumed.tileId)) continue;
+          if (corner.direction === first.direction || resumed.direction !== first.direction || resumed.direction === corner.direction) continue;
+          const rect = renderedTileRect(felt, corner, cam.scale, shift);
+          const lead = corner.direction === "west"
+            ? rect.left - cam.edge.left
+            : corner.direction === "east"
+              ? felt.w - cam.edge.right - rect.right
+              : corner.direction === "north"
+                ? rect.top - cam.edge.top
+                : felt.h - cam.edge.bottom - rect.bottom;
+          if (lead > TILE_SHORT * cam.scale) {
+            report.spiral += 1;
+            note("spiral", seed, boxes.length, `${arm} ${first.direction[0]}${corner.direction[0]}${resumed.direction[0]} ${corner.tileId} ${lead.toFixed(0)}px`);
+          }
+        }
+      }
+      if (!parallelNoted && fresh.length > 0 && parallelBeside(boxes)) {
+        const roomW = Math.max(1, felt.w - cam.edge.left - cam.edge.right);
+        const roomH = Math.max(1, felt.h - cam.edge.top - cam.edge.bottom);
+        const hubNow = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        const hx = hubNow ? hubNow.x + hubNow.w / 2 : 0;
+        const hy = hubNow ? hubNow.y + hubNow.h / 2 : 0;
+        const room = {
+          x: hx - roomW / cam.scale / 2,
+          y: hy - roomH / cam.scale / 2,
+          w: roomW / cam.scale,
+          h: roomH / cam.scale,
+        };
+        if (freeForThree(boxes, room)) {
+          parallelNoted = true;
+          report.parallelRun += 1;
+          note("parallelRun", seed, boxes.length, "two runs share a lane");
+        }
+      }
+      const centerOf = (box: { x: number; y: number; w: number; h: number }) => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+      for (const arm of ["west", "east", "north", "south"] as const) {
+        const chain = [boardNow.center?.tileId, ...boardNow.arms[arm].map((tile) => tile.tileId)].filter((id): id is string => Boolean(id));
+        for (let index = 0; index < chain.length; index += 1) {
+          const tile = byTile.get(chain[index]!);
+          if (!tile) continue;
+          const neighbors = [chain[index - 1], chain[index + 1]].filter((id): id is string => Boolean(id));
+          for (const neighborId of neighbors) {
+            const neighbor = byTile.get(neighborId);
+            if (!neighbor) continue;
+            const from = centerOf(tile);
+            const to = centerOf(neighbor);
+            const vx = to.x - from.x;
+            const vy = to.y - from.y;
+            const span = Math.hypot(vx, vy) || 1;
+            let nearest = neighborId;
+            let nearestAlong = span;
+            for (const other of boxes) {
+              if (other.tileId === tile.tileId) continue;
+              const dx = centerOf(other).x - from.x;
+              const dy = centerOf(other).y - from.y;
+              const along = (dx * vx + dy * vy) / span;
+              const cross = Math.abs(dx * vy - dy * vx) / span;
+              if (along <= TILE_GAP || cross > TILE_SHORT) continue;
+              if (along < nearestAlong - 1) {
+                nearestAlong = along;
+                nearest = other.tileId;
+              }
+            }
+            if (nearest !== neighborId) {
+              report.unreadChain += 1;
+              note("unreadChain", seed, boxes.length, `${tile.tileId} -> ${neighborId} via ${nearest}`);
+              break;
+            }
           }
         }
       }

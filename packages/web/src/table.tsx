@@ -362,7 +362,7 @@ export function Table({
         solved.scale,
         fitFrameScale({ tiles: drawn, felt, screenWidth, frame: solved.edge, previous }),
       );
-      const centered = chainViewShift(drawn, zoom);
+      const centered = chainViewShift(drawn, zoom, undefined, roomNow);
       const nextShift = {
         x: centered.x + frameShift.x + solved.nudge.x,
         y: centered.y + frameShift.y + solved.nudge.y,
