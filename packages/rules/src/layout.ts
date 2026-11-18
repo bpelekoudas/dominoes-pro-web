@@ -420,6 +420,88 @@ type Seat = { box: LayoutBox; dir: LayoutDir; opening: boolean };
  * another tile, or that does not touch its parent, is not a candidate.
  * Returns null when nothing legal fits at the current scale.
  */
+/** Two runs this close, measured in the gap between them, are the same lane. */
+const PARALLEL_BAND = TILE_SHORT * 1.5;
+
+function axisOf(dir: LayoutDir): "h" | "v" {
+  return dir === "east" || dir === "west" ? "h" : "v";
+}
+
+function alongOverlap(a: LayoutBox, b: LayoutBox, horizontal: boolean): number {
+  return horizontal
+    ? Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+    : Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+}
+
+/** Consecutive same-direction runs, in the order each arm was laid. */
+export function directionRuns(placed: readonly LayoutBox[]): Array<{ arm: string; dir: LayoutDir; tiles: LayoutBox[] }> {
+  const byArm = new Map<string, PlacedTile[]>();
+  for (const tile of placed) {
+    const laid = tile as PlacedTile;
+    if (!laid.arm || !laid.direction) continue;
+    const list = byArm.get(laid.arm) ?? [];
+    list.push(laid);
+    byArm.set(laid.arm, list);
+  }
+  const runs: Array<{ arm: string; dir: LayoutDir; tiles: LayoutBox[] }> = [];
+  for (const [arm, tiles] of byArm) {
+    let current: PlacedTile[] = [];
+    const flush = () => {
+      if (current.length > 0) runs.push({ arm, dir: current[0]!.direction, tiles: current });
+    };
+    for (const tile of tiles) {
+      if (current.length > 0 && current[current.length - 1]!.direction !== tile.direction) {
+        flush();
+        current = [];
+      }
+      current.push(tile);
+    }
+    flush();
+  }
+  return runs;
+}
+
+/** The next three tiles in `dir` would run beside another arm's run of three. */
+export function entersParallelLane(box: LayoutBox, dir: LayoutDir, placed: readonly LayoutBox[], parent: LayoutBox): boolean {
+  const arm = (parent as PlacedTile).arm;
+  const horizontal = axisOf(dir) === "h";
+  const projected = [box];
+  let cursor = box;
+  for (let step = 0; step < 2; step += 1) {
+    cursor = straightBox(cursor, dir, false);
+    projected.push(cursor);
+  }
+  for (const other of directionRuns(placed)) {
+    if (other.tiles.length < 2 || axisOf(other.dir) !== axisOf(dir)) continue;
+    if (arm && other.arm === arm && other.tiles.some((tile) => sameBox(tile, parent))) continue;
+    const beside = other.tiles.filter((tile) => projected.some((ours) => alongOverlap(tile, ours, horizontal) >= TILE_SHORT * 0.5 && boxGap(tile, ours) <= PARALLEL_BAND));
+    if (beside.length >= 2) return true;
+  }
+  return false;
+}
+
+/**
+ * True when `box` would be the third tile of a run that sits beside another
+ * run of three or more, within one and a half short sides. The parent is the
+ * tile this box joins.
+ */
+export function extendsParallel(box: LayoutBox, dir: LayoutDir, placed: readonly LayoutBox[], parent: LayoutBox): boolean {
+  const arm = (parent as PlacedTile).arm;
+  if (!arm || (parent as PlacedTile).direction !== dir) return false;
+  const horizontal = axisOf(dir) === "h";
+  const ownRun = directionRuns(placed).filter((run) => run.arm === arm && run.dir === dir).find((run) => run.tiles.some((tile) => sameBox(tile, parent)));
+  const behind = ownRun?.tiles.length ?? 1;
+  if (behind + 1 < 3) return false;
+  const ownTiles = [...(ownRun?.tiles ?? [parent]), box];
+  for (const other of directionRuns(placed)) {
+    if (other.tiles.length < 3 || axisOf(other.dir) !== axisOf(dir)) continue;
+    if (other.arm === arm && other.tiles.some((tile) => sameBox(tile, parent))) continue;
+    const beside = other.tiles.filter((tile) => ownTiles.some((ours) => alongOverlap(tile, ours, horizontal) >= TILE_SHORT * 0.5 && boxGap(tile, ours) <= PARALLEL_BAND));
+    if (beside.length >= 3) return true;
+  }
+  return false;
+}
+
 function inOwnHalf(box: LayoutBox, arm: ArmId, center: LayoutBox): boolean {
   const midX = center.x + center.w / 2;
   const midY = center.y + center.h / 2;
@@ -466,20 +548,27 @@ function seatOnFelt(
   };
   const stickOut = (box: LayoutBox) => {
     if (!fitBudget || !(fitBudget.scale > 0)) return 0;
-    const all = [...placed, box];
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const item of all) {
-      minX = Math.min(minX, item.x);
-      minY = Math.min(minY, item.y);
-      maxX = Math.max(maxX, item.x + item.w);
-      maxY = Math.max(maxY, item.y + item.h);
-    }
     const scale = fitBudget.scale;
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
+    let cx: number;
+    let cy: number;
+    if (center) {
+      cx = center.x + center.w / 2;
+      cy = center.y + center.h / 2;
+    } else {
+      const all = [...placed, box];
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const item of all) {
+        minX = Math.min(minX, item.x);
+        minY = Math.min(minY, item.y);
+        maxX = Math.max(maxX, item.x + item.w);
+        maxY = Math.max(maxY, item.y + item.h);
+      }
+      cx = (minX + maxX) / 2;
+      cy = (minY + maxY) / 2;
+    }
     const left = (box.x - cx) * scale + fitBudget.roomW / 2;
     const top = (box.y - cy) * scale + fitBudget.roomH / 2;
     return Math.max(0, -left, -top, left + box.w * scale - fitBudget.roomW, top + box.h * scale - fitBudget.roomH);
@@ -487,14 +576,63 @@ function seatOnFelt(
   // Keep going straight while most of the next tile still lands on the felt.
   // A few pixels past the copper is a zoom, not a turn. A tile that is mostly
   // past the edge is the corner: the arm turns and runs along the copper.
+  const readableAtHub = (boxes: readonly LayoutBox[]) => {
+    if (!center || !fitBudget) return scaleThatFits(boxes) >= 0.5;
+    const hx = center.x + center.w / 2;
+    const hy = center.y + center.h / 2;
+    let reachW = 1;
+    let reachH = 1;
+    for (const tile of boxes) {
+      reachW = Math.max(reachW, Math.abs(tile.x - hx), Math.abs(tile.x + tile.w - hx));
+      reachH = Math.max(reachH, Math.abs(tile.y - hy), Math.abs(tile.y + tile.h - hy));
+    }
+    return Math.min(fitBudget.scale, fitBudget.roomW / (2 * reachW), fitBudget.roomH / (2 * reachH)) >= 0.5;
+  };
   const straightOk = (box: LayoutBox) => {
     if (!legalJoin(box, parent, placed) || avoid.some((held) => boxesOverlap(box, held))) return false;
     const stick = stickOut(box);
-    if (stick <= 0.8) return true;
-    const lead = (travel === "east" || travel === "west" ? box.w : box.h) * (fitBudget?.scale ?? 1);
-    return stick < lead * 0.22 && scaleThatFits([...placed, box]) >= 0.5;
+    const onFelt = stick <= 0.8 || (() => {
+      const lead = (travel === "east" || travel === "west" ? box.w : box.h) * (fitBudget?.scale ?? 1);
+      return stick < lead * 0.22 && readableAtHub([...placed, box]);
+    })();
+    if (!onFelt) return false;
+    // A step that would run beside another arm is not "still straight".
+    return !entersParallelLane(box, travel, placed, parent);
   };
   if (straightOk(straight)) return { box: straight, dir: travel, opening: false };
+  if (stickOut(straight) <= 0.8) {
+    const across = travel === "east" || travel === "west" ? "y" : "x";
+    for (const delta of [8, -8, 14, -14, 18, -18, 24, -24]) {
+      const slid = { ...straight, [across]: straight[across] + delta };
+      if (straightOk(slid)) return { box: slid, dir: travel, opening: false };
+    }
+  }
+  const ownRun = (parent as PlacedTile).arm
+    ? directionRuns(placed).filter((run) => run.arm === (parent as PlacedTile).arm && run.tiles.some((tile) => sameBox(tile, parent))).pop()
+    : undefined;
+  if (
+    ownRun && ownRun.tiles.length === 1
+    && legalJoin(straight, parent, placed)
+    && avoid.every((held) => !boxesOverlap(straight, held))
+    && !entersParallelLane(straight, travel, placed, parent)
+    && readableAtHub([...placed, straight])
+  ) {
+    return { box: straight, dir: travel, opening: false };
+  }
+  if (legalJoin(straight, parent, placed) && stickOut(straight) <= 0.8 && entersParallelLane(straight, travel, placed, parent)) {
+    const across = travel === "east" || travel === "west" ? "y" : "x";
+    for (const delta of [18, -18, 22, -22]) {
+      const slid = { ...straight, [across]: straight[across] + delta };
+      if (
+        legalJoin(slid, parent, placed)
+        && avoid.every((held) => !boxesOverlap(slid, held))
+        && stickOut(slid) <= 0.8
+        && !entersParallelLane(slid, travel, placed, parent)
+      ) {
+        return { box: slid, dir: travel, opening: false };
+      }
+    }
+  }
   // A straight tile that only grazes a reserved socket. Pull it back onto its
   // parent, or slide it across, before turning the arm back on itself.
   if (legalJoin(straight, parent, placed) && stickOut(straight) < TILE_LONG) {
@@ -530,18 +668,15 @@ function seatOnFelt(
     let best: Candidate | null = null;
     let bestScore = -Infinity;
     for (const candidate of pool) {
-      const onFelt = fitsOnFelt([...placed, candidate.box]);
+      const onward = candidate.dir;
+      const lane = entersParallelLane(candidate.box, onward, placed, parent);
+      const onFelt = stickOut(candidate.box) <= (lane ? 0.8 : TILE_SHORT);
       const clear = avoid.every((held) => !boxesOverlap(candidate.box, held));
-      const leaveDir = candidate.opening ? opposite(travel) : candidate.dir;
-      const exits = hasExit(candidate.box, leaveDir);
+      const exits = hasExit(candidate.box, onward);
       if (requireFelt && (!onFelt || !clear || !exits)) continue;
       const gapped = !candidate.opening || !parallelTooClose(candidate.box, placed, parent);
-      const open = runway(
-        candidate.box,
-        candidate.opening ? opposite(travel) : candidate.dir,
-        placed,
-        avoid,
-      );
+      const open = runway(candidate.box, onward, placed, avoid);
+      const crowded = lane;
       const spinnerDist = (box: LayoutBox) => {
         if (!center) return 0;
         const x = box.x + box.w / 2 - (center.x + center.w / 2);
@@ -551,16 +686,17 @@ function seatOnFelt(
       const inward = Boolean(center) && candidate.opening && spinnerDist(candidate.box) + TILE_SHORT * TILE_SHORT < spinnerDist(parent);
       const reversed = candidate.dir === opposite(travel);
       const score = (exits ? 1e10 : 0)
+        + (crowded ? 0 : 5e9)
         + (inward ? 0 : 2e9)
         + (reversed ? 0 : 2e9)
         + (clear ? 1e9 : 0)
         + (hitsObstacle(candidate.box) ? 0 : 1e8)
         + (onFelt ? 1e7 : 0)
-        + (doubleClears(candidate.box, candidate.opening ? opposite(travel) : candidate.dir) ? 1e6 : 0)
+        + (doubleClears(candidate.box, onward) ? 1e6 : 0)
+        + open * 1e6
         + (gapped ? 1e5 : 0)
         + (candidate.opening ? 0 : 1e4)
-        + (home && center && inOwnHalf(candidate.box, home, center) ? 1e3 : 0)
-        + open * 1e2
+        + (home && center && inOwnHalf(candidate.box, home, center) ? 1e5 : 0)
         + scaleThatFits([...placed, candidate.box]) * 10
         - candidate.slide;
       if (score > bestScore) {
@@ -585,7 +721,22 @@ function seatOnFelt(
     for (const way of ways) consider(way, way !== travel, TILE_LONG, false);
     best = rank(candidates, true);
   }
-  if (best) return { box: best.box, dir: best.dir, opening: best.opening };
+  if (best && !entersParallelLane(best.box, best.dir, placed, parent) && runway(best.box, best.dir, placed, avoid) >= 2) {
+    return { box: best.box, dir: best.dir, opening: best.opening };
+  }
+  // A one-tile sidestep would jog straight back. Zoom and keep the straight
+  // run while the tiles stay readable.
+  if (
+    legalJoin(straight, parent, placed)
+    && avoid.every((held) => !boxesOverlap(straight, held))
+    && !entersParallelLane(straight, travel, placed, parent)
+    && readableAtHub([...placed, straight])
+  ) {
+    return { box: straight, dir: travel, opening: false };
+  }
+  if (legalJoin(straight, parent, placed) && stickOut(straight) <= 0.8 && !entersParallelLane(straight, travel, placed, parent)) {
+    return { box: straight, dir: travel, opening: false };
+  }
   // Nothing on the felt. The caller zooms and asks again. At a tiny scale
   // every legal cell counts as on the felt, so this still never overlaps.
   if (fitBudget && fitBudget.scale <= 0.08) {

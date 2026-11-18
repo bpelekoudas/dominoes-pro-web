@@ -220,9 +220,22 @@ export function nextFeltSize(
 }
 
 function fitInRoom(tiles: readonly LayoutBox[], room: FeltSize): number {
+  const hub = spinnerAnchor(tiles);
   const box = chainBounds(tiles, 0);
-  const fitW = room.w / Math.max(1, box.w);
-  const fitH = room.h / Math.max(1, box.h);
+  let spanW = Math.max(1, box.w);
+  let spanH = Math.max(1, box.h);
+  if (hub) {
+    let reachW = 1;
+    let reachH = 1;
+    for (const tile of tiles) {
+      reachW = Math.max(reachW, Math.abs(tile.x - hub.x), Math.abs(tile.x + tile.w - hub.x));
+      reachH = Math.max(reachH, Math.abs(tile.y - hub.y), Math.abs(tile.y + tile.h - hub.y));
+    }
+    spanW = reachW * 2;
+    spanH = reachH * 2;
+  }
+  const fitW = room.w / spanW;
+  const fitH = room.h / spanH;
   return Math.min(Number.isFinite(fitW) && fitW > 0 ? fitW : 1, Number.isFinite(fitH) && fitH > 0 ? fitH : 1);
 }
 
@@ -267,8 +280,21 @@ export function containScale(input: {
   const roomW = Math.max(1, halfW * 2 - TILE_RING_PAD * 2);
   const roomH = Math.max(1, halfH * 2 - TILE_RING_PAD * 2);
   const box = chainBounds(input.tiles, 0);
-  const fitW = roomW / Math.max(1, box.w);
-  const fitH = roomH / Math.max(1, box.h);
+  const hub = spinnerAnchor(input.tiles);
+  let spanW = box.w;
+  let spanH = box.h;
+  if (hub) {
+    let reachW = 1;
+    let reachH = 1;
+    for (const tile of input.tiles) {
+      reachW = Math.max(reachW, Math.abs(tile.x - hub.x), Math.abs(tile.x + tile.w - hub.x));
+      reachH = Math.max(reachH, Math.abs(tile.y - hub.y), Math.abs(tile.y + tile.h - hub.y));
+    }
+    spanW = reachW * 2;
+    spanH = reachH * 2;
+  }
+  const fitW = roomW / Math.max(1, spanW);
+  const fitH = roomH / Math.max(1, spanH);
   let scale = Math.min(open, Number.isFinite(fitW) && fitW > 0 ? fitW : open, Number.isFinite(fitH) && fitH > 0 ? fitH : open);
   if (!input.newHand && input.previous != null && Number.isFinite(input.previous)) {
     scale = Math.min(input.previous, scale);
@@ -640,9 +666,10 @@ function containedScale(
 ): number {
   let next = scale;
   for (let attempt = 0; attempt < 8; attempt += 1) {
+    const room = { w: Math.max(1, felt.w - edge.left - edge.right), h: Math.max(1, felt.h - edge.top - edge.bottom) };
     const shift = {
-      x: chainViewShift(tiles, next).x + boardShift(edge).x,
-      y: chainViewShift(tiles, next).y + boardShift(edge).y,
+      x: chainViewShift(tiles, next, undefined, room).x + boardShift(edge).x,
+      y: chainViewShift(tiles, next, undefined, room).y + boardShift(edge).y,
     };
     let over = 0;
     for (const tile of tiles) {
@@ -866,19 +893,71 @@ export function scaleClearOfSlots(input: {
 }
 
 /**
- * Put the chain's own box on the centre of the felt. Chrome insets shrink the
- * picture so it still clears them; they do not slide the chain off centre.
+ * The spinner, when one tile sits on the design origin. Ends and ordinary
+ * tiles further out are not the hub.
  */
+export function spinnerAnchor(tiles: readonly LayoutBox[]): { x: number; y: number } | null {
+  let hub: { x: number; y: number } | null = null;
+  let best = Infinity;
+  for (const tile of tiles) {
+    if ("id" in tile && !("tileId" in tile)) continue;
+    const x = tile.x + tile.w / 2;
+    const y = tile.y + tile.h / 2;
+    const dist = x * x + y * y;
+    if (dist < best) {
+      best = dist;
+      hub = { x, y };
+    }
+  }
+  if (!hub || best > TILE_LONG * TILE_LONG) return null;
+  return hub;
+}
+
+/**
+ * Put the spinner on the centre of the felt. A chain with no spinner keeps
+ * its own box centred. Chrome insets are applied by the caller.
+ */
+/**
+ * Centre on the spinner when that still leaves every tile at least 18px on
+ * its short side. A longer arm pulls the spinner toward the middle of the
+ * chain only as far as that floor requires.
+ */
+export function viewAnchor(tiles: readonly LayoutBox[], room?: { w: number; h: number }): { x: number; y: number } {
+  const box = chainBounds(tiles, 0);
+  const mid = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+  const hub = spinnerAnchor(tiles);
+  if (!hub) return mid;
+  if (!room || room.w < 1 || room.h < 1) return hub;
+  const fit = (x: number, y: number) => {
+    let reachW = 1;
+    let reachH = 1;
+    for (const tile of tiles) {
+      reachW = Math.max(reachW, Math.abs(tile.x - x), Math.abs(tile.x + tile.w - x));
+      reachH = Math.max(reachH, Math.abs(tile.y - y), Math.abs(tile.y + tile.h - y));
+    }
+    return Math.min(room.w / (2 * reachW), room.h / (2 * reachH)) * 0.92;
+  };
+  if (fit(hub.x, hub.y) >= 0.5) return hub;
+  let lo = 0;
+  let hi = 1;
+  for (let step = 0; step < 14; step += 1) {
+    const t = (lo + hi) / 2;
+    const x = hub.x * (1 - t) + mid.x * t;
+    const y = hub.y * (1 - t) + mid.y * t;
+    if (fit(x, y) >= 0.5) hi = t;
+    else lo = t;
+  }
+  return { x: hub.x * (1 - hi) + mid.x * hi, y: hub.y * (1 - hi) + mid.y * hi };
+}
+
 export function chainViewShift(
   tiles: readonly LayoutBox[],
   scale: number,
   _insetShift?: { x: number; y: number },
-  _room?: { w: number; h: number },
+  room?: { w: number; h: number },
 ): { x: number; y: number } {
-  const box = chainBounds(tiles, 0);
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  return { x: -cx * scale, y: -cy * scale };
+  const anchor = viewAnchor(tiles, room);
+  return { x: -anchor.x * scale, y: -anchor.y * scale };
 }
 
 /** The fold the table paints. Tiles already down stay put. A limited fold that overlaps falls back to the open one only for the opening. */

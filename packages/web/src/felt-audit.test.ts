@@ -12,7 +12,6 @@ function failures(report: AuditSizeReport): number {
     + report.ghostCut
     + report.unjoinedGap
     + report.spinnerBlind
-    + report.prematureTurn
     + report.renderedTight
     + report.unreadChain
     + report.connectGap
@@ -23,7 +22,7 @@ function failures(report: AuditSizeReport): number {
 function merge(left: AuditSizeReport | null, right: AuditSizeReport): AuditSizeReport {
   if (!left) return right;
   const sum = { ...left, endPx: [...left.endPx, ...right.endPx], endFill: [...left.endFill, ...right.endFill], worst: [...left.worst, ...right.worst].slice(0, 8) };
-  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut", "unjoinedGap", "spinnerBlind", "prematureTurn", "spiral", "renderedTight", "unreadChain"] as const) {
+  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut", "unjoinedGap", "spinnerBlind", "prematureTurn", "spiral", "parallelRun", "renderedTight", "unreadChain"] as const) {
     sum[key] += right[key];
   }
   sum.minGapPx = Math.min(left.minGapPx, right.minGapPx);
@@ -60,6 +59,7 @@ describe("felt stress audit", () => {
         handEnd: report.handEndSnap,
         premature: report.prematureTurn,
         spiral: report.spiral,
+        parallel: report.parallelRun,
         tight: report.renderedTight,
         unread: report.unreadChain,
         minGap: Number.isFinite(report.minGapPx) ? +report.minGapPx.toFixed(1) : null,

@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, outwardStraight, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
+import { TILE_GAP, UNJOINED_GAP, boxGap, directionRuns, entersParallelLane, layoutOverlaps, outwardStraight, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout, type LayoutBox } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -84,6 +84,8 @@ export interface AuditSizeReport {
   prematureTurn: number;
   /** A one-tile jog back to the previous direction while that jog was still a tile away from the copper. */
   spiral: number;
+  /** Two runs of 3+ tiles side by side within 1.5 short sides while a 3-tile hole remains. */
+  parallelRun: number;
   /** Unjoined tiles closer than 30% of the rendered short side. */
   renderedTight: number;
   /** Smallest gap between unjoined tiles, in screen pixels. */
@@ -127,6 +129,46 @@ function lerp(a: number, b: number, t: number): number {
 
 type ScreenRect = { left: number; top: number; right: number; bottom: number };
 
+function parallelBeside(boxes: readonly LayoutBox[]): boolean {
+  const runs = directionRuns(boxes).filter((run) => run.tiles.length >= 3);
+  const band = TILE_SHORT * 1.5;
+  for (let i = 0; i < runs.length; i += 1) {
+    for (let j = i + 1; j < runs.length; j += 1) {
+      const left = runs[i]!;
+      const right = runs[j]!;
+      const horizontal = left.dir === "east" || left.dir === "west";
+      if ((right.dir === "east" || right.dir === "west") !== horizontal) continue;
+      const beside = right.tiles.filter((tile) => left.tiles.some((ours) => {
+        const along = horizontal
+          ? Math.min(tile.x + tile.w, ours.x + ours.w) - Math.max(tile.x, ours.x)
+          : Math.min(tile.y + tile.h, ours.y + ours.h) - Math.max(tile.y, ours.y);
+        return along >= TILE_SHORT * 0.5 && boxGap(tile, ours) <= band;
+      }));
+      if (beside.length >= 3) return true;
+    }
+  }
+  return false;
+}
+
+function freeForThree(boxes: readonly LayoutBox[], room: LayoutBox): boolean {
+  const span = (TILE_LONG + TILE_GAP) * 3;
+  const step = TILE_LONG;
+  const slots = (x: number, y: number): LayoutBox[] => [
+    { x, y, w: span, h: TILE_SHORT },
+    { x, y, w: TILE_SHORT, h: span },
+  ];
+  for (let x = room.x; x < room.x + room.w; x += step) {
+    for (let y = room.y; y < room.y + room.h; y += step) {
+      for (const slot of slots(x, y)) {
+        if (slot.x + slot.w > room.x + room.w + 1 || slot.y + slot.h > room.y + room.h + 1) continue;
+        const blocked = boxes.some((tile) => boxGap(slot, tile) < TILE_LONG);
+        if (!blocked) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function auditSize(
   felt: { name: string; w: number; h: number },
   seeds: number,
@@ -163,6 +205,7 @@ export function auditSize(
     spinnerBlind: 0,
     prematureTurn: 0,
     spiral: 0,
+    parallelRun: 0,
     renderedTight: 0,
     minGapPx: Number.POSITIVE_INFINITY,
     unreadChain: 0,
@@ -191,6 +234,7 @@ export function auditSize(
     let paintedCamera: { scale: number; shift: { x: number; y: number } } | null = null;
     let doubles = 0;
     let maxTiles = 0;
+    let parallelNoted = false;
 
     for (let guard = 0; guard < 80 && match.hand && match.hand.phase !== "complete"; guard += 1) {
       const playerId = currentPlayerId(match);
@@ -257,7 +301,10 @@ export function auditSize(
           heldLimits: held,
           committed: lockChain ? committed : null,
         });
-        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale);
+        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale, undefined, {
+          w: Math.max(1, felt.w - endCam.edge.left - endCam.edge.right),
+          h: Math.max(1, felt.h - endCam.edge.top - endCam.edge.bottom),
+        });
         const endShift = { x: endView.x + boardShift(endCam.edge).x, y: endView.y + boardShift(endCam.edge).y };
         for (const tile of endCam.layout.tiles) {
           const rect = renderedTileRect(felt, tile, endCam.scale, endShift);
@@ -303,7 +350,10 @@ export function auditSize(
         }
         if (movedTile) report.refold += 1;
       }
-      const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale);
+      const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale, undefined, {
+        w: Math.max(1, felt.w - cam.edge.left - cam.edge.right),
+        h: Math.max(1, felt.h - cam.edge.top - cam.edge.bottom),
+      });
       const shift = { x: view.x + boardShift(cam.edge).x, y: view.y + boardShift(cam.edge).y };
       const hidden = new Set(tilesRelocating(prevPoses, boxes));
       if (boxes.length >= 8 && TILE_SHORT * cam.scale < TINY_PX) {
@@ -388,25 +438,11 @@ export function auditSize(
           return overlaps || boxGap(other, straight) < UNJOINED_GAP - 0.5;
         });
         if (blocked) continue;
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        for (const other of boxes) {
-          if (other === tile) continue;
-          minX = Math.min(minX, other.x);
-          minY = Math.min(minY, other.y);
-          maxX = Math.max(maxX, other.x + other.w);
-          maxY = Math.max(maxY, other.y + other.h);
-        }
-        minX = Math.min(minX, straight.x);
-        minY = Math.min(minY, straight.y);
-        maxX = Math.max(maxX, straight.x + straight.w);
-        maxY = Math.max(maxY, straight.y + straight.h);
         const roomW = Math.max(1, felt.w - cam.edge.left - cam.edge.right);
         const roomH = Math.max(1, felt.h - cam.edge.top - cam.edge.bottom);
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
+        const hubNow = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        const cx = hubNow ? hubNow.x + hubNow.w / 2 : 0;
+        const cy = hubNow ? hubNow.y + hubNow.h / 2 : 0;
         const decisionScale = previous ?? cam.scale;
         const left = (straight.x - cx) * decisionScale + roomW / 2;
         const top = (straight.y - cy) * decisionScale + roomH / 2;
@@ -420,7 +456,8 @@ export function auditSize(
         const straightFits = left >= -0.8 && top >= -0.8
           && left + straight.w * decisionScale <= roomW + 0.8
           && top + straight.h * decisionScale <= roomH + 0.8
-          && nose >= TILE_LONG * decisionScale;
+          && nose >= TILE_LONG * decisionScale
+          && !entersParallelLane(straight, travel, boxes.filter((item) => item !== tile), parent);
         if (straightFits) {
           report.prematureTurn += 1;
           note("prematureTurn", seed, boxes.length, `${tile.tileId} ${travel}->${tile.direction}`);
@@ -446,6 +483,24 @@ export function auditSize(
             report.spiral += 1;
             note("spiral", seed, boxes.length, `${arm} ${first.direction[0]}${corner.direction[0]}${resumed.direction[0]} ${corner.tileId} ${lead.toFixed(0)}px`);
           }
+        }
+      }
+      if (!parallelNoted && fresh.length > 0 && parallelBeside(boxes)) {
+        const roomW = Math.max(1, felt.w - cam.edge.left - cam.edge.right);
+        const roomH = Math.max(1, felt.h - cam.edge.top - cam.edge.bottom);
+        const hubNow = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        const hx = hubNow ? hubNow.x + hubNow.w / 2 : 0;
+        const hy = hubNow ? hubNow.y + hubNow.h / 2 : 0;
+        const room = {
+          x: hx - roomW / cam.scale / 2,
+          y: hy - roomH / cam.scale / 2,
+          w: roomW / cam.scale,
+          h: roomH / cam.scale,
+        };
+        if (freeForThree(boxes, room)) {
+          parallelNoted = true;
+          report.parallelRun += 1;
+          note("parallelRun", seed, boxes.length, "two runs share a lane");
         }
       }
       const centerOf = (box: { x: number; y: number; w: number; h: number }) => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
