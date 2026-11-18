@@ -1,5 +1,7 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
+import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout, type LayoutDir, type PlacedTile } from "../../rules/src/layout.js";
+import { pinwheelTurn } from "../../rules/src/pinwheel.js";
+import type { BoardState } from "../../rules/src/board.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -8,6 +10,8 @@ import {
   chainHeldAtHandEnd,
   chainViewShift,
   pictureFrom,
+  PINWHEEL_LONG_FRAC,
+  safeRoom,
   clampGhostToFelt,
   frameInsets,
   renderedTileRect,
@@ -67,6 +71,22 @@ export interface AuditSizeReport {
   tinyPlays: number;
   /** Tile short side at the end of each hand, in screen pixels. */
   endPx: number[];
+  /** Tile long side at the end of each hand, in CSS pixels. */
+  endLong: number[];
+  /** Plays whose long side is under 18px. Reported, not failed. */
+  longUnder18: number;
+  g1: number;
+  g2: number;
+  g3: number;
+  g7: number;
+  g8: number;
+  g9: number;
+  g10: number;
+  g11: number;
+  g12: number;
+  g13: number;
+  g14: number;
+  g15: number;
   /** Chain bbox area divided by the felt area, at the end of each hand. */
   endFill: number[];
   settledOverlap: number;
@@ -117,12 +137,198 @@ function lerp(a: number, b: number, t: number): number {
 
 type ScreenRect = { left: number; top: number; right: number; bottom: number };
 
+const OPPOSITE: Record<LayoutDir, LayoutDir> = {
+  east: "west",
+  west: "east",
+  north: "south",
+  south: "north",
+};
+
+function centerOf(tile: { x: number; y: number; w: number; h: number }): { x: number; y: number } {
+  return { x: tile.x + tile.w / 2, y: tile.y + tile.h / 2 };
+}
+
+function isDoubleId(id: string): boolean {
+  const [low, high] = id.split("-");
+  return low === high;
+}
+
+/** PlayDrift placement gates. The hub corner is counted apart from G9: a 2:1 cross cannot be 0.5 L clear and still joined at 0.04 L. */
+function scorePinwheel(
+  report: AuditSizeReport,
+  board: BoardState,
+  tiles: readonly PlacedTile[],
+  scale: number,
+  edge: AxisInsets,
+  felt: { w: number; h: number },
+  screenWidth: number,
+  previous: number | null,
+  seed: number,
+  play: number,
+  note: (kind: string, seed: number, play: number, detail: string) => void,
+): void {
+  if (tiles.length === 0) return;
+  const box = chainBounds(tiles, 0);
+  const shift = {
+    x: chainViewShift(tiles, scale).x + boardShift(edge).x,
+    y: chainViewShift(tiles, scale).y + boardShift(edge).y,
+  };
+  const anchorX = felt.w / 2 + boardShift(edge).x;
+  const anchorY = felt.h / 2 + boardShift(edge).y;
+  const screenX = felt.w / 2 + shift.x + (box.x + box.w / 2) * scale;
+  const screenY = felt.h / 2 + shift.y + (box.y + box.h / 2) * scale;
+  if (Math.abs(screenX - anchorX) > 2 || Math.abs(screenY - anchorY) > 2) {
+    report.g1 += 1;
+    note("g1", seed, play, `${(screenX - anchorX).toFixed(1)},${(screenY - anchorY).toFixed(1)}`);
+  }
+  const longPx = scale * TILE_LONG;
+  const openPx = PINWHEEL_LONG_FRAC * screenWidth;
+  const room = safeRoom(felt, edge);
+  const fitPx = Math.min(room.w * TILE_LONG / Math.max(1, box.w), room.h * TILE_LONG / Math.max(1, box.h));
+  const capPx = previous == null ? openPx : Math.min(previous * TILE_LONG, openPx);
+  const expected = Math.min(capPx, fitPx);
+  if (Math.abs(longPx - expected) > 1) {
+    report.g3 += 1;
+    note("g3", seed, play, `${longPx.toFixed(1)} vs ${expected.toFixed(1)}`);
+  }
+  if (longPx < openPx - 1) {
+    const fillW = Math.abs(box.w * scale - room.w);
+    const fillH = Math.abs(box.h * scale - room.h);
+    if (Math.min(fillW, fillH) > 1) {
+      report.g2 += 1;
+      note("g2", seed, play, `${fillW.toFixed(1)} x ${fillH.toFixed(1)}`);
+    }
+  }
+  if (tiles.length === 1 && board.center) {
+    const hub = centerOf(tiles[0]!);
+    const vertical = tiles[0]!.h > tiles[0]!.w;
+    if (Math.abs(hub.x) > 1 || Math.abs(hub.y) > 1 || (board.center.low === board.center.high && !vertical) || Math.abs(longPx - openPx) > 1) {
+      report.g7 += 1;
+      note("g7", seed, play, `${hub.x.toFixed(1)},${hub.y.toFixed(1)} ${longPx.toFixed(1)}`);
+    }
+  }
+  if (!board.center) return;
+  const byId = new Map(tiles.map((tile) => [tile.tileId, tile]));
+  const joined = new Set<string>();
+  const firstOfArm = new Set<string>();
+  const pair = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (const arm of ["west", "east", "north", "south"] as const) {
+    const chain = board.arms[arm];
+    if (chain[0]) firstOfArm.add(chain[0].tileId);
+    let prevId = board.center.tileId;
+    let prevDir: LayoutDir | null = null;
+    chain.forEach((tile, index) => {
+      joined.add(pair(prevId, tile.tileId));
+      const laid = byId.get(tile.tileId);
+      const prev = byId.get(prevId);
+      if (laid && prev) {
+        const gap = boxGap(prev, laid);
+        if (gap < 0.03 * TILE_LONG - 0.5 || gap > 0.05 * TILE_LONG + 0.5) {
+          report.g8 += 1;
+          note("g8", seed, play, `${gap.toFixed(1)} ${prevId} ${tile.tileId}`);
+        }
+        if (prevDir && laid.direction === OPPOSITE[prevDir]) {
+          report.g14 += 1;
+          note("g14", seed, play, `${tile.tileId} ${prevDir}->${laid.direction}`);
+        }
+        if (isDoubleId(tile.tileId) && prevDir === laid.direction) {
+          const here = centerOf(laid);
+          const was = centerOf(prev);
+          const cross = laid.direction === "east" || laid.direction === "west" ? Math.abs(here.y - was.y) : Math.abs(here.x - was.x);
+          if (cross > 0.01 * TILE_LONG) {
+            report.g13 += 1;
+            note("g13", seed, play, tile.tileId);
+          }
+        }
+      }
+      if (index < 3 && laid && laid.direction !== arm) {
+        report.g10 += 1;
+        note("g10", seed, play, `${arm} ${index} ${laid.direction}`);
+      }
+      if (index === 3 && laid && laid.direction !== pinwheelTurn(arm, arm)) {
+        report.g11 += 1;
+        note("g11", seed, play, `${arm} ${laid.direction}`);
+      }
+      if (index === 3 && laid && prev && !isDoubleId(tile.tileId) && !isDoubleId(prevId) && (arm === "west" || arm === "east")) {
+        const here = centerOf(laid);
+        const was = centerOf(prev);
+        const dx = (here.x - was.x) / TILE_LONG;
+        const dy = (here.y - was.y) / TILE_LONG;
+        const wantX = arm === "west" ? -0.26 : 0.26;
+        const wantY = arm === "west" ? 0.78 : -0.78;
+        if (Math.abs(dx - wantX) > 0.02 || Math.abs(dy - wantY) > 0.02) {
+          report.g12 += 1;
+          note("g12", seed, play, `${arm} ${dx.toFixed(2)},${dy.toFixed(2)}`);
+        }
+      }
+      prevId = tile.tileId;
+      prevDir = laid?.direction ?? prevDir;
+    });
+  }
+  for (let i = 0; i < tiles.length; i += 1) {
+    for (let j = i + 1; j < tiles.length; j += 1) {
+      const left = tiles[i]!;
+      const right = tiles[j]!;
+      if (joined.has(pair(left.tileId, right.tileId))) continue;
+      if (firstOfArm.has(left.tileId) && firstOfArm.has(right.tileId)) continue;
+      if (boxGap(left, right) < 0.5 * TILE_LONG - 0.5) {
+        report.g9 += 1;
+        note("g9", seed, play, `${left.tileId} ${right.tileId}`);
+        i = tiles.length;
+        break;
+      }
+    }
+  }
+  const runs: Array<{ dir: LayoutDir; at: number; from: number; to: number }> = [];
+  for (const arm of ["west", "east", "north", "south"] as const) {
+    const laid = board.arms[arm].map((tile) => byId.get(tile.tileId)).filter((tile): tile is PlacedTile => tile != null);
+    let start = 0;
+    while (start < laid.length) {
+      let end = start + 1;
+      while (end < laid.length && laid[end]!.direction === laid[start]!.direction) end += 1;
+      if (end - start >= 2) {
+        const dir = laid[start]!.direction;
+        const horizontal = dir === "east" || dir === "west";
+        const at = horizontal ? centerOf(laid[start]!).y : centerOf(laid[start]!).x;
+        let from = Infinity;
+        let to = -Infinity;
+        for (let index = start; index < end; index += 1) {
+          const mid = centerOf(laid[index]!);
+          const along = horizontal ? mid.x : mid.y;
+          from = Math.min(from, along);
+          to = Math.max(to, along);
+        }
+        runs.push({ dir, at, from, to });
+      }
+      start = end;
+    }
+  }
+  for (let i = 0; i < runs.length; i += 1) {
+    for (let j = i + 1; j < runs.length; j += 1) {
+      const a = runs[i]!;
+      const b = runs[j]!;
+      const aHor = a.dir === "east" || a.dir === "west";
+      const bHor = b.dir === "east" || b.dir === "west";
+      if (aHor !== bHor) continue;
+      if (Math.abs(a.at - b.at) < 0.2 * TILE_LONG) continue;
+      const overlap = Math.min(a.to, b.to) - Math.max(a.from, b.from);
+      if (overlap <= 0) continue;
+      if (Math.abs(a.at - b.at) < 2.5 * TILE_LONG) {
+        report.g15 += 1;
+        note("g15", seed, play, `${(Math.abs(a.at - b.at) / TILE_LONG).toFixed(2)}L`);
+        return;
+      }
+    }
+  }
+}
+
 export function auditSize(
   felt: { name: string; w: number; h: number },
   seeds: number,
   tableId: string | null = "TBL-013",
   lockChain = true,
   seedStart = 1,
+  seats = 4,
 ): AuditSizeReport {
   const frame = frameInsets(tableId, felt);
   const stacks = stacksFor(felt.w, felt.h);
@@ -140,7 +346,21 @@ export function auditSize(
     refold: 0,
     tinyPlays: 0,
     endPx: [],
+    endLong: [],
+    longUnder18: 0,
     endFill: [],
+    g1: 0,
+    g2: 0,
+    g3: 0,
+    g7: 0,
+    g8: 0,
+    g9: 0,
+    g10: 0,
+    g11: 0,
+    g12: 0,
+    g13: 0,
+    g14: 0,
+    g15: 0,
     settledOverlap: 0,
     glideOverlap: 0,
     uiOverlap: 0,
@@ -159,7 +379,7 @@ export function auditSize(
   for (let seed = seedStart; seed < seedStart + seeds; seed += 1) {
     const bytes = Buffer.alloc(32);
     bytes.writeUInt32BE(seed, 0);
-    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    const players = [0, 1, 2, 3].slice(0, seats).map((index) => ({ id: `p${index}`, name: `P${index}` }));
     let match: MatchState = beginHand(
       createMatch(players, { boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
       shuffleWithSeed(bytes),
@@ -241,7 +461,7 @@ export function auditSize(
           heldLimits: held,
           committed: lockChain ? committed : null,
         });
-        const endView = chainViewShift([...endCam.layout.tiles, ...endCam.layout.ends], endCam.scale);
+        const endView = chainViewShift(endCam.layout.tiles, endCam.scale);
         const endShift = { x: endView.x + boardShift(endCam.edge).x, y: endView.y + boardShift(endCam.edge).y };
         for (const tile of endCam.layout.tiles) {
           const rect = renderedTileRect(felt, tile, endCam.scale, endShift);
@@ -253,6 +473,8 @@ export function auditSize(
         }
         const endBox = chainBounds(endCam.layout.tiles, 0);
         report.endPx.push(TILE_SHORT * endCam.scale);
+        report.endLong.push(TILE_LONG * endCam.scale);
+        if (TILE_LONG * endCam.scale < 18) report.longUnder18 += 1;
         report.endFill.push((endBox.w * endCam.scale * endBox.h * endCam.scale) / Math.max(1, felt.w * felt.h));
         break;
       }
@@ -287,7 +509,7 @@ export function auditSize(
         }
         if (movedTile) report.refold += 1;
       }
-      const view = chainViewShift([...boxes, ...cam.layout.ends], cam.scale);
+      const view = chainViewShift(boxes, cam.scale);
       const shift = { x: view.x + boardShift(cam.edge).x, y: view.y + boardShift(cam.edge).y };
       const hidden = new Set(tilesRelocating(prevPoses, boxes));
       if (boxes.length >= 8 && TILE_SHORT * cam.scale < TINY_PX) {
@@ -300,6 +522,7 @@ export function auditSize(
         note("settledOverlap", seed, boxes.length, "layout");
       }
       const boardNow = match.hand.board;
+      scorePinwheel(report, boardNow, boxes, cam.scale, cam.edge, felt, felt.w, previous, seed, boxes.length, note);
       const joined = new Set<string>();
       const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
       if (boardNow.center) {

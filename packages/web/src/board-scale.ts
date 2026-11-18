@@ -1,5 +1,6 @@
 import type { BoardState } from "../../rules/src/board.js";
 import { FIT_MARGIN, extendLayout, extendLayoutFitting, layoutBoard, layoutOverlaps, TILE_LONG, TILE_SHORT, type BoardLayout, type FitBudget, type LayoutBox, type LayoutLimits } from "../../rules/src/layout.js";
+import { layoutPinwheel } from "../../rules/src/pinwheel.js";
 
 /** Inset from the wooden rails. The turn banner does not change this. */
 export const FELT_PAD_X = 22;
@@ -322,6 +323,10 @@ export function nextBoardScale(previous: number | null, computed: number, newHan
 
 /** Opening tile width, as a fraction of the table's screen. Middle of 12–15%. */
 export const OPEN_TILE_FRAC = 0.135;
+/** Opening long side, as a fraction of the viewport width. PlayDrift starts here. */
+export const PINWHEEL_LONG_FRAC = 0.125;
+/** Usable felt inset when the frame is thinner than this. */
+export const PINWHEEL_MARGIN = 35;
 /** Floor. The snake turns before the picture goes below this. About 4.5% of the screen. */
 export const MIN_TILE_FRAC = 0.045;
 /** Zoom out once the chain comes this close to the felt edge. */
@@ -334,8 +339,10 @@ export const CAMERA_COMFORT = 72;
  * long chain is at the floor.
  */
 export const CAMERA_EDGE = 30;
-/** One glide after a tile lands. Long enough for about 14 frames at 30fps. */
-export const CAMERA_EASE_MS = 480;
+/** One glide after the tile has snapped into its slot. About 0.4s. */
+export const CAMERA_EASE_MS = 400;
+/** The tile's own snap. The camera glide starts when this finishes. */
+export const TILE_SNAP_MS = 220;
 
 export interface CameraPose {
   scale: number;
@@ -617,18 +624,27 @@ export function settledHandCamera(input: {
     top: Math.max(input.frame.top, stacks.top),
     bottom: Math.max(input.frame.bottom, stacks.bottom),
   };
-  const open = (OPEN_TILE_FRAC * Math.max(1, input.screenWidth)) / TILE_SHORT;
+  const open = (PINWHEEL_LONG_FRAC * Math.max(1, input.screenWidth)) / TILE_LONG;
   const cap = input.previous == null || !Number.isFinite(input.previous) ? open : Math.min(input.previous, open);
-  const room = safeRoom(input.felt, edge);
-  const obstacles = designObstacles(input.felt, boardShift(edge), cap, input.keepOuts ?? [], STACK_AIR);
-  const chosen = chooseReadableLayout(input.board, room, cap, input.heldLimits ?? null, obstacles, input.committed ?? null);
-  const scale = containedScale(
-    [...chosen.layout.tiles, ...chosen.layout.ends],
-    input.felt,
-    edge,
-    Math.min(cap, chosen.scale),
-  );
-  return { scale, limits: chosen.limits, obstacles, layout: chosen.layout, nudge: { x: 0, y: 0 }, edge };
+  const fitEdge = {
+    left: Math.max(edge.left, PINWHEEL_MARGIN),
+    right: Math.max(edge.right, PINWHEEL_MARGIN),
+    top: Math.max(edge.top, PINWHEEL_MARGIN),
+    bottom: Math.max(edge.bottom, PINWHEEL_MARGIN),
+  };
+  const room = safeRoom(input.felt, fitEdge);
+  const layout = layoutPinwheel(input.board);
+  const box = chainBounds(layout.tiles, 0);
+  const fit = Math.min(room.w / Math.max(1, box.w), room.h / Math.max(1, box.h));
+  const scale = Math.min(cap, Number.isFinite(fit) && fit > 0 ? fit : cap);
+  return {
+    scale,
+    limits: { width: box.w, height: box.h },
+    obstacles: [],
+    layout,
+    nudge: { x: 0, y: 0 },
+    edge: fitEdge,
+  };
 }
 
 /** Shrink until the centred chain sits inside the frame. The room math can miss by a pixel once the chain is recentered. */
@@ -890,18 +906,10 @@ export function pictureFrom(
 ): BoardLayout | null {
   if (!board?.center) return null;
   try {
-    if (previous && previous.tiles.length > 0) {
-      return budget
-        ? extendLayoutFitting(previous, board, limits ?? undefined, budget)
-        : extendLayout(previous, board, limits ?? undefined);
-    }
-    const picture = layoutBoard(board, limits ?? undefined);
-    if (!layoutOverlaps(picture)) return picture;
-    const plain = layoutBoard(board);
-    return layoutOverlaps(plain) ? picture : plain;
+    return layoutPinwheel(board);
   } catch {
     try {
-      return layoutBoard(board);
+      return layoutBoard(board, limits ?? undefined);
     } catch {
       return null;
     }

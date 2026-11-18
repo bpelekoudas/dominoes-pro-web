@@ -959,7 +959,7 @@ input {
   transition: none;
 }
 .table-scroll {
-  --camera-ease: 480ms;
+  --camera-ease: 400ms;
 }
 .board-tile.is-camera-hold { visibility: hidden; }
 .board-tile.is-relocating { visibility: hidden; }

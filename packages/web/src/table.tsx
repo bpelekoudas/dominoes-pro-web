@@ -9,13 +9,13 @@ import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
 import {
   boardShift,
   CAMERA_EASE_MS,
+  TILE_SNAP_MS,
   cameraHoldStale,
   cameraSettlesOn,
   cameraEase,
   chainHeldAtHandEnd,
   chainViewShift,
   clampGhostToFelt,
-  fitFrameScale,
   safeRoom,
   frameInsets,
   settledHandCamera,
@@ -356,12 +356,11 @@ export function Table({
         roomH: roomNow.h,
       };
       const picture = pictureFrom(liveBoard, handLimits, settledChain.current, budgetNow) ?? solved.layout;
-      const drawn = [...picture.tiles, ...picture.ends];
+      // The camera fits and centres the placed tiles. Drop targets stay put
+      // but they are not part of the picture the board scales to.
+      const drawn = picture.tiles;
       const frameShift = boardShift(solved.edge);
-      const zoom = Math.min(
-        solved.scale,
-        fitFrameScale({ tiles: drawn, felt, screenWidth, frame: solved.edge, previous }),
-      );
+      const zoom = solved.scale;
       const centered = chainViewShift(drawn, zoom);
       const nextShift = {
         x: centered.x + frameShift.x + solved.nudge.x,
@@ -468,7 +467,8 @@ export function Table({
         const started = performance.now();
         window.cancelAnimationFrame(glideTimer.current);
         const step = (now: number) => {
-          const t = Math.min(1, (now - started) / CAMERA_EASE_MS);
+          const elapsed = now - started - TILE_SNAP_MS;
+          const t = elapsed <= 0 ? 0 : Math.min(1, elapsed / CAMERA_EASE_MS);
           setGlideT(t);
           if (t < 1) glideTimer.current = window.requestAnimationFrame(step);
           else handEndFit.current = handOver ? "ready" : handEndFit.current;

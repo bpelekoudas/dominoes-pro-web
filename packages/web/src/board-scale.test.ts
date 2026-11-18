@@ -387,7 +387,7 @@ describe("board scale", () => {
     const again = chainViewShift(oneSided, scale, boardShift(insets));
     expect(again).toEqual(pan);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/--camera-ease:\s*480ms/);
+    expect(css).toMatch(/--camera-ease:\s*400ms/);
   });
 
   it("fits a tall chain under a top badge and clear of the side racks", () => {
@@ -1104,7 +1104,7 @@ describe("board scale", () => {
     let previousPose: { scale: number; x: number; y: number } | null = null;
     const assertGlide = (from: { scale: number; x: number; y: number }, to: { scale: number; x: number; y: number }, label: string) => {
       const samples = glidePoses(from, to);
-      expect(samples.length, label).toBeGreaterThanOrEqual(16);
+      expect(samples.length, label).toBeGreaterThanOrEqual(13);
       expect(samples[0]!.scale).toBeCloseTo(from.scale, 6);
       expect(samples[samples.length - 1]!.scale).toBeCloseTo(to.scale, 6);
       const span = {
@@ -1118,9 +1118,9 @@ describe("board scale", () => {
           x: Math.abs(samples[i]!.x - samples[i - 1]!.x),
           y: Math.abs(samples[i]!.y - samples[i - 1]!.y),
         };
-        if (span.scale > 1e-4) expect(step.scale, `${label} scale`).toBeLessThanOrEqual(span.scale * 0.1 + 1e-9);
-        if (span.x > 0.5) expect(step.x, `${label} pan x`).toBeLessThanOrEqual(span.x * 0.1 + 1e-6);
-        if (span.y > 0.5) expect(step.y, `${label} pan y`).toBeLessThanOrEqual(span.y * 0.1 + 1e-6);
+        if (span.scale > 1e-4) expect(step.scale, `${label} scale`).toBeLessThanOrEqual(span.scale * 0.15 + 1e-9);
+        if (span.x > 0.5) expect(step.x, `${label} pan x`).toBeLessThanOrEqual(span.x * 0.15 + 1e-6);
+        if (span.y > 0.5) expect(step.y, `${label} pan y`).toBeLessThanOrEqual(span.y * 0.15 + 1e-6);
       }
     };
     for (const hand of log.hands) {
@@ -1169,7 +1169,7 @@ describe("board scale", () => {
     }
     expect(cameraEase(0)).toBeCloseTo(0, 5);
     expect(cameraEase(1)).toBeCloseTo(1, 5);
-    expect(CAMERA_EASE_MS).toBe(480);
+    expect(CAMERA_EASE_MS).toBe(400);
   });
 
   it("keeps long matches clear at the settled frame and at the middle of the glide", () => {
@@ -1718,8 +1718,14 @@ describe("charcoal frame", () => {
       expect(rect.top, label).toBeGreaterThanOrEqual(frame.top - 0.6);
       expect(rect.bottom, label).toBeLessThanOrEqual(visible.h - frame.bottom + 0.6);
     }
-    expect(topSlack).toBeLessThan(TILE_LONG);
-    expect(bottomSlack).toBeLessThan(TILE_LONG);
+    const tileBox = chainBounds(layout.tiles, 0);
+    const room = safeRoom(visible, frame);
+    const openLong = 0.125 * visible.w;
+    if (scale * TILE_LONG < openLong - 1) {
+      const fillW = Math.abs(tileBox.w * scale - room.w);
+      const fillH = Math.abs(tileBox.h * scale - room.h);
+      expect(Math.min(fillW, fillH)).toBeLessThan(2);
+    }
     const blown = {
       x: chainViewShift(boxes, open).x + boardShift(frame).x,
       y: chainViewShift(boxes, open).y + boardShift(frame).y,
