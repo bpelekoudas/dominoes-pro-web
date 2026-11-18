@@ -291,15 +291,6 @@ function scaleThatFits(boxes: readonly LayoutBox[]): number {
   return Math.min(fitBudget.scale, fitBudget.roomW / size.w, fitBudget.roomH / size.h);
 }
 
-/** Short side stays about 18px at this scale. A straight run that would go smaller should turn. */
-const READABLE_SCALE = 18 / TILE_SHORT;
-
-function roomScale(boxes: readonly LayoutBox[]): number {
-  if (!fitBudget || !(fitBudget.roomW > 0) || !(fitBudget.roomH > 0)) return 1;
-  const size = chainSize(boxes);
-  return Math.min(fitBudget.roomW / Math.max(1, size.w), fitBudget.roomH / Math.max(1, size.h));
-}
-
 function counterClockwise(dir: LayoutDir): LayoutDir {
   return clockwise(clockwise(clockwise(dir)));
 }
@@ -373,7 +364,7 @@ function reservedRunway(
 }
 
 /** A corner's long side faces the new row. The next tile sits on the outer half, a tile plus the gap off the previous row. */
-function outwardStraight(parent: LayoutBox, travel: LayoutDir, isDouble: boolean): LayoutBox {
+export function outwardStraight(parent: LayoutBox, travel: LayoutDir, isDouble: boolean): LayoutBox {
   const box = straightBox(parent, travel, isDouble);
   const facing = (parent as PlacedTile).direction;
   if (isDouble || !facing || (parent as PlacedTile).arm == null) return box;
@@ -473,17 +464,49 @@ function seatOnFelt(
     }
     return false;
   };
-  if (
-    !lockStraight
-    && legalJoin(straight, parent, placed)
-    && !hitsObstacle(straight)
-    && avoid.every((held) => !boxesOverlap(straight, held))
-    && fitsOnFelt([...placed, straight])
-    && doubleClears(straight, travel)
-    && hasExit(straight, travel)
-    && roomScale([...placed, straight]) >= READABLE_SCALE - 0.02
-  ) {
-    return { box: straight, dir: travel, opening: false };
+  const stickOut = (box: LayoutBox) => {
+    if (!fitBudget || !(fitBudget.scale > 0)) return 0;
+    const all = [...placed, box];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const item of all) {
+      minX = Math.min(minX, item.x);
+      minY = Math.min(minY, item.y);
+      maxX = Math.max(maxX, item.x + item.w);
+      maxY = Math.max(maxY, item.y + item.h);
+    }
+    const scale = fitBudget.scale;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const left = (box.x - cx) * scale + fitBudget.roomW / 2;
+    const top = (box.y - cy) * scale + fitBudget.roomH / 2;
+    return Math.max(0, -left, -top, left + box.w * scale - fitBudget.roomW, top + box.h * scale - fitBudget.roomH);
+  };
+  // Keep going straight while most of the next tile still lands on the felt.
+  // A few pixels past the copper is a zoom, not a turn. A tile that is mostly
+  // past the edge is the corner: the arm turns and runs along the copper.
+  const straightOk = (box: LayoutBox) => {
+    if (!legalJoin(box, parent, placed) || avoid.some((held) => boxesOverlap(box, held))) return false;
+    const stick = stickOut(box);
+    if (stick <= 0.8) return true;
+    const lead = (travel === "east" || travel === "west" ? box.w : box.h) * (fitBudget?.scale ?? 1);
+    return stick < lead * 0.22 && scaleThatFits([...placed, box]) >= 0.5;
+  };
+  if (straightOk(straight)) return { box: straight, dir: travel, opening: false };
+  // A straight tile that only grazes a reserved socket. Pull it back onto its
+  // parent, or slide it across, before turning the arm back on itself.
+  if (legalJoin(straight, parent, placed) && stickOut(straight) < TILE_LONG) {
+    const along = travel === "east" || travel === "west" ? "x" : "y";
+    const back = travel === "east" || travel === "south" ? -2 : 2;
+    const pulled = { ...straight, [along]: straight[along] + back };
+    if (straightOk(pulled)) return { box: pulled, dir: travel, opening: false };
+    const across = along === "x" ? "y" : "x";
+    for (const delta of [6, -6, 12, -12, 18, -18, 24, -24]) {
+      const slid = { ...straight, [across]: straight[across] + delta };
+      if (straightOk(slid)) return { box: slid, dir: travel, opening: false };
+    }
   }
 
   type Candidate = { box: LayoutBox; dir: LayoutDir; opening: boolean; slide: number };
@@ -519,9 +542,17 @@ function seatOnFelt(
         placed,
         avoid,
       );
-      const readable = roomScale([...placed, candidate.box]) >= READABLE_SCALE - 0.02;
+      const spinnerDist = (box: LayoutBox) => {
+        if (!center) return 0;
+        const x = box.x + box.w / 2 - (center.x + center.w / 2);
+        const y = box.y + box.h / 2 - (center.y + center.h / 2);
+        return x * x + y * y;
+      };
+      const inward = Boolean(center) && candidate.opening && spinnerDist(candidate.box) + TILE_SHORT * TILE_SHORT < spinnerDist(parent);
+      const reversed = candidate.dir === opposite(travel);
       const score = (exits ? 1e10 : 0)
-        + (readable ? 5e9 : 0)
+        + (inward ? 0 : 2e9)
+        + (reversed ? 0 : 2e9)
         + (clear ? 1e9 : 0)
         + (hitsObstacle(candidate.box) ? 0 : 1e8)
         + (onFelt ? 1e7 : 0)
@@ -2271,16 +2302,15 @@ function layoutBoardNow(
           cursor = resumeCursor(cursor, next, arm, isDoubleTile(tile));
           continue;
         }
-        const saved = index === chain.length - 1 ? priorCursors?.[arm] : undefined;
-        const from = saved && Math.abs(saved.box.x - cursor.box.x) < 1 && Math.abs(saved.box.y - cursor.box.y) < 1 ? saved : cursor;
+        const from = cursor;
         const feltChoice = fitBudget
           ? seatZoomed(
             from.box,
-            from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir,
+            from.dir,
             isDoubleTile(tile),
             placed,
             isDoubleTile(tile) || from.fromDouble,
-            reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
+            [...reserved.values()],
             index + 1 < chain.length && isDoubleTile(chain[index + 1]!),
             index + 2 < chain.length && isDoubleTile(chain[index + 2]!),
             arm,
@@ -2297,7 +2327,7 @@ function layoutBoardNow(
             opening: false,
             fromDouble: false,
             column: false,
-            nextDir: feltChoice.opening ? opposite(from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir) : feltChoice.dir,
+            nextDir: feltChoice.dir,
           }
           : (() => {
             const stepped = clearStep(
@@ -2353,7 +2383,7 @@ function layoutBoardNow(
         isDoubleTile(first),
         placed,
         isDoubleTile(first),
-        reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
+        [...reserved.values()],
         chain.length > 1 && isDoubleTile(chain[1]!),
         chain.length > 2 && isDoubleTile(chain[2]!),
         arm,
@@ -2374,7 +2404,7 @@ function layoutBoardNow(
         fromDouble: false,
         column: false,
         full: 1,
-        resume: feltOpen.opening ? opposite(arm) : feltOpen.dir,
+        resume: feltOpen.dir,
       }
       : pinned && looseOk
       ? { ...looseOpen, row: 0, line: 0, run: 1, opening: false, fromDouble: false, column: false, full: 1 }
@@ -2415,11 +2445,11 @@ function layoutBoardNow(
         const from = cursor;
         const feltChoice = seatZoomed(
           from.box,
-          from.opening ? travelDir(arm, Math.max(1, from.row)) : from.dir,
+          from.dir,
           isDoubleTile(tile),
           placed,
           isDoubleTile(tile) || from.fromDouble,
-          reservedRunway(cursors, arm, [...reserved.values(), ...armAir(placed, arm)]),
+          [...reserved.values()],
           index + 1 < chain.length && isDoubleTile(chain[index + 1]!),
           index + 2 < chain.length && isDoubleTile(chain[index + 2]!),
           arm,

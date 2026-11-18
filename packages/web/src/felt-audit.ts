@@ -1,5 +1,5 @@
 import { applyIntent, beginHand, createMatch, currentPlayerId, legalIntents, type MatchState } from "../../rules/src/engine.js";
-import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
+import { TILE_GAP, UNJOINED_GAP, boxGap, layoutOverlaps, outwardStraight, straightBox, TILE_SHORT, TILE_LONG, type BoardLayout } from "../../rules/src/layout.js";
 import { shuffleWithSeed } from "../../rules/src/rng.js";
 import {
   boardShift,
@@ -80,6 +80,16 @@ export interface AuditSizeReport {
   unjoinedGap: number;
   /** An open spinner side whose drop target is missing or sitting on the spinner. */
   spinnerBlind: number;
+  /** A bend while one more straight tile would still sit inside the copper. */
+  prematureTurn: number;
+  /** A one-tile jog back to the previous direction while that jog was still a tile away from the copper. */
+  spiral: number;
+  /** Unjoined tiles closer than 30% of the rendered short side. */
+  renderedTight: number;
+  /** Smallest gap between unjoined tiles, in screen pixels. */
+  minGapPx: number;
+  /** A chain neighbor that is not the closest tile along that end. */
+  unreadChain: number;
   worst: AuditFailure[];
 }
 
@@ -123,6 +133,7 @@ export function auditSize(
   tableId: string | null = "TBL-013",
   lockChain = true,
   seedStart = 1,
+  seats = 4,
 ): AuditSizeReport {
   const frame = frameInsets(tableId, felt);
   const stacks = stacksFor(felt.w, felt.h);
@@ -150,6 +161,11 @@ export function auditSize(
     ghostCut: 0,
     unjoinedGap: 0,
     spinnerBlind: 0,
+    prematureTurn: 0,
+    spiral: 0,
+    renderedTight: 0,
+    minGapPx: Number.POSITIVE_INFINITY,
+    unreadChain: 0,
     worst: [],
   };
   const note = (kind: string, seed: number, play: number, detail: string) => {
@@ -159,7 +175,7 @@ export function auditSize(
   for (let seed = seedStart; seed < seedStart + seeds; seed += 1) {
     const bytes = Buffer.alloc(32);
     bytes.writeUInt32BE(seed, 0);
-    const players = [0, 1, 2, 3].map((index) => ({ id: `p${index}`, name: `P${index}` }));
+    const players = [0, 1, 2, 3].slice(0, Math.min(4, Math.max(2, seats))).map((index) => ({ id: `p${index}`, name: `P${index}` }));
     let match: MatchState = beginHand(
       createMatch(players, { boneyardMode: "draw_until", seriesLength: 1, targetScore: 500 }),
       shuffleWithSeed(bytes),
@@ -317,6 +333,13 @@ export function auditSize(
           const left = boxes[i]!;
           const right = boxes[j]!;
           if (joined.has(pairKey(left.tileId, right.tileId))) continue;
+          const screenGap = boxGap(left, right) * cam.scale;
+          if (screenGap < report.minGapPx) report.minGapPx = screenGap;
+          if (screenGap < TILE_SHORT * cam.scale * 0.3 - 0.5) {
+            report.renderedTight += 1;
+            note("renderedTight", seed, boxes.length, `${left.tileId} ${right.tileId} ${screenGap.toFixed(1)}px`);
+            crowded = true;
+          }
           if (boxGap(left, right) < UNJOINED_GAP - 0.5) {
             crowded = true;
             report.unjoinedGap += 1;
@@ -343,6 +366,122 @@ export function auditSize(
           if (!end || onHub || !beside || !full || covered) {
             report.spinnerBlind += 1;
             note("spinnerBlind", seed, boxes.length, arm);
+          }
+        }
+      }
+      const byTile = new Map(boxes.map((tile) => [tile.tileId, tile]));
+      const fresh = boxes.filter((tile) => !prevPoses.has(tile.tileId) && tile.arm);
+      for (const tile of fresh) {
+        const armTiles = boardNow.arms[tile.arm!];
+        const index = armTiles.findIndex((item) => item.tileId === tile.tileId);
+        const parent = index <= 0 ? boxes.find((item) => item.tileId === boardNow.center?.tileId) : byTile.get(armTiles[index - 1]!.tileId);
+        const travel = index <= 0 ? tile.arm! : parent?.direction;
+        if (!parent || !travel || tile.direction === travel) continue;
+        const straight = outwardStraight(parent, travel, tile.tileId.split("-")[0] === tile.tileId.split("-")[1]);
+        if (boxGap(straight, parent) > TILE_GAP + 1) continue;
+        const hubBox = boxes.find((item) => item.tileId === boardNow.center?.tileId);
+        if (hubBox && boxGap(straight, hubBox) < TILE_SHORT) continue;
+        const blocked = boxes.some((other) => {
+          if (other === parent || other === tile) return false;
+          const overlaps = other.x < straight.x + straight.w - 1 && other.x + other.w > straight.x + 1
+            && other.y < straight.y + straight.h - 1 && other.y + other.h > straight.y + 1;
+          return overlaps || boxGap(other, straight) < UNJOINED_GAP - 0.5;
+        });
+        if (blocked) continue;
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const other of boxes) {
+          if (other === tile) continue;
+          minX = Math.min(minX, other.x);
+          minY = Math.min(minY, other.y);
+          maxX = Math.max(maxX, other.x + other.w);
+          maxY = Math.max(maxY, other.y + other.h);
+        }
+        minX = Math.min(minX, straight.x);
+        minY = Math.min(minY, straight.y);
+        maxX = Math.max(maxX, straight.x + straight.w);
+        maxY = Math.max(maxY, straight.y + straight.h);
+        const roomW = Math.max(1, felt.w - cam.edge.left - cam.edge.right);
+        const roomH = Math.max(1, felt.h - cam.edge.top - cam.edge.bottom);
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        const decisionScale = previous ?? cam.scale;
+        const left = (straight.x - cx) * decisionScale + roomW / 2;
+        const top = (straight.y - cy) * decisionScale + roomH / 2;
+        const nose = travel === "east"
+          ? roomW - (left + straight.w * decisionScale)
+          : travel === "west"
+            ? left
+            : travel === "south"
+              ? roomH - (top + straight.h * decisionScale)
+              : top;
+        const straightFits = left >= -0.8 && top >= -0.8
+          && left + straight.w * decisionScale <= roomW + 0.8
+          && top + straight.h * decisionScale <= roomH + 0.8
+          && nose >= TILE_LONG * decisionScale;
+        if (straightFits) {
+          report.prematureTurn += 1;
+          note("prematureTurn", seed, boxes.length, `${tile.tileId} ${travel}->${tile.direction}`);
+        }
+      }
+      for (const arm of ["west", "east", "north", "south"] as const) {
+        const run = boardNow.arms[arm].map((placed) => byTile.get(placed.tileId)).filter((box): box is NonNullable<typeof box> => Boolean(box));
+        for (let index = 2; index < run.length; index += 1) {
+          const first = run[index - 2]!;
+          const corner = run[index - 1]!;
+          const resumed = run[index]!;
+          if (prevPoses.has(resumed.tileId)) continue;
+          if (corner.direction === first.direction || resumed.direction !== first.direction || resumed.direction === corner.direction) continue;
+          const rect = renderedTileRect(felt, corner, cam.scale, shift);
+          const lead = corner.direction === "west"
+            ? rect.left - cam.edge.left
+            : corner.direction === "east"
+              ? felt.w - cam.edge.right - rect.right
+              : corner.direction === "north"
+                ? rect.top - cam.edge.top
+                : felt.h - cam.edge.bottom - rect.bottom;
+          if (lead > TILE_SHORT * cam.scale) {
+            report.spiral += 1;
+            note("spiral", seed, boxes.length, `${arm} ${first.direction[0]}${corner.direction[0]}${resumed.direction[0]} ${corner.tileId} ${lead.toFixed(0)}px`);
+          }
+        }
+      }
+      const centerOf = (box: { x: number; y: number; w: number; h: number }) => ({ x: box.x + box.w / 2, y: box.y + box.h / 2 });
+      for (const arm of ["west", "east", "north", "south"] as const) {
+        const chain = [boardNow.center?.tileId, ...boardNow.arms[arm].map((tile) => tile.tileId)].filter((id): id is string => Boolean(id));
+        for (let index = 0; index < chain.length; index += 1) {
+          const tile = byTile.get(chain[index]!);
+          if (!tile) continue;
+          const neighbors = [chain[index - 1], chain[index + 1]].filter((id): id is string => Boolean(id));
+          for (const neighborId of neighbors) {
+            const neighbor = byTile.get(neighborId);
+            if (!neighbor) continue;
+            const from = centerOf(tile);
+            const to = centerOf(neighbor);
+            const vx = to.x - from.x;
+            const vy = to.y - from.y;
+            const span = Math.hypot(vx, vy) || 1;
+            let nearest = neighborId;
+            let nearestAlong = span;
+            for (const other of boxes) {
+              if (other.tileId === tile.tileId) continue;
+              const dx = centerOf(other).x - from.x;
+              const dy = centerOf(other).y - from.y;
+              const along = (dx * vx + dy * vy) / span;
+              const cross = Math.abs(dx * vy - dy * vx) / span;
+              if (along <= TILE_GAP || cross > TILE_SHORT) continue;
+              if (along < nearestAlong - 1) {
+                nearestAlong = along;
+                nearest = other.tileId;
+              }
+            }
+            if (nearest !== neighborId) {
+              report.unreadChain += 1;
+              note("unreadChain", seed, boxes.length, `${tile.tileId} -> ${neighborId} via ${nearest}`);
+              break;
+            }
           }
         }
       }
