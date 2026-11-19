@@ -29,10 +29,9 @@ export const HEAVY_FX = new Set<FxId>(["glass", "fire", "lightning", "quake", "f
 
 /**
  * Filmed bursts. The file name is FX-00N-<id>.mp4 and .webm under /fx.
- * Fire stays on the canvas until its clip is confirmed. A missing file,
- * or a play() that rejects, falls back to the canvas effect.
+ * A missing file, or a play() that rejects, falls back to the canvas effect.
  */
-const VIDEO_FX = new Set<FxId>(["glass", "lightning", "explosion"]);
+const VIDEO_FX = new Set<FxId>(["glass", "fire", "lightning", "money", "confetti", "tumble", "explosion"]);
 
 export function videoFxAsset(id: FxId): { mp4: string; webm: string } | null {
   if (!VIDEO_FX.has(id)) return null;
