@@ -1503,8 +1503,7 @@ async function checkBigScores(browser, origin, outDir) {
     });
   });
   for (const size of BIG_SCORE_SIZES) {
-    const effects = ["glass", "lightning", "explosion"];
-    if (size.name === "390x844" || size.name === "904x1060") effects.push("fire", "money", "confetti", "tumble");
+    const effects = ["glass", "fire", "lightning", "money", "confetti", "tumble", "explosion"];
     for (const fx of effects) {
       const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
       page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -1579,6 +1578,8 @@ async function checkBigScores(browser, origin, outDir) {
         else await page.waitForTimeout(200);
       }
       if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
+      const hand = await handStill(page);
+      if (!hand.ok) throw new Error(`The ${fx} clip covers the hand at ${size.name}: ${JSON.stringify(hand)}`);
       await page.waitForFunction(() => {
         const video = document.querySelector("[data-uhoh=blast]");
         return video instanceof HTMLVideoElement && video.currentTime >= 0.28 && video.currentTime <= 0.85;
@@ -1598,6 +1599,59 @@ async function checkBigScores(browser, origin, outDir) {
   const noisy = pageErrors.filter((line) => !/favicon|Failed to load resource|ResizeObserver loop/i.test(line));
   if (noisy.length > 0) throw new Error(`Console errors during 20+ scores: ${noisy.slice(0, 3).join(" | ")}`);
   return `big scores ${notes.join(", ")}`;
+}
+
+function rawRgb(file) {
+  const result = spawnSync("ffmpeg", ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { maxBuffer: 16_000_000 });
+  return result.stdout;
+}
+
+async function handStill(page) {
+  const rects = await page.evaluate(() => {
+    return [...document.querySelectorAll(".hand-tile .domino, .bone-pile")].map((node) => {
+      const box = node.getBoundingClientRect();
+      return { x: Math.round(box.left), y: Math.round(box.top), w: Math.round(box.width), h: Math.round(box.height) };
+    }).filter((box) => box.w > 4 && box.h > 4);
+  });
+  if (rects.length < 2) return { ok: false, reason: "The hand or the draw pile is missing." };
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => { node.style.visibility = "hidden"; });
+    const video = document.querySelector("[data-uhoh=blast]");
+    if (video instanceof HTMLElement) video.style.visibility = "hidden";
+  });
+  const bare = path.join("/tmp", `hand-bare-${Date.now()}.png`);
+  await page.screenshot({ path: bare });
+  await page.evaluate(() => {
+    const video = document.querySelector("[data-uhoh=blast]");
+    if (video instanceof HTMLElement) video.style.visibility = "";
+  });
+  const live = path.join("/tmp", `hand-live-${Date.now()}.png`);
+  await page.screenshot({ path: live });
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => { node.style.visibility = ""; });
+  });
+  const view = page.viewportSize();
+  const before = rawRgb(bare);
+  const after = rawRgb(live);
+  let delta = 0;
+  let samples = 0;
+  for (const rect of rects) {
+    for (let y = rect.y; y < rect.y + rect.h; y += 2) {
+      if (y < 0 || y >= view.height) continue;
+      for (let x = rect.x; x < rect.x + rect.w; x += 2) {
+        if (x < 0 || x >= view.width) continue;
+        const index = (y * view.width + x) * 3;
+        const lift = Math.max(
+          Math.abs(before[index] - after[index]),
+          Math.abs(before[index + 1] - after[index + 1]),
+          Math.abs(before[index + 2] - after[index + 2]),
+        );
+        samples += 1;
+        if (lift > delta) delta = lift;
+      }
+    }
+  }
+  return { ok: delta <= 3 && samples > 20, delta, samples };
 }
 
 async function feltSeam(page) {

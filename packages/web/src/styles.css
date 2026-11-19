@@ -1999,7 +1999,11 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   object-fit: cover;
   background: transparent;
   mix-blend-mode: screen;
-  transform: translate(-50%, -50%);
+  /* A flat translate lets Chrome keep the video on its own overlay. While a
+     frame is mostly black, that overlay ignores the screen blend and the
+     mask and paints an opaque disc over the hand. The Z move puts the
+     frame in the page compositor, so the letterbox stays invisible. */
+  transform: translate3d(-50%, -50%, 0);
   -webkit-mask-image: radial-gradient(circle at center, #000 50%, transparent 62%);
   mask-image: radial-gradient(circle at center, #000 50%, transparent 62%);
   -webkit-mask-repeat: no-repeat;
