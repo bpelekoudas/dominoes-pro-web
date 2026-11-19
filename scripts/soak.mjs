@@ -14,6 +14,23 @@ import { alignedFronts, createSeatSync, exposedTotal, handCountsMatch, ingest, p
 
 const runId = randomUUID();
 
+function artifactDir() {
+  const requested = process.env.SOAK_ARTIFACTS;
+  const candidates = requested ? [requested] : ["/opt/cursor/artifacts", path.resolve("artifacts")];
+  for (const dir of candidates) {
+    try {
+      mkdirSync(dir, { recursive: true });
+      const probe = path.join(dir, ".soak-write");
+      writeFileSync(probe, "ok");
+      rmSync(probe);
+      return dir;
+    } catch {
+      // This location is missing or not writable. Try the next one.
+    }
+  }
+  throw new Error("No writable artifacts directory. Set SOAK_ARTIFACTS.");
+}
+
 const MODES = [
   { seats: 2, boneyardMode: "draw_until", seriesLength: 3 },
   { seats: 3, boneyardMode: "draw_one", seriesLength: 3 },
@@ -1502,8 +1519,13 @@ async function checkBigScores(browser, origin, outDir) {
       },
     });
   });
-  for (const size of BIG_SCORE_SIZES) {
-    const effects = ["glass", "fire", "lightning", "money", "confetti", "tumble", "explosion"];
+  const passes = Math.max(1, Number(process.env.SOAK_PASSES) || 1);
+  const only = (process.env.SOAK_VIEWPORTS || "").split(",").map((name) => name.trim()).filter(Boolean);
+  const sizes = only.length > 0 ? BIG_SCORE_SIZES.filter((size) => only.includes(size.name)) : BIG_SCORE_SIZES;
+  if (sizes.length === 0) throw new Error(`SOAK_VIEWPORTS matched nothing: ${only.join(", ")}`);
+  for (let pass = 0; pass < passes; pass += 1) {
+  for (const size of sizes) {
+    const effects = ["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "explosion"];
     for (const fx of effects) {
       const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
       page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -1521,7 +1543,7 @@ async function checkBigScores(browser, origin, outDir) {
       await page.locator("[data-action=start-solo]").click();
       await page.waitForSelector(".hand-tile", { timeout: 25_000 });
       await settleCamera(page);
-    const scores = fx === "fire" || fx === "money" || fx === "confetti" || fx === "tumble" ? [20, 25] : [20, 25, 30];
+    const scores = fx === "glass" || fx === "lightning" || fx === "explosion" ? [20, 25, 30] : [20, 25];
     for (const score of scores) {
       await page.evaluate(({ next, effect }) => { window.__bigAward = next; window.__bigFx = effect; window.__bigHeld = 0; window.__momentLog = []; }, { next: score, effect: fx });
       let shown = null;
@@ -1578,23 +1600,29 @@ async function checkBigScores(browser, origin, outDir) {
         else await page.waitForTimeout(200);
       }
       if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
-      const hand = await handStill(page);
-      if (!hand.ok) throw new Error(`The ${fx} clip covers the hand at ${size.name}: ${JSON.stringify(hand)}`);
       await page.waitForFunction(() => {
         const video = document.querySelector("[data-uhoh=blast]");
-        return video instanceof HTMLVideoElement && video.currentTime >= 0.28 && video.currentTime <= 0.85;
-      }, { timeout: 900 }).catch(() => undefined);
+        return video instanceof HTMLVideoElement && video.currentTime >= 0.4;
+      }, { timeout: 1500 }).catch(() => undefined);
+      await page.evaluate(() => {
+        const video = document.querySelector("[data-uhoh=blast]");
+        if (video instanceof HTMLVideoElement) video.pause();
+      });
+      const hand = await handStill(page);
+      if (!hand.ok) throw new Error(`The ${fx} clip covers the hand at ${size.name}: ${JSON.stringify(hand)}`);
       const seam = await feltSeam(page);
       if (!seam.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(seam)}`);
-      if (size.name === "390x844" && score === 20) {
-        mkdirSync("/opt/cursor/artifacts", { recursive: true });
-        await page.screenshot({ path: `/opt/cursor/artifacts/fx-${fx}-390.png` });
+      if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
+        const label = size.name === "390x844" ? "390" : "904";
+        const shot = fx === "quake" ? "earthquake" : fx === "trophy" ? "trophy" : fx;
+        await page.screenshot({ path: path.join(artifactDir(), `fx-${shot}-${label}.png`) });
       }
       notes.push(`${size.name} ${fx} +${score}`);
       await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
     }
       await page.close();
     }
+  }
   }
   const noisy = pageErrors.filter((line) => !/favicon|Failed to load resource|ResizeObserver loop/i.test(line));
   if (noisy.length > 0) throw new Error(`Console errors during 20+ scores: ${noisy.slice(0, 3).join(" | ")}`);
@@ -1606,6 +1634,43 @@ function rawRgb(file) {
   return result.stdout;
 }
 
+const HIDE_CHROME = "[data-uhoh=title],[data-uhoh=impact],.score-pop{visibility:hidden !important}";
+const HIDE_BLAST = `${HIDE_CHROME}[data-uhoh=blast]{display:none !important}`;
+
+function videoBlackAt(buf, view, x, y) {
+  if (!buf || x < 0 || y < 0 || x >= view.width || y >= view.height) return false;
+  const index = (y * view.width + x) * 3;
+  return buf[index] <= 18 && buf[index + 1] <= 18 && buf[index + 2] <= 18;
+}
+
+async function traySentinels(page) {
+  return page.evaluate(() => {
+    const tray = document.querySelector(".hand-tray");
+    if (!tray) return [];
+    const box = tray.getBoundingClientRect();
+    const y = Math.round(box.bottom - 3);
+    return [Math.round(box.left + 8), Math.round(box.right - 8)].map((x) => ({ x, y }));
+  });
+}
+
+// Hiding the <video> with visibility leaves Chrome's overlay up for a frame.
+// That frame is video-black (RGB 16) outside the round mask, so the hand and
+// the felt look covered. The screenshot stylesheet removes the clip for that
+// shot only, and a video-black tray corner means the overlay is still there.
+async function captureBlast(page, file, { hide, sentinels }) {
+  const view = page.viewportSize();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (attempt > 0) await page.waitForTimeout(40);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.screenshot({ path: file, style: hide ? HIDE_BLAST : HIDE_CHROME });
+    if (blankShot(file, view)) continue;
+    const buf = rawRgb(file);
+    if (sentinels.some((point) => videoBlackAt(buf, view, point.x, point.y))) continue;
+    return true;
+  }
+  return false;
+}
+
 async function handStill(page) {
   const rects = await page.evaluate(() => {
     return [...document.querySelectorAll(".hand-tile .domino, .bone-pile")].map((node) => {
@@ -1614,22 +1679,13 @@ async function handStill(page) {
     }).filter((box) => box.w > 4 && box.h > 4);
   });
   if (rects.length < 2) return { ok: false, reason: "The hand or the draw pile is missing." };
-  await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact], .score-pop").forEach((node) => { node.style.visibility = "hidden"; });
-    const video = document.querySelector("[data-uhoh=blast]");
-    if (video instanceof HTMLElement) video.style.visibility = "hidden";
-  });
+  const videoThere = await page.evaluate(() => document.querySelector("[data-uhoh=blast]") instanceof HTMLVideoElement);
+  if (!videoThere) return { ok: false, reason: "The filmed clip was gone." };
+  const sentinels = await traySentinels(page);
   const bare = path.join("/tmp", `hand-bare-${Date.now()}.png`);
-  await page.screenshot({ path: bare });
-  await page.evaluate(() => {
-    const video = document.querySelector("[data-uhoh=blast]");
-    if (video instanceof HTMLElement) video.style.visibility = "";
-  });
   const live = path.join("/tmp", `hand-live-${Date.now()}.png`);
-  await page.screenshot({ path: live });
-  await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact], .score-pop").forEach((node) => { node.style.visibility = ""; });
-  });
+  if (!(await captureBlast(page, bare, { hide: true, sentinels }))) return { ok: false, reason: "The hidden clip left a black ring." };
+  if (!(await captureBlast(page, live, { hide: false, sentinels }))) return { ok: false, reason: "The clip left a black ring on the hand." };
   const view = page.viewportSize();
   const before = rawRgb(bare);
   const after = rawRgb(live);
@@ -1658,8 +1714,20 @@ async function handStill(page) {
   return { ok: covered < 80 && samples > 20, delta, covered, samples };
 }
 
+function blankShot(file, view) {
+  const buf = rawRgb(file);
+  if (!buf || buf.length < view.width * view.height * 3) return true;
+  const spots = [[24, 24], [Math.floor(view.width / 2), 80], [40, view.height - 40]];
+  let dark = 0;
+  for (const [x, y] of spots) {
+    const index = (y * view.width + x) * 3;
+    if (buf[index] < 6 && buf[index + 1] < 6 && buf[index + 2] < 6) dark += 1;
+  }
+  return dark === spots.length;
+}
+
 async function feltSeam(page) {
-  const points = await page.evaluate(() => {
+  const readPoints = () => page.evaluate(() => {
     const video = document.querySelector("[data-uhoh=blast]");
     const felt = document.querySelector(".table-scroll");
     if (!(video instanceof HTMLVideoElement) || !felt) return null;
@@ -1678,37 +1746,42 @@ async function feltSeam(page) {
     if (!pair) return { covered: true };
     return { inside: pair[0], outside: pair[1] };
   });
-  if (!points) return { ok: false, reason: "The blast or the felt is missing." };
+  let points = await readPoints();
+  if (!points) {
+    await page.waitForTimeout(150);
+    points = await readPoints();
+  }
+  if (!points) {
+    const state = await page.evaluate(() => ({
+      felt: Boolean(document.querySelector(".table-scroll")),
+      shatter: Boolean(document.querySelector("[data-uhoh=shatter]")),
+    }));
+    if (!state.felt) return { ok: false, reason: "The felt is missing." };
+    if (state.shatter) return { ok: false, reason: "The filmed clip fell back to canvas." };
+    return { ok: false, reason: "The filmed clip was gone." };
+  }
   if (points.covered) return { ok: true, covered: true };
-  await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => {
-      node.style.visibility = "hidden";
-    });
-    const video = document.querySelector("[data-uhoh=blast]");
-    if (video instanceof HTMLElement) video.style.visibility = "hidden";
-  });
+  const sentinels = await traySentinels(page);
   const bare = path.join("/tmp", `felt-seam-bare-${Date.now()}.png`);
-  await page.screenshot({ path: bare });
-  await page.evaluate(() => {
-    const video = document.querySelector("[data-uhoh=blast]");
-    if (video instanceof HTMLElement) video.style.visibility = "";
-  });
   const live = path.join("/tmp", `felt-seam-live-${Date.now()}.png`);
-  await page.screenshot({ path: live });
-  await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => {
-      node.style.visibility = "";
+  let deltas = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (!(await captureBlast(page, bare, { hide: true, sentinels }))) continue;
+    if (!(await captureBlast(page, live, { hide: false, sentinels }))) continue;
+    deltas = ["inside", "outside"].map((side) => {
+      const point = points[side];
+      const before = rgbAt(bare, point.x, point.y);
+      const after = rgbAt(live, point.x, point.y);
+      // Screen blend can only lift the felt. A sample that gets darker is the
+      // felt texture shifting a pixel between the two shots, not a square.
+      const delta = Math.max(0, after[0] - before[0], after[1] - before[1], after[2] - before[2]);
+      return { side, delta, before, after };
     });
-  });
-  const deltas = ["inside", "outside"].map((side) => {
-    const point = points[side];
-    const before = rgbAt(bare, point.x, point.y);
-    const after = rgbAt(live, point.x, point.y);
-    // Screen blend can only lift the felt. A sample that gets darker is the
-    // felt texture shifting a pixel between the two shots, not a square.
-    const delta = Math.max(0, after[0] - before[0], after[1] - before[1], after[2] - before[2]);
-    return { side, delta, before, after };
-  });
+    const stale = deltas.some((item) => item.before.every((channel) => channel <= 18));
+    if (!stale) break;
+    deltas = null;
+  }
+  if (!deltas) return { ok: false, reason: "The hidden clip left a black ring on the felt." };
   const delta = Math.max(...deltas.map((item) => item.delta));
   // A real square lifts the felt by well more than this. Four channels is a
   // one-pixel shift of the cloth between the hidden and shown shots.
@@ -1742,6 +1815,10 @@ async function uiSmoke(origin, outDir = "soak-reports") {
   });
   const errors = [];
   try {
+    if (process.env.SOAK_FX_ONLY === "1") {
+      const bigScores = await checkBigScores(browser, origin, outDir);
+      return { ok: true, skipped: false, summary: bigScores };
+    }
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.addInitScript(() => {
       localStorage.clear();
