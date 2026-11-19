@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { MOTION, motionMs } from "../../rules/src/motion.js";
-import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, peakReach, readEquippedFx, videoFxAsset, warmVideoFx, type FxId } from "./fx.js";
+import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, peakReach, readEquippedFx, videoFxAsset, videoFxSeconds, warmVideoFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { scorePopupText } from "./feel/score-delta.js";
 import { playUhOh, unlockSound } from "./sound.js";
@@ -264,7 +264,15 @@ export function MomentLayer({
               className="uhoh-blast"
               data-uhoh="blast"
               data-fx={fxId}
-              style={{ left: blastAt.left, top: blastAt.top, width: blastAt.size, height: blastAt.size }}
+              style={{
+                left: blastAt.left,
+                top: blastAt.top,
+                width: blastAt.size,
+                height: blastAt.size,
+                // The shared fade is 1.2s. A longer cut, like legend's crest hold, keeps the page fade matched to the file.
+                animationDuration: `${videoFxSeconds(fxId)}s`,
+                animationName: videoFxSeconds(fxId) > 1.25 ? "uhoh-blast-long" : undefined,
+              }}
             />
           </>,
           document.body,

@@ -36,6 +36,13 @@ const VIDEO_FX = new Set<FxId>(["glass", "fire", "lightning", "money", "confetti
 // The effect id stays "quake". The filmed file uses the catalog name.
 const VIDEO_FILE: Partial<Record<FxId, string>> = { quake: "earthquake" };
 
+/** Most filmed bursts are 1.2s. Legend holds on the crest, then fades, so it runs longer. */
+const VIDEO_SECONDS: Partial<Record<FxId, number>> = { legend: 1.9 };
+
+export function videoFxSeconds(id: FxId): number {
+  return VIDEO_SECONDS[id] ?? 1.2;
+}
+
 export function videoFxAsset(id: FxId): { mp4: string; webm: string } | null {
   if (!VIDEO_FX.has(id)) return null;
   const meta = FX_LIST.find((fx) => fx.id === id);

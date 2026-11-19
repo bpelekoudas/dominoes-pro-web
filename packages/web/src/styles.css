@@ -2035,6 +2035,12 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   0%, 78% { opacity: 1; }
   100% { opacity: 0; }
 }
+/* Legend is 1.9s: the burst, a hold on the crest, then the clip's own fade.
+   The page fade only covers that last sliver, so the hold is not cut at 1.2s. */
+@keyframes uhoh-blast-long {
+  0%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .uhoh-cracks,
 .uhoh-flash {
   position: fixed;

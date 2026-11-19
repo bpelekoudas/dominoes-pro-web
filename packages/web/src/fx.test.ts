@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FX_LIST, createFxScene, normalizeFx, peakReach, videoFxAsset } from "./fx.js";
+import { BIG_MOMENT_MS } from "../../rules/src/moment.js";
+import { FX_LIST, createFxScene, normalizeFx, peakReach, videoFxAsset, videoFxSeconds } from "./fx.js";
 
 describe("uh-oh effects", () => {
   it("lists eleven effects and falls back to the house shatter", () => {
@@ -32,6 +33,9 @@ describe("uh-oh effects", () => {
     expect(videoFxAsset("trophy")).toEqual({ mp4: "/fx/FX-008-trophy.mp4", webm: "/fx/FX-008-trophy.webm" });
     expect(videoFxAsset("fireworks")).toEqual({ mp4: "/fx/FX-009-fireworks.mp4", webm: "/fx/FX-009-fireworks.webm" });
     expect(videoFxAsset("legend")).toEqual({ mp4: "/fx/FX-010-legend.mp4", webm: "/fx/FX-010-legend.webm" });
+    expect(videoFxSeconds("legend")).toBe(1.9);
+    expect(videoFxSeconds("glass")).toBe(1.2);
+    expect(BIG_MOMENT_MS).toBeGreaterThan(1900);
     expect(videoFxAsset("explosion")).toEqual({ mp4: "/fx/FX-011-explosion.mp4", webm: "/fx/FX-011-explosion.webm" });
     expect(videoFxAsset("nope" as never)).toBeNull();
   });

@@ -1647,9 +1647,23 @@ async function checkBigScores(browser, origin, outDir) {
       if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
       await page.evaluate(() => {
         const video = document.querySelector("[data-uhoh=blast-video]");
-        if (!(video instanceof HTMLVideoElement)) return;
-        if (video.currentTime < 0.4) video.currentTime = 0.45;
-        video.pause();
+        const blast = document.querySelector("[data-uhoh=blast]");
+        if (!(video instanceof HTMLVideoElement)) return Promise.resolve();
+        // Legend holds on the crest after the burst. The still is that hold, not the 1.2s mark.
+        const mid = blast?.getAttribute("data-fx") === "legend" ? 1.35 : 0.45;
+        const seek = video.currentTime < mid - 0.05
+          ? new Promise((resolve) => {
+              const done = () => {
+                video.removeEventListener("seeked", done);
+                resolve();
+              };
+              video.addEventListener("seeked", done);
+              video.currentTime = mid;
+            })
+          : Promise.resolve();
+        return seek.then(() => {
+          video.pause();
+        });
       });
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
