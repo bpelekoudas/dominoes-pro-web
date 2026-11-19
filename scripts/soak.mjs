@@ -1646,7 +1646,9 @@ async function feltSeam(page) {
     const point = points[side];
     const before = rgbAt(bare, point.x, point.y);
     const after = rgbAt(live, point.x, point.y);
-    const delta = Math.max(Math.abs(before[0] - after[0]), Math.abs(before[1] - after[1]), Math.abs(before[2] - after[2]));
+    // Screen blend can only lift the felt. A sample that gets darker is the
+    // felt texture shifting a pixel between the two shots, not a square.
+    const delta = Math.max(0, after[0] - before[0], after[1] - before[1], after[2] - before[2]);
     return { side, delta, before, after };
   });
   const delta = Math.max(...deltas.map((item) => item.delta));
