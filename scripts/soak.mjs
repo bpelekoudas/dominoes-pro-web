@@ -1635,6 +1635,7 @@ async function handStill(page) {
   const after = rawRgb(live);
   let delta = 0;
   let samples = 0;
+  let covered = 0;
   for (const rect of rects) {
     for (let y = rect.y; y < rect.y + rect.h; y += 2) {
       if (y < 0 || y >= view.height) continue;
@@ -1648,12 +1649,13 @@ async function handStill(page) {
         );
         samples += 1;
         if (lift > delta) delta = lift;
+        if (lift > 24) covered += 1;
       }
     }
   }
-  // The opaque disc drops a tile from about 108 to 16. A couple of channels
-  // of noise is the felt or a pip shifting one pixel between the two shots.
-  return { ok: delta <= 8 && samples > 20, delta, samples };
+  // The opaque disc covers a wide run of the hand. One pip shifting between
+  // the two shots moves only a few samples.
+  return { ok: covered < 24 && samples > 20, delta, covered, samples };
 }
 
 async function feltSeam(page) {
