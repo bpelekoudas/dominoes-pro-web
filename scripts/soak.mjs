@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { alignedFronts, createSeatSync, exposedTotal, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
+import { alignedFronts, createSeatSync, exposedTotal, handCountsMatch, ingest, owedIntent, publicSignature, scoreMove, shiftFronts, shouldResendTurn, turnActionKey } from "./soak-sync.mjs";
 
 const runId = randomUUID();
 
@@ -659,6 +659,7 @@ async function playMatch(mode, index, options) {
   let actions = 0;
   let reconnectStarted = false;
   let hold = false;
+  let healing = false;
 
   const fail = (message) => {
     if (failure) return;
@@ -683,6 +684,11 @@ async function playMatch(mode, index, options) {
       return;
     }
     if (message.type === "error") {
+      if (/The table lost this seat/i.test(message.message) && (seat.resumes ?? 0) < 2) {
+        seat.resumes = (seat.resumes ?? 0) + 1;
+        void resumeDropped(seat).catch((error) => fail(error instanceof Error ? error.message : String(error)));
+        return;
+      }
       fail(`Server error: ${message.message}`);
       return;
     }
@@ -934,16 +940,7 @@ async function playMatch(mode, index, options) {
     }
     if (view.turnPlayerId !== seat.playerId) return;
     if (view.phase !== "play" && view.phase !== "draw" && view.phase !== "knock") return;
-    const key = [
-      view.gameNumber,
-      view.handNumber,
-      view.phase,
-      view.you.hand.length,
-      view.boneyardCount,
-      view.lastPlay?.seq ?? 0,
-      view.lastEvent?.kind ?? "",
-      view.lastEvent?.playerId ?? "",
-    ].join(":");
+    const key = turnActionKey(view);
     if (seat.acted.has(key)) return;
     const intent = chooseIntent(view);
     seat.acted.add(key);
@@ -1020,12 +1017,16 @@ async function playMatch(mode, index, options) {
     const deadline = Date.now() + 60 * 60 * 1000;
     while (!done && !failure) {
       if (Date.now() > deadline) fail("The match ran longer than 60 minutes.");
+      nudgeQuietTurn();
       if (Date.now() - lastActivity > args.stallMs) {
         const frozen = seats.map((seat) => seat.view).find(Boolean);
         if (frozen?.boneyardCount === 0 && frozen.lastEvent?.kind === "knock") {
           fail("Stalled after a knock with an empty boneyard.");
         }
-        fail(`No state change for more than ${Math.round(args.stallMs / 1000)}s.`);
+        const owed = seats.find((seat) => owedIntent(seat.view));
+        const intent = owed ? owedIntent(owed.view) : null;
+        const who = owed && intent ? ` ${owed.name} was owed a ${intent.type}${intent.tileId ? ` of ${intent.tileId}` : ""}.` : "";
+        fail(`No state change for more than ${Math.round(args.stallMs / 1000)}s.${who}`);
       }
       if (
         options.reconnect &&
@@ -1062,6 +1063,42 @@ async function playMatch(mode, index, options) {
   if (failureError) throw failureError;
   return stats;
 
+  // A move the harness already sent that never changed the table, or a turn
+  // that was visible and never sent. Ask once more before the stall clock.
+  function nudgeQuietTurn() {
+    if (hold || healing || failure || done) return;
+    const quiet = Date.now() - lastActivity;
+    if (!seats.every((seat) => seat.queue.length === 0)) {
+      if (quiet < 1_500) return;
+      const behind = seats.find((seat) => seat.queue.length === 0) ?? seats[0];
+      healing = true;
+      void resumeDropped(behind)
+        .catch((error) => fail(error instanceof Error ? error.message : String(error)))
+        .finally(() => {
+          healing = false;
+        });
+      return;
+    }
+    try {
+      for (const seat of seats) {
+        const view = seat.view;
+        if (!view) continue;
+        if (!seat.acted.has(turnActionKey(view))) {
+          act(seat);
+          continue;
+        }
+        if (!shouldResendTurn(view, seat.acted, quiet, seat.nudged)) continue;
+        const key = turnActionKey(view);
+        seat.nudged = key;
+        seat.acted.delete(key);
+        act(seat);
+        return;
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function resumeDropped(seat) {
     hold = true;
     try {
@@ -1085,6 +1122,8 @@ async function playMatch(mode, index, options) {
       }
       for (const player of seats) {
         player.queue = [];
+        player.acted?.clear();
+        player.nudged = "";
         if (!player.latest) continue;
         player.view = player.latest;
         player.tailSig = publicSignature(player.latest);
@@ -1530,7 +1569,7 @@ async function checkBigScores(browser, origin, outDir) {
   for (let pass = 0; pass < passes; pass += 1) {
   for (const size of sizes) {
     const onlyFx = (process.env.SOAK_EFFECTS || "").split(",").map((name) => name.trim()).filter(Boolean);
-    const effects = onlyFx.length > 0 ? onlyFx : ["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "explosion"];
+    const effects = onlyFx.length > 0 ? onlyFx : ["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "fireworks", "legend", "explosion"];
     for (const fx of effects) {
       const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
       page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -1615,7 +1654,7 @@ async function checkBigScores(browser, origin, outDir) {
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
         const label = size.name === "390x844" ? "390" : "904";
-        const shot = fx === "quake" ? "earthquake" : fx === "trophy" ? "trophy" : fx;
+        const shot = fx === "quake" ? "earthquake" : fx;
         // The clip fades itself out on a 1.2s clock. Hold it open for this still,
         // taken before the pixel checks, so the picture is the middle of the burst.
         await page.screenshot({

@@ -123,6 +123,48 @@ export function exposedTotal(board) {
 }
 
 /** Points this public update should add for one player, given what was already checked. */
+/**
+ * The move this seat is owed. Null when the table is waiting on someone else
+ * or the hand is between deals.
+ */
+export function owedIntent(view) {
+  if (!view || view.turnPlayerId !== view.yourId) return null;
+  if (view.phase === "play") {
+    const play = view.legalPlays?.[0];
+    if (!play?.tileId || !play.endId) return null;
+    return { type: "play", tileId: play.tileId, endId: play.endId };
+  }
+  if (view.phase === "draw") return view.canDraw ? { type: "draw" } : null;
+  if (view.phase === "knock") return view.canKnock ? { type: "knock" } : null;
+  return null;
+}
+
+/** Identity of one owed turn. A new play, draw, or knock changes it. */
+export function turnActionKey(view) {
+  return [
+    view.gameNumber,
+    view.handNumber,
+    view.phase,
+    view.you?.hand?.length ?? 0,
+    view.boneyardCount,
+    view.lastPlay?.seq ?? 0,
+    view.lastEvent?.kind ?? "",
+    view.lastEvent?.playerId ?? "",
+  ].join(":");
+}
+
+/**
+ * The harness already asked for this turn, and the table has been quiet since.
+ * The ask did not land. One retry per key, so a slow reply is not a second move.
+ */
+export function shouldResendTurn(view, acted, quietMs, alreadyNudged) {
+  if (!owedIntent(view)) return false;
+  const key = turnActionKey(view);
+  if (!acted?.has?.(key)) return false;
+  if (alreadyNudged === key) return false;
+  return quietMs >= 8_000;
+}
+
 export function scoreMove(player, view, before, prevPlaySeq, endedNow) {
   let expected = 0;
   if (endedNow) expected += view.lastHand?.leftoverAwards?.[player.id] ?? 0;

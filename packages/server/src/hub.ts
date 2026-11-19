@@ -537,10 +537,10 @@ export class Hub {
     return { ok: false, error: "Join a table first." };
   }
 
-  command(playerId: string, message: ClientMessage): void {
+  command(playerId: string, message: ClientMessage): boolean {
     const room = this.roomFor(playerId);
     const seat = room?.seats.find((candidate) => candidate.id === playerId);
-    if (!room || !seat) return;
+    if (!room || !seat) return false;
     if (message.type === "start") this.start(room, seat);
     else if (message.type === "intent") this.intent(room, seat, message.intent);
     else if (message.type === "chat") this.chat(room, seat, message);
@@ -556,6 +556,7 @@ export class Hub {
     else if (message.type === "cancel-quick") this.cancelQuick(room, seat);
     else if (message.type === "set-series") this.setSeries(room, seat, message.seriesLength);
     else this.tell(seat, { type: "error", message: "You're already at a table." });
+    return true;
   }
 
   /** Public quick tables that are still waiting. A signed-in player does not see a blocked table. */

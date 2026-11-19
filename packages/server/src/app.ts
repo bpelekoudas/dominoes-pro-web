@@ -611,8 +611,22 @@ export async function createApp(options: AppOptions = {}) {
     attachSocketHeartbeat(socket);
     socket.on("error", () => undefined);
 
+    let dropping = false;
     const send = (message: ServerMessage): void => {
-      if (socket.readyState === 1) socket.send(JSON.stringify(message));
+      if (socket.readyState !== 1) {
+        // A state dropped on a half-closed socket never reaches the other seats'
+        // checks, and the table then sits with no error. Close it so the seat reconnects.
+        if (!dropping) {
+          dropping = true;
+          try {
+            socket.close();
+          } catch {
+            // The socket is already gone.
+          }
+        }
+        return;
+      }
+      socket.send(JSON.stringify(message));
     };
 
     socket.on("message", (raw: unknown) => {
@@ -646,7 +660,8 @@ export async function createApp(options: AppOptions = {}) {
         return;
       }
       try {
-        hub.command(session.playerId, message);
+        const known = hub.command(session.playerId, message);
+        if (!known) send({ type: "error", message: "The table lost this seat." });
       } catch (error) {
         const detail = error instanceof Error ? error.message : "play failed";
         const seat = store.playerById(session.playerId);

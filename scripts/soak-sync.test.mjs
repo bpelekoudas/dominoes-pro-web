@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   alignedFronts,
   createSeatSync,
   exposedTotal,
   handCountsMatch,
   ingest,
+  owedIntent,
   publicSignature,
   scoreMove,
   shiftFronts,
+  shouldResendTurn,
+  turnActionKey,
 } from "./soak-sync.mjs";
 
 function player(id, score, tileCount) {
@@ -209,6 +213,42 @@ test("the live one-arm double-six exposes 14, and a terminal double-six is not a
     },
   };
   assert.equal(exposedTotal(terminal), 14);
+});
+
+test("the stalled four-player hand owes south a play, and a quiet ask is sent again", async () => {
+  const rules = await import("@uhoh/rules");
+  const log = JSON.parse(readFileSync(new URL("./fixtures/replay-stall-m3.json", import.meta.url), "utf8"));
+  let match = rules.createMatch(log.players, { ...log.config, targetScore: 150 });
+  for (const hand of log.hands) {
+    match = rules.beginHand(match, rules.shuffleWithSeed(Buffer.from(hand.seed, "hex")));
+    for (const action of hand.actions) {
+      const result = rules.applyIntent(match, action.playerId, action.intent);
+      assert.equal(result.ok, true, result.error);
+      match = result.match;
+    }
+  }
+  const south = log.players[0].id;
+  assert.equal(match.phase, "in_hand");
+  assert.equal(match.hand.phase, "await_play");
+  assert.equal(rules.currentPlayerId(match), south);
+  assert.equal(match.hand.boneyard.length, 0);
+  const legal = rules.legalIntents(match, south);
+  assert.ok(legal.some((intent) => intent.type === "play" && intent.tileId === "2-3" && intent.endId === "west"));
+  const view = rules.project(match, {
+    roomCode: "STALL",
+    status: "playing",
+    youId: south,
+    hostId: south,
+    settings: { playerCount: 4, boneyardMode: "draw_until", seriesLength: 5, targetScore: 150, casual: true },
+    seats: log.players.map((player) => ({ id: player.id, name: player.name, connected: true, bot: false })),
+    betweenHands: false,
+  });
+  assert.deepEqual(owedIntent(view), { type: "play", tileId: "2-3", endId: "west" });
+  const acted = new Set([turnActionKey(view)]);
+  assert.equal(shouldResendTurn(view, acted, 1_500, ""), false);
+  assert.equal(shouldResendTurn(view, acted, 8_000, ""), true);
+  assert.equal(shouldResendTurn(view, acted, 8_000, turnActionKey(view)), false);
+  assert.equal(owedIntent({ ...view, yourId: log.players[1].id, turnPlayerId: south }), null);
 });
 
 test("another player's hand is not queued as this seat's update", () => {
