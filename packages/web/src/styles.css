@@ -4354,11 +4354,7 @@ html[data-feel-cues~="lead-change"] .seat-chip[data-feel="score"] .chip-name { c
   .you-float .seat-chip { max-width: min(52vw, 176px); }
   .tray-notices .seat-chip { max-width: min(52vw, 176px); }
   .turn-bar { width: 44px; }
-  .score-hint-toggle {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 42%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  .your-turn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .status-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .score-hint-toggle { flex: none; max-width: none; overflow: hidden; text-overflow: ellipsis; }
 }
