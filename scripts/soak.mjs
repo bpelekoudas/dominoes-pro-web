@@ -1529,7 +1529,8 @@ async function checkBigScores(browser, origin, outDir) {
   if (sizes.length === 0) throw new Error(`SOAK_VIEWPORTS matched nothing: ${only.join(", ")}`);
   for (let pass = 0; pass < passes; pass += 1) {
   for (const size of sizes) {
-    const effects = ["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "explosion"];
+    const onlyFx = (process.env.SOAK_EFFECTS || "").split(",").map((name) => name.trim()).filter(Boolean);
+    const effects = onlyFx.length > 0 ? onlyFx : ["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "explosion"];
     for (const fx of effects) {
       const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
       page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -1611,17 +1612,23 @@ async function checkBigScores(browser, origin, outDir) {
         if (video.currentTime < 0.4) video.currentTime = 0.45;
         video.pause();
       });
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
+        const label = size.name === "390x844" ? "390" : "904";
+        const shot = fx === "quake" ? "earthquake" : fx === "trophy" ? "trophy" : fx;
+        // The clip fades itself out on a 1.2s clock. Hold it open for this still,
+        // taken before the pixel checks, so the picture is the middle of the burst.
+        await page.screenshot({
+          path: path.join(artifactDir(), `fx-${shot}-${label}.png`),
+          style: "[data-uhoh=blast]{animation:none !important;opacity:1 !important}",
+        });
+      }
       const shots = await blastShots(page);
       if (!shots.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(shots)}`);
       const hand = await handStill(page, shots);
       if (!hand.ok) throw new Error(`The ${fx} clip covers the hand at ${size.name}: ${JSON.stringify(hand)}`);
       const seam = await feltSeam(page, shots);
       if (!seam.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(seam)}`);
-      if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
-        const label = size.name === "390x844" ? "390" : "904";
-        const shot = fx === "quake" ? "earthquake" : fx === "trophy" ? "trophy" : fx;
-        await page.screenshot({ path: path.join(artifactDir(), `fx-${shot}-${label}.png`) });
-      }
       notes.push(`${size.name} ${fx} +${score}`);
       await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
     }
