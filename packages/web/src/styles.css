@@ -216,6 +216,7 @@ input {
 .playbar {
   position: relative;
   z-index: 30;
+  isolation: isolate;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -364,6 +365,7 @@ input {
    dark bar above the felt. East sits in the dark tray, below the right hand. */
 .corner-bar {
   position: relative;
+  isolation: isolate;
   flex: none;
   display: flex;
   align-items: flex-start;
@@ -1069,6 +1071,9 @@ input {
 .hand-tray {
   position: relative;
   z-index: 20;
+  /* The draw pile is translucent. Without a group, that translucency
+     blends with the burst behind the tray and the pile lights up. */
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: stretch;
