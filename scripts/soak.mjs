@@ -1605,17 +1605,17 @@ async function checkBigScores(browser, origin, outDir) {
         else await page.waitForTimeout(200);
       }
       if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
-      await page.waitForFunction(() => {
-        const video = document.querySelector("[data-uhoh=blast-video]");
-        return video instanceof HTMLVideoElement && video.currentTime >= 0.4;
-      }, { timeout: 1500 }).catch(() => undefined);
       await page.evaluate(() => {
         const video = document.querySelector("[data-uhoh=blast-video]");
-        if (video instanceof HTMLVideoElement) video.pause();
+        if (!(video instanceof HTMLVideoElement)) return;
+        if (video.currentTime < 0.4) video.currentTime = 0.45;
+        video.pause();
       });
-      const hand = await handStill(page);
+      const shots = await blastShots(page);
+      if (!shots.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(shots)}`);
+      const hand = await handStill(page, shots);
       if (!hand.ok) throw new Error(`The ${fx} clip covers the hand at ${size.name}: ${JSON.stringify(hand)}`);
-      const seam = await feltSeam(page);
+      const seam = await feltSeam(page, shots);
       if (!seam.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(seam)}`);
       if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
         const label = size.name === "390x844" ? "390" : "904";
@@ -1673,21 +1673,53 @@ async function captureBlast(page, file, { hide, sentinels }) {
   return false;
 }
 
-async function handStill(page) {
-  const rects = await page.evaluate(() => {
+async function blastShots(page) {
+  const geometry = await page.evaluate(() => {
+    const video = document.querySelector("[data-uhoh=blast-video]");
+    const blast = document.querySelector("[data-uhoh=blast]");
+    const felt = document.querySelector(".table-scroll");
+    if (!(video instanceof HTMLVideoElement) || !(blast instanceof HTMLElement) || !felt) return null;
+    const rects = [...document.querySelectorAll(".hand-tile .domino, .bone-pile")].map((node) => {
+      const box = node.getBoundingClientRect();
+      return { x: Math.round(box.left), y: Math.round(box.top), w: Math.round(box.width), h: Math.round(box.height) };
+    }).filter((box) => box.w > 4 && box.h > 4);
+    const tray = document.querySelector(".hand-tray");
+    const trayBox = tray ? tray.getBoundingClientRect() : null;
+    const sentinels = trayBox ? [Math.round(trayBox.left + 8), Math.round(trayBox.right - 8)].map((x) => ({ x, y: Math.round(trayBox.bottom - 3) })) : [];
+    const v = blast.getBoundingClientRect();
+    const f = felt.getBoundingClientRect();
+    const midX = Math.min(f.right - 6, Math.max(f.left + 6, (v.left + v.right) / 2));
+    const midY = Math.min(f.bottom - 6, Math.max(f.top + 6, (v.top + v.bottom) / 2));
+    const onFelt = (point) => point.x > f.left + 2 && point.x < f.right - 2 && point.y > f.top + 2 && point.y < f.bottom - 2;
+    const pairs = [
+      [{ x: v.left + 16, y: midY }, { x: v.left - 4, y: midY }],
+      [{ x: v.right - 16, y: midY }, { x: v.right + 4, y: midY }],
+      [{ x: midX, y: v.top + 16 }, { x: midX, y: v.top - 4 }],
+      [{ x: midX, y: v.bottom - 16 }, { x: midX, y: v.bottom + 4 }],
+    ];
+    const found = pairs.find(([inside, outside]) => onFelt(inside) && onFelt(outside));
+    return { rects, sentinels, points: found ? { inside: found[0], outside: found[1] } : { covered: true } };
+  });
+  if (!geometry) return { ok: false, reason: "The filmed clip was gone." };
+  const stamp = Date.now();
+  const bare = path.join("/tmp", `blast-bare-${stamp}.png`);
+  const live = path.join("/tmp", `blast-live-${stamp}.png`);
+  if (!(await captureBlast(page, bare, { hide: true, sentinels: geometry.sentinels }))) return { ok: false, reason: "The hidden clip left a black ring." };
+  if (!(await captureBlast(page, live, { hide: false, sentinels: geometry.sentinels }))) return { ok: false, reason: "The clip left a black ring on the hand." };
+  return { ok: true, bare, live, rects: geometry.rects, points: geometry.points };
+}
+
+async function handStill(page, shots = null) {
+  const pair = shots ?? await blastShots(page);
+  if (!pair.ok) return pair;
+  const rects = pair.rects ?? await page.evaluate(() => {
     return [...document.querySelectorAll(".hand-tile .domino, .bone-pile")].map((node) => {
       const box = node.getBoundingClientRect();
       return { x: Math.round(box.left), y: Math.round(box.top), w: Math.round(box.width), h: Math.round(box.height) };
     }).filter((box) => box.w > 4 && box.h > 4);
   });
   if (rects.length < 2) return { ok: false, reason: "The hand or the draw pile is missing." };
-  const videoThere = await page.evaluate(() => document.querySelector("[data-uhoh=blast-video]") instanceof HTMLVideoElement);
-  if (!videoThere) return { ok: false, reason: "The filmed clip was gone." };
-  const sentinels = await traySentinels(page);
-  const bare = path.join("/tmp", `hand-bare-${Date.now()}.png`);
-  const live = path.join("/tmp", `hand-live-${Date.now()}.png`);
-  if (!(await captureBlast(page, bare, { hide: true, sentinels }))) return { ok: false, reason: "The hidden clip left a black ring." };
-  if (!(await captureBlast(page, live, { hide: false, sentinels }))) return { ok: false, reason: "The clip left a black ring on the hand." };
+  const { bare, live } = pair;
   const view = page.viewportSize();
   const before = rawRgb(bare);
   const after = rawRgb(live);
@@ -1728,7 +1760,7 @@ function blankShot(file, view) {
   return dark === spots.length;
 }
 
-async function feltSeam(page) {
+async function feltSeam(page, shots = null) {
   const readPoints = () => page.evaluate(() => {
     const video = document.querySelector("[data-uhoh=blast-video]");
     const blast = document.querySelector("[data-uhoh=blast]");
@@ -1749,7 +1781,7 @@ async function feltSeam(page) {
     if (!pair) return { covered: true };
     return { inside: pair[0], outside: pair[1] };
   });
-  let points = await readPoints();
+  let points = shots?.points ?? await readPoints();
   if (!points) {
     await page.waitForTimeout(150);
     points = await readPoints();
@@ -1764,11 +1796,9 @@ async function feltSeam(page) {
     return { ok: false, reason: "The filmed clip was gone." };
   }
   if (points.covered) return { ok: true, covered: true };
-  const sentinels = await traySentinels(page);
-  const bare = path.join("/tmp", `felt-seam-bare-${Date.now()}.png`);
-  const live = path.join("/tmp", `felt-seam-live-${Date.now()}.png`);
-  if (!(await captureBlast(page, bare, { hide: true, sentinels }))) return { ok: false, reason: "The hidden clip left a black ring on the felt." };
-  if (!(await captureBlast(page, live, { hide: false, sentinels }))) return { ok: false, reason: "The clip left a black ring on the felt." };
+  const pair = shots ?? await blastShots(page);
+  if (!pair.ok) return pair;
+  const { bare, live } = pair;
   const deltas = ["inside", "outside"].map((side) => {
     const point = points[side];
     const before = rgbAt(bare, point.x, point.y);
