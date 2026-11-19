@@ -25,8 +25,9 @@ describe("uh-oh effects", () => {
     expect(videoFxAsset("glass")).toEqual({ mp4: "/fx/FX-001-glass.mp4", webm: "/fx/FX-001-glass.webm" });
     expect(videoFxAsset("fire")).toEqual({ mp4: "/fx/FX-002-fire.mp4", webm: "/fx/FX-002-fire.webm" });
     expect(videoFxAsset("lightning")).toEqual({ mp4: "/fx/FX-003-lightning.mp4", webm: "/fx/FX-003-lightning.webm" });
+    expect(videoFxAsset("money")).toEqual({ mp4: "/fx/FX-004-money.mp4", webm: "/fx/FX-004-money.webm" });
     expect(videoFxAsset("explosion")).toEqual({ mp4: "/fx/FX-011-explosion.mp4", webm: "/fx/FX-011-explosion.webm" });
-    expect(videoFxAsset("money")).toBeNull();
+    expect(videoFxAsset("confetti")).toBeNull();
   });
 
   it("starts on the placed tile and reaches most of the screen", () => {
