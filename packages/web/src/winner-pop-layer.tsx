@@ -230,7 +230,7 @@ function findSeat(id: string): { edge: SeatEdge; avatar: Box; score: Box } | nul
 
 function collectObstacles(): Box[] {
   const nodes = document.querySelectorAll(
-    "[data-board-tile], .hand-tile, .edge-badge, .seat-chip, .edge-slivers, .hand-tray, .playbar, .win-reveal, .bone-pile, .feel-call span, .feel-tally",
+    "[data-board-tile], .table-scroll, .hand-tile, .edge-badge, .seat-chip, .edge-slivers, .hand-tray, .playbar, .win-reveal, .bone-pile, .feel-call span, .feel-tally",
   );
   const boxes: Box[] = [];
   for (const node of nodes) {

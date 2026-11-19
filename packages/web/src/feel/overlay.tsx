@@ -141,26 +141,17 @@ export function FeelTally({
   useEffect(() => {
     const node = spot.current;
     if (!node || !text) return;
-    const tile = document.querySelector(".board-tile.last-move");
-    if (!tile) return;
-    const tr = tile.getBoundingClientRect();
-    const mine = node.getBoundingClientRect();
-    let top = window.innerHeight * 0.18;
-    let left = window.innerWidth / 2;
-    const hits = (y: number, x: number) =>
-      x - mine.width / 2 < tr.right + 8
-      && x + mine.width / 2 > tr.left - 8
-      && y < tr.bottom + 8
-      && y + mine.height > tr.top - 8;
-    if (hits(top, left)) {
-      const below = tr.bottom + 16;
-      const above = tr.top - mine.height - 16;
-      if (below + mine.height < window.innerHeight * 0.72) top = below;
-      else if (above > 56) top = above;
-      else left = tr.left > window.innerWidth / 2 ? tr.left - mine.width / 2 - 16 : tr.right + mine.width / 2 + 16;
+    const tray = document.querySelector(".hand-tray");
+    const trayBox = tray?.getBoundingClientRect();
+    if (trayBox && trayBox.width > 1 && trayBox.top > 40) {
+      node.style.top = `${trayBox.top + 4}px`;
+      node.style.left = `${trayBox.left + trayBox.width / 2}px`;
+      return;
     }
-    node.style.top = `${top}px`;
-    node.style.left = `${left}px`;
+    const felt = document.querySelector(".table-scroll");
+    const feltBox = felt?.getBoundingClientRect();
+    node.style.top = feltBox && feltBox.top > 28 ? `${Math.max(8, feltBox.top - 28)}px` : "8px";
+    node.style.left = `${window.innerWidth / 2}px`;
   }, [text, step]);
   if (!text) return null;
   return (
