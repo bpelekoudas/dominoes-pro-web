@@ -351,20 +351,20 @@ export interface CameraPose {
 }
 
 /**
- * Matches `--camera-ease` in styles.css: cubic-bezier(0.41, 0.19, 0.59, 0.81).
- * At 30fps across 480ms no sample moves more than about a tenth of the trip.
+ * Smoothstep ease-in-out. Slope is 0 at both ends, so a glide starts and
+ * stops without a velocity jump, and it never overshoots.
+ * At 30fps across 400ms the fastest frame is about 12% of the trip.
  */
 export function cameraEase(t: number): number {
   const x = Math.min(1, Math.max(0, t));
-  const bez = (u: number, a: number, b: number) => 3 * (1 - u) * (1 - u) * u * a + 3 * (1 - u) * u * u * b + u * u * u;
-  let lo = 0;
-  let hi = 1;
-  for (let i = 0; i < 24; i += 1) {
-    const mid = (lo + hi) / 2;
-    if (bez(mid, 0.41, 0.59) < x) lo = mid;
-    else hi = mid;
-  }
-  return bez((lo + hi) / 2, 0.19, 0.81);
+  return x * x * (3 - 2 * x);
+}
+
+/** One compositor transform: pan and zoom together, origin at the stage's top left. */
+export function cameraTransform(pose: CameraPose, frame: { w: number; h: number }, lift = 0): string {
+  const x = pose.x - (frame.w * pose.scale) / 2;
+  const y = pose.y + lift - (frame.h * pose.scale) / 2;
+  return `translate3d(${x}px, ${y}px, 0) scale(${pose.scale})`;
 }
 
 export function poseAt(from: CameraPose, to: CameraPose, t: number): CameraPose {

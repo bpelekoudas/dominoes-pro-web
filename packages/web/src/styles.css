@@ -958,7 +958,8 @@ input {
   position: absolute;
   top: 0;
   left: 0;
-  transform-origin: top left;
+  transform-origin: 0 0;
+  will-change: transform;
   transition: none;
 }
 .table-scroll {
@@ -966,22 +967,6 @@ input {
 }
 .board-tile.is-camera-hold { visibility: hidden; }
 .board-tile.is-relocating { visibility: hidden; }
-.table-scroll[data-camera="armed"][data-zoom="ease"] .board-scaler {
-  transition:
-    width var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
-    height var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
-    transform var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
-}
-.table-scroll[data-camera="armed"][data-zoom="ease"] .board-stage {
-  transition: transform var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
-}
-.table-scroll[data-camera="armed"][data-zoom="ease"] .board-tile {
-  transition:
-    left var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
-    top var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
-    width var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81),
-    height var(--camera-ease) cubic-bezier(0.41, 0.19, 0.59, 0.81);
-}
 .table-scroll[data-cam-user="drag"] .board-scaler,
 .table-scroll[data-cam-user="drag"] .board-stage,
 .table-scroll[data-glide="locked"] .board-scaler,
@@ -1053,20 +1038,6 @@ input {
     0 0 0 4px var(--gold),
     0 0 22px 6px rgba(227, 30, 38, 0.9);
 }
-.board-tile[data-cross="closed"]::before,
-.board-tile[data-cross="closed"]::after {
-  content: "";
-  position: absolute;
-  left: 18%;
-  right: 18%;
-  height: 7px;
-  background: #1c140c;
-  border-radius: 2px;
-  z-index: 2;
-  pointer-events: none;
-}
-.board-tile[data-cross="closed"]::before { top: 4px; }
-.board-tile[data-cross="closed"]::after { bottom: 4px; }
 .end-cap {
   z-index: 4;
   border: 0;
@@ -1359,9 +1330,12 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 }
 .half i {
   position: absolute;
-  /* Circle whose diameter is 0.20 of the half's width, on the board and in the hand. */
-  width: 20cqw;
-  height: 20cqw;
+  /* Circle whose diameter is 0.20 of the half's width, on the board and in the hand.
+     cqmin keeps the dot round when a half is not square, and aspect-ratio stops a
+     later rule from stretching it into a bar. */
+  width: 20cqmin;
+  height: 20cqmin;
+  aspect-ratio: 1;
   margin: 0;
   transform: translate(-50%, -50%);
   border-radius: 50%;

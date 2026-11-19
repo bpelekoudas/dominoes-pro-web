@@ -12,8 +12,10 @@ import {
   TILE_SNAP_MS,
   cameraHoldStale,
   cameraSettlesOn,
-  cameraEase,
+  cameraTransform,
+  poseAt,
   chainHeldAtHandEnd,
+  type CameraPose,
   chainViewShift,
   clampGhostToFelt,
   PINWHEEL_LONG_FRAC,
@@ -48,6 +50,11 @@ import {
 import { faceRotation, PipHalf } from "./pips.js";
 
 const NO_SLOTS: Array<LayoutBox & { id: string }> = [];
+
+function sampleCamera(motion: { from: CameraPose; to: CameraPose; snapUntil: number }, now: number): CameraPose {
+  if (now <= motion.snapUntil) return motion.from;
+  return poseAt(motion.from, motion.to, Math.min(1, (now - motion.snapUntil) / CAMERA_EASE_MS));
+}
 
 export function Domino({
   a,
@@ -193,34 +200,30 @@ export function Table({
   const [nudge, setNudge] = useState({ x: 0, y: 0, zoom: 1 });
   const [userCam, setUserCam] = useState<"follow" | "drag">("follow");
   const [cameraArmed, setCameraArmed] = useState(false);
-  const [glideT, setGlideT] = useState(1);
+  const [glideOn, setGlideOn] = useState(false);
   const [pin, setPin] = useState<{ left: number; top: number } | null>(null);
-  const glideCam = useRef<{
-    fromScale: number;
-    toScale: number;
-    fromX: number;
-    fromY: number;
-    toX: number;
-    toY: number;
-    hide: Set<string>;
-  } | null>(null);
+  const motionRef = useRef<{ from: CameraPose; to: CameraPose; snapUntil: number; hide: Set<string> } | null>(null);
   const glideTimer = useRef(0);
   const shownPose = useRef({ scale: 1, x: 0, y: 0 });
+  const scaleRef = useRef(scale);
+  const panRef = useRef(pan);
+  const frameRef = useRef(frame);
+  const liftRef = useRef(lift);
+  const pinRef = useRef(pin);
+  const handOverRef = useRef(handOver);
+  scaleRef.current = scale;
+  panRef.current = pan;
+  frameRef.current = frame;
+  liftRef.current = lift;
+  pinRef.current = pin;
+  handOverRef.current = handOver;
   const feltRef = useRef<{ w: number; h: number } | null>(null);
   const edgeRef = useRef<AxisInsets | null>(null);
-  const glideEase = glideT < 1 ? cameraEase(glideT) : 1;
-  const gliding = glideT < 1 && glideCam.current != null;
-  const shownScale = (gliding
-    ? glideCam.current!.fromScale + (glideCam.current!.toScale - glideCam.current!.fromScale) * glideEase
-    : scale) * nudge.zoom;
-  const panNow = gliding
-    ? {
-      x: glideCam.current!.fromX + (glideCam.current!.toX - glideCam.current!.fromX) * glideEase,
-      y: glideCam.current!.fromY + (glideCam.current!.toY - glideCam.current!.fromY) * glideEase,
-    }
-    : pan;
-  const shift = { x: panNow.x + nudge.x, y: panNow.y + nudge.y };
-  shownPose.current = { scale: gliding ? shownScale / nudge.zoom : scale, x: panNow.x, y: panNow.y };
+  const visual = motionRef.current ? sampleCamera(motionRef.current, performance.now()) : { scale, x: pan.x, y: pan.y };
+  const shownScale = visual.scale * nudge.zoom;
+  const shift = { x: visual.x + nudge.x, y: visual.y + nudge.y };
+  const gliding = glideOn && motionRef.current != null;
+  shownPose.current = { scale: visual.scale, x: visual.x, y: visual.y };
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number; table: string } | null>(null);
@@ -247,9 +250,11 @@ export function Table({
 
   useLayoutEffect(() => {
     placedBoxes.current = new Map();
-    glideCam.current = null;
+    motionRef.current = null;
+    window.cancelAnimationFrame(glideTimer.current);
+    glideTimer.current = 0;
     handEndFit.current = "";
-    setGlideT(1);
+    setGlideOn(false);
     setRelocating(new Set());
     window.clearTimeout(relocateTimer.current);
   }, [handKey]);
@@ -455,7 +460,8 @@ export function Table({
         || Math.abs(previousShift.y - shift.y) > 1;
       const feltNow = { w: width, h: height };
       const shown = shownPose.current;
-      if (cameraMoves && prevScale != null && previousShift && shown.scale > 0.05 && !prefersReducedMotion()) {
+      const glideThis = cameraMoves && prevScale != null && previousShift && shown.scale > 0.05 && !prefersReducedMotion();
+      if (glideThis) {
         const hide = new Set<string>();
         for (const tile of picture.tiles) {
           const start = renderedTileRect(feltNow, tile, shown.scale, { x: shown.x, y: shown.y });
@@ -467,35 +473,46 @@ export function Table({
           );
           if (past > 0.6) hide.add(tile.tileId);
         }
-        glideCam.current = {
-          fromScale: shown.scale,
-          toScale: zoom,
-          fromX: shown.x,
-          fromY: shown.y,
-          toX: shift.x,
-          toY: shift.y,
-          hide,
+        const now = performance.now();
+        const from = motionRef.current ? sampleCamera(motionRef.current, now) : { scale: shown.scale, x: shown.x, y: shown.y };
+        motionRef.current = { from, to: { scale: zoom, x: shift.x, y: shift.y }, snapUntil: now + TILE_SNAP_MS, hide };
+        const step = (frameNow: number) => {
+          const motion = motionRef.current;
+          const node = stageRef.current;
+          const box = frameRef.current;
+          if (!motion || !node || !box) {
+            glideTimer.current = 0;
+            return;
+          }
+          const pose = sampleCamera(motion, frameNow);
+          node.style.transform = pinRef.current
+            ? `scale(${pose.scale})`
+            : cameraTransform(pose, box, liftRef.current);
+          shownPose.current = pose;
+          if (frameNow < motion.snapUntil + CAMERA_EASE_MS) {
+            glideTimer.current = window.requestAnimationFrame(step);
+            return;
+          }
+          motionRef.current = null;
+          glideTimer.current = 0;
+          shownPose.current = motion.to;
+          setScale(motion.to.scale);
+          setPan({ x: motion.to.x, y: motion.to.y });
+          setGlideOn(false);
+          if (handOverRef.current) handEndFit.current = "ready";
         };
-        setGlideT(0);
-        const started = performance.now();
         window.cancelAnimationFrame(glideTimer.current);
-        const step = (now: number) => {
-          const elapsed = now - started - TILE_SNAP_MS;
-          const t = elapsed <= 0 ? 0 : Math.min(1, elapsed / CAMERA_EASE_MS);
-          setGlideT(t);
-          if (t < 1) glideTimer.current = window.requestAnimationFrame(step);
-          else handEndFit.current = handOver ? "ready" : handEndFit.current;
-        };
         glideTimer.current = window.requestAnimationFrame(step);
+        setGlideOn(true);
         if (handOver) handEndFit.current = "gliding";
-      } else if (handOver) {
-        handEndFit.current = "ready";
+      } else {
+        if (handOver) handEndFit.current = "ready";
+        setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
+        setPan((current) => (Math.abs(current.x - shift.x) < 1 && Math.abs(current.y - shift.y) < 1 ? current : shift));
       }
       held.current = { hand: handKey, scale: zoom };
       turnBudget.current = { scale: zoom, roomW: roomNow.w, roomH: roomNow.h };
       frozen.current = handOver;
-      setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
-      setPan((current) => (Math.abs(current.x - shift.x) < 1 && Math.abs(current.y - shift.y) < 1 ? current : shift));
       setCamMode("fit");
       setOffscreen((current) =>
         current.top || current.right || current.bottom || current.left
@@ -534,7 +551,7 @@ export function Table({
   useLayoutEffect(() => {
     const root = document.documentElement;
     const viewport = viewportRef.current;
-    if (!handOver || !viewport || handEndFit.current !== "ready" || glideT < 1) {
+    if (!handOver || !viewport || handEndFit.current !== "ready" || glideOn) {
       if (!handOver) {
         setLift((current) => (current === 0 ? current : 0));
         setPin((current) => (current == null ? current : null));
@@ -546,23 +563,32 @@ export function Table({
     // inside it moves when the reveal resizes the table. Lift the picture
     // onto the body at the rect the player is already looking at.
     window.cancelAnimationFrame(glideTimer.current);
-    const stage = viewport.querySelector<HTMLElement>(".board-stage");
-    const scaler = viewport.querySelector<HTMLElement>(".board-scaler");
+    glideTimer.current = 0;
+    motionRef.current = null;
+    const stage = stageRef.current;
     const matrix = new DOMMatrix(getComputedStyle(stage ?? viewport).transform);
-    const visual = Math.abs(matrix.a) > 0.05 ? Math.abs(matrix.a) : null;
-    glideCam.current = null;
-    if (visual != null) {
-      held.current = { hand: handKey, scale: visual };
-      setScale((current) => (Math.abs(current - visual) < 0.001 ? current : visual));
+    const seen = Math.abs(matrix.a) > 0.05 ? Math.abs(matrix.a) : null;
+    if (seen != null) {
+      held.current = { hand: handKey, scale: seen };
+      setScale((current) => (Math.abs(current - seen) < 0.001 ? current : seen));
     }
-    if (scaler) {
-      const rect = scaler.getBoundingClientRect();
+    if (stage) {
+      const rect = stage.getBoundingClientRect();
       if (rect.width > 2 && rect.height > 2) setPin({ left: rect.left, top: rect.top });
     }
-    setGlideT(1);
     setLift(0);
     root.style.removeProperty("--hand-sheet-max");
-  }, [handOver, handKey, glideT]);
+  }, [handOver, handKey, glideOn]);
+
+  useLayoutEffect(() => {
+    const node = stageRef.current;
+    const box = frameRef.current;
+    if (!node || !box) return;
+    const motion = motionRef.current;
+    const pose = motion ? sampleCamera(motion, performance.now()) : { scale: scaleRef.current, x: panRef.current.x, y: panRef.current.y };
+    node.style.transform = pinRef.current ? `scale(${pose.scale})` : cameraTransform(pose, box, liftRef.current);
+    if (!motion) shownPose.current = pose;
+  });
 
   const focusTile = dragTileId ?? selectedTile;
   const focusPlays = focusTile ? view.legalPlays.filter((play) => play.tileId === focusTile) : [];
@@ -647,7 +673,7 @@ export function Table({
       data-win-board="true"
       data-camera={cameraArmed ? "armed" : "hold"}
       data-zoom="ease"
-      data-glide={glideT < 1 ? "locked" : "free"}
+      data-glide={glideOn ? "locked" : "free"}
       data-drop-ready={dropLead ? "true" : "false"}
       style={tableArt ? { backgroundImage: `url(${tableArt})` } : undefined}
     >
@@ -669,25 +695,20 @@ export function Table({
             top: pin.top,
             margin: 0,
             zIndex: 2,
-            width: frame.w * shownScale,
-            height: frame.h * shownScale,
+            width: frame.w,
+            height: frame.h,
             transform: "none",
-            transition: "none",
-          } : {
-            width: frame.w * shownScale,
-            height: frame.h * shownScale,
-            transform: `translate(${shift.x - (frame.w * shownScale) / 2}px, ${shift.y + lift - (frame.h * shownScale) / 2}px)`,
-          }}
+          } : undefined}
         >
           <div
             className="board-stage"
             ref={stageRef}
-            style={{ width: frame.w, height: frame.h, transform: `scale(${shownScale})` }}
+            style={{ width: frame.w, height: frame.h }}
           >
             {layout.tiles.map((tile) => (
               <div
                 key={tile.tileId}
-                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${!handOver && (relocating.has(tile.tileId) || (gliding && glideCam.current?.hide.has(tile.tileId)) || tileCrossesInset(tile, shownScale, shift, feltRef.current, edgeRef.current)) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
+                className={`board-tile${tile.tileId === lastTileId ? " last-move" : ""}${heldIds.has(tile.tileId) ? " is-camera-hold" : ""}${!handOver && (relocating.has(tile.tileId) || (gliding && motionRef.current?.hide.has(tile.tileId)) || tileCrossesInset(tile, shownScale, shift, feltRef.current, edgeRef.current)) ? " is-relocating" : ""}${concealed === tile.tileId ? " is-arriving" : ""}${slamming && !handOver && tile.tileId === moment?.tileId ? " is-slamming" : ""}`}
                 data-feel={tile.tileId === lastTileId ? feel.tier : undefined}
                 style={place(tile, frame)}
                 data-board-tile={tile.tileId}

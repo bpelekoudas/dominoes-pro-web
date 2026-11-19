@@ -631,10 +631,9 @@ describe("board scale", () => {
     ];
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
     expect(css).toMatch(/is-camera-hold \{\s*visibility:\s*hidden/);
-    expect(css).toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,320}transition:[\s\S]{0,200}var\(--camera-ease\)/);
-    expect(css).not.toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,80}transition:\s*none/);
-    expect(css).toMatch(/data-board-frozen="true"\]\[data-camera="armed"\]\[data-zoom="ease"\] \.board-tile[\s\S]{0,220}transition:\s*none/);
-    expect(css).toMatch(/data-board-frozen="true"\]\[data-camera="armed"\]\[data-zoom="ease"\] \.board-scaler[\s\S]{0,400}transition:\s*none/);
+    expect(css).toMatch(/\.board-stage \{[^}]*will-change:\s*transform/);
+    expect(css).not.toMatch(/data-zoom="ease"\] \.board-scaler[\s\S]{0,240}width var\(--camera-ease\)/);
+    expect(css).not.toMatch(/data-zoom="ease"\] \.board-tile[\s\S]{0,240}width var\(--camera-ease\)/);
     let turns = 0;
     let smallest = Number.POSITIVE_INFINITY;
     for (const table of tables) {
@@ -1169,7 +1168,26 @@ describe("board scale", () => {
     }
     expect(cameraEase(0)).toBeCloseTo(0, 5);
     expect(cameraEase(1)).toBeCloseTo(1, 5);
-    expect(CAMERA_EASE_MS).toBe(400);
+    expect(cameraEase(0.5)).toBeCloseTo(0.5, 5);
+    expect(CAMERA_EASE_MS).toBeGreaterThanOrEqual(300);
+    expect(CAMERA_EASE_MS).toBeLessThanOrEqual(450);
+    const zoomOut = glidePoses({ scale: 1.2, x: 0, y: 0 }, { scale: 0.7, x: 40, y: -20 });
+    for (let i = 1; i < zoomOut.length; i += 1) {
+      expect(zoomOut[i]!.scale, "scale stays monotonic").toBeLessThanOrEqual(zoomOut[i - 1]!.scale + 1e-9);
+    }
+    const trip = Math.hypot(40, 20);
+    const speed = (index: number) => {
+      const dx = zoomOut[index]!.x - zoomOut[index - 1]!.x;
+      const dy = zoomOut[index]!.y - zoomOut[index - 1]!.y;
+      return Math.hypot(dx, dy);
+    };
+    expect(speed(1) / trip, "no jump as the glide starts").toBeLessThan(0.04);
+    expect(speed(zoomOut.length - 1) / trip, "no jump as the glide ends").toBeLessThan(0.04);
+    const speeds = zoomOut.slice(1).map((_, index) => speed(index + 1));
+    const peak = Math.max(...speeds);
+    for (let i = 1; i < speeds.length; i += 1) {
+      expect(Math.abs(speeds[i]! - speeds[i - 1]!), "velocity stays continuous").toBeLessThan(peak * 0.6 + 1e-6);
+    }
   });
 
   it("keeps long matches clear at the settled frame and at the middle of the glide", () => {

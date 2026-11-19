@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { allTiles } from "../../rules/src/tiles.js";
 import { PIP_COL_INSET, PIP_DIAMETER, PIP_END_INSET, PIP_PITCH, PIP_RADIUS, pipCenters, rotatePip, type PipPoint, type PipRotation } from "./pips.js";
 
+const TILE_SKINS = ["ivory", "wood", "neon", "marble", "charcoal", "gold", "sky", "cherry", "boss", "ice", "candy"];
+
 const ROTATIONS: PipRotation[] = [0, 90, 180, 270];
 /** The face radius is 7px on a half about one short side (36px) across. */
 const FACE_RADIUS = 7 / 36;
@@ -51,7 +53,7 @@ describe("pip positions", () => {
     expect(PIP_END_INSET).toBeCloseTo(0.19, 5);
     expect(PIP_PITCH).toBeCloseTo(0.31, 5);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    expect(css).toMatch(/\.half i \{[^}]*width:\s*20cqw;\s*height:\s*20cqw;/);
+    expect(css).toMatch(/\.half i \{[^}]*width:\s*20cqmin;\s*height:\s*20cqmin;/);
     expect(css).not.toMatch(/\.hand-tile \.half i \{[^}]*width:/);
     let checked = 0;
     for (const tile of allTiles()) {
@@ -147,6 +149,45 @@ describe("pip positions", () => {
         }
       }
     } finally {
+    chrome.kill();
+    await new Promise((resolve) => server.close(resolve));
+    }
+  }, 40_000);
+
+  it("renders every double round, at a regular tile's size, crosswise and lengthwise", async () => {
+    const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/data-cross="closed"\]::before/);
+    const html = doubleFixture(css);
+    const server = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(html);
+      void req;
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const port = (server.address() as { port: number }).port;
+    const chrome = await launchChrome();
+    try {
+      const page = await connectPage(chrome.port);
+      await page.send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+      const measured = (await waitForMeasure(page)) as unknown as DoubleMeasure[];
+      expect(measured.length).toBeGreaterThan(50);
+      for (const item of measured) {
+        expect(Math.abs(item.dominoW - item.regularW), `${item.id} width`).toBeLessThan(0.6);
+        expect(Math.abs(item.dominoH - item.regularH), `${item.id} height`).toBeLessThan(0.6);
+        const long = Math.max(item.dominoW, item.dominoH);
+        const short = Math.min(item.dominoW, item.dominoH);
+        expect(long / short, `${item.id} aspect`).toBeGreaterThan(1.9);
+        expect(long / short, `${item.id} aspect`).toBeLessThan(2.1);
+        expect(item.pips, `${item.id} pip count`).toBe(item.value * 2);
+        for (const pip of item.pipShapes) {
+          expect(Math.abs(pip.w - pip.h), `${item.id} circle`).toBeLessThan(0.6);
+          expect(pip.w, `${item.id} pip size`).toBeGreaterThan(2);
+          expect(pip.clipped, `${item.id} clipped`).toBe(false);
+        }
+      }
+      const closed = measured.find((item) => item.id === "closed-6");
+      expect(closed?.bar, "closed spinner draws no bar over the pips").toBe("none");
+    } finally {
       chrome.kill();
       await new Promise((resolve) => server.close(resolve));
     }
@@ -159,6 +200,131 @@ interface Measure {
   cornerInset: number;
   dotW: number;
   dotH: number;
+}
+
+interface DoubleMeasure {
+  id: string;
+  value: number;
+  dominoW: number;
+  dominoH: number;
+  regularW: number;
+  regularH: number;
+  pips: number;
+  pipShapes: Array<{ w: number; h: number; clipped: boolean }>;
+  bar: string;
+}
+
+function doubleFixture(css: string): string {
+  const dots: Record<string, PipPoint[]> = {};
+  for (const value of [0, 1, 2, 3, 4, 5, 6]) {
+    dots[`${value}-0`] = pipCenters(value, 0);
+    dots[`${value}-90`] = pipCenters(value, 90);
+  }
+  dots["regular-0"] = pipCenters(3, 0);
+  dots["regular-b-0"] = pipCenters(4, 0);
+  dots["regular-90"] = pipCenters(3, 90);
+  dots["regular-b-90"] = pipCenters(4, 90);
+  return `<!doctype html><html><head><style>${css}</style>
+<style>body{margin:0;background:#16301c}.board-tile{position:relative !important}button{border:0;padding:0;background:none}</style>
+</head><body><div id="root"></div><script>
+const dots = ${JSON.stringify(dots)};
+const skins = ${JSON.stringify(TILE_SKINS)};
+function half(key) {
+  const span = document.createElement("span");
+  span.className = "half";
+  for (const pip of dots[key]) {
+    const dot = document.createElement("i");
+    dot.style.left = (pip.x * 100) + "%";
+    dot.style.top = (pip.y * 100) + "%";
+    span.appendChild(dot);
+  }
+  return span;
+}
+function face(node, keyA, keyB) {
+  node.appendChild(half(keyA));
+  const split = document.createElement("span");
+  split.className = "domino-split";
+  node.appendChild(split);
+  node.appendChild(half(keyB));
+}
+function pair(skin, value, turned, surface) {
+  const host = document.createElement("div");
+  host.setAttribute("data-tile-skin", skin);
+  const long = 96, short = 48;
+  const make = (kind) => {
+    const wrap = document.createElement(surface === "hand" ? "button" : "div");
+    wrap.className = surface === "hand" ? "hand-tile playable" : "board-tile";
+    if (surface === "hand") {
+      wrap.style.setProperty("--hand-tile", short + "px");
+      wrap.style.width = short + "px";
+    } else {
+      wrap.style.width = (turned ? long : short) + "px";
+      wrap.style.height = (turned ? short : long) + "px";
+    }
+    const domino = document.createElement("span");
+    domino.className = "domino" + (surface === "board" && turned ? " horizontal" : "");
+    const rot = surface === "board" && turned ? "90" : "0";
+    if (kind === "double") face(domino, value + "-" + rot, value + "-" + rot);
+    else face(domino, "regular-" + rot, "regular-b-" + rot);
+    wrap.appendChild(domino);
+    return wrap;
+  };
+  const tile = make("double");
+  const regular = make("regular");
+  host.appendChild(tile);
+  host.appendChild(regular);
+  host.dataset.id = skin + "-" + surface + "-" + value + "-" + (turned ? "length" : "cross");
+  host.dataset.value = String(value);
+  return host;
+}
+const root = document.getElementById("root");
+for (const skin of skins) {
+  for (const value of [0, 1, 2, 3, 4, 5, 6]) {
+    root.appendChild(pair(skin, value, false, "board"));
+    root.appendChild(pair(skin, value, true, "board"));
+    root.appendChild(pair(skin, value, false, "hand"));
+  }
+}
+const closed = pair("wood", 6, false, "board");
+closed.dataset.id = "closed-6";
+closed.querySelector(".board-tile").setAttribute("data-cross", "closed");
+root.appendChild(closed);
+requestAnimationFrame(() => requestAnimationFrame(() => {
+  const out = [];
+  for (const host of root.children) {
+    const tiles = host.querySelectorAll(".board-tile, .hand-tile");
+    const tile = tiles[0];
+    const regular = tiles[1];
+    const domino = tile.querySelector(".domino");
+    const regularDomino = regular.querySelector(".domino");
+    const dr = domino.getBoundingClientRect();
+    const rr = regularDomino.getBoundingClientRect();
+    const shapes = [];
+    for (const pip of domino.querySelectorAll(".half i")) {
+      const pr = pip.getBoundingClientRect();
+      const half = pip.parentElement.getBoundingClientRect();
+      shapes.push({
+        w: pr.width,
+        h: pr.height,
+        clipped: pr.left < half.left - 0.5 || pr.top < half.top - 0.5 || pr.right > half.right + 0.5 || pr.bottom > half.bottom + 0.5,
+      });
+    }
+    const before = getComputedStyle(tile, "::before");
+    out.push({
+      id: host.dataset.id,
+      value: Number(host.dataset.value),
+      dominoW: dr.width,
+      dominoH: dr.height,
+      regularW: rr.width,
+      regularH: rr.height,
+      pips: shapes.length,
+      pipShapes: shapes,
+      bar: before.content,
+    });
+  }
+  document.body.dataset.ready = JSON.stringify(out);
+}));
+</script></body></html>`;
 }
 
 function renderFixture(css: string): string {
