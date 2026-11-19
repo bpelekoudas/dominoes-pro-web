@@ -409,14 +409,17 @@ input {
 .stack-badge .seat-pips { position: static; transform: none; left: auto; right: auto; bottom: auto; margin-top: 1px; }
 .stack-badge .cpu-tag { display: none; }
 .stack-badge .talk-line {
-  left: 0;
+  position: static;
+  left: auto;
   right: auto;
   top: auto;
-  bottom: calc(100% + 4px);
+  bottom: auto;
   transform: none;
-  width: max-content;
-  max-width: 168px;
-  max-height: none;
+  display: block;
+  width: auto;
+  max-width: 72px;
+  max-height: 16px;
+  margin-top: 2px;
   white-space: nowrap;
 }
 .opponent-chip[data-edge="right"] .stack-badge .talk-line,

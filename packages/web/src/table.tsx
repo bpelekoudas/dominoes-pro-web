@@ -581,15 +581,15 @@ export function Table({
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
   const landed = useTileCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, lastTileId);
-  const endsAt = useEndCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, (pop?.awarded ?? 0) >= 10);
   // Keep the state object. A fresh literal would restart the shatter on every render.
   const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
-  const popFrom = endsAt ?? landed;
   const livePopup = scorePopupText(view.lastPlay?.awarded ?? 0);
   const popup = scorePopupForPlay(view.lastPlay, pop);
+  const tray = typeof document === "undefined" ? null : document.querySelector(".hand-tray");
+  const trayRect = tray?.getBoundingClientRect();
   const popAt =
-    popup && pop && popFrom && pop.tileId === lastTileId
-      ? { left: popFrom.x, top: popFrom.y - 48, place: "above" as const }
+    popup && pop && trayRect && trayRect.width > 1
+      ? { left: trayRect.left + Math.min(96, trayRect.width / 2), top: trayRect.top + 10, place: "above" as const }
       : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 

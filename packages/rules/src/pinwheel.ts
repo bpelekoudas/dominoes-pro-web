@@ -2,6 +2,7 @@ import type { ArmId, BoardState, OrientedTile } from "./board.js";
 import { openEnds } from "./board.js";
 import {
   TILE_LONG,
+  boxGap,
   type BoardLayout,
   type LayoutBox,
   type LayoutDir,
@@ -111,11 +112,9 @@ export function cornerCenter(
 ): { x: number; y: number } {
   const outward = STEP[travel];
   const along = STEP[turn];
-  // Flush with the previous tile's outer edge, but never so far inward that the
-  // corner's back edge comes within 0.5 L of the tile before that one.
-  const flush = halfAlong(prevDouble) - halfAcross(nextDouble);
-  const clear = halfAcross(nextDouble) - halfAlong(prevDouble) - JOIN_GAP + 0.5 * L;
-  const outShift = Math.max(flush, clear);
+  // Flush with the outer end. The new tile's end meets that end; it is not
+  // slid sideways along the previous tile.
+  const outShift = halfAlong(prevDouble) - halfAcross(nextDouble);
   const turnShift = halfAcross(prevDouble) + JOIN_GAP + halfAlong(nextDouble);
   return {
     x: prev.x + outward.x * outShift + along.x * turnShift,
@@ -162,14 +161,16 @@ function turnOutward(dir: LayoutDir, center: { x: number; y: number }): LayoutDi
   return best;
 }
 
-function laneOf(dir: LayoutDir, center: { x: number; y: number }): { along: "x" | "y"; at: number } {
-  const along = dir === "east" || dir === "west" ? "y" : "x";
-  return { along, at: along === "y" ? center.y : center.x };
+function crowded(box: LayoutBox, own: readonly LayoutBox[], parent: LayoutBox | null): boolean {
+  return own.some((other) => {
+    if (parent && Math.abs(other.x - parent.x) < 0.2 && Math.abs(other.y - parent.y) < 0.2
+      && Math.abs(other.w - parent.w) < 0.2 && Math.abs(other.h - parent.h) < 0.2) return false;
+    return boxGap(box, other) < 0.5 * L - 0.5;
+  });
 }
 
 function placeChain(arm: ArmId, chain: readonly OrientedTile[], spinner: LayoutBox): PlacedTile[] {
   const out: PlacedTile[] = [];
-  const lanes: Array<{ along: "x" | "y"; at: number }> = [];
   let cursor: Cursor | null = null;
   let segment = 0;
   for (const tile of chain) {
@@ -180,59 +181,32 @@ function placeChain(arm: ArmId, chain: readonly OrientedTile[], spinner: LayoutB
       dir = cursor.dir;
       run = cursor.run;
     }
-    // Opening row and its leg: 3, then the inward hook stops at 2 so it never
-    // reaches the centre column. Every later run is at least 3 and keeps going
-    // until the lane it turns onto is 2.6 L from lanes this arm already used.
-    const cap = segment === 2 ? 2 : ROW_CAP;
-    const turnOf = (from: LayoutDir, at: { x: number; y: number }) =>
-      segment >= 2 ? turnOutward(from, at) : pinwheelTurn(arm, from);
-    const laneClear = (from: LayoutDir, at: { x: number; y: number }, prevDouble: boolean) => {
-      const turn = turnOf(from, at);
-      const next = cornerCenter(at, from, turn, prevDouble, double);
-      const lane = laneOf(turn, next);
-      return !lanes.some((used) => used.along === lane.along && Math.abs(used.at - lane.at) < 2.6 * L);
-    };
-    // Each arm keeps its own half of the board once it leaves its opening run,
-    // so a hook never crosses the centre into another arm.
-    const leavesHalf = (at: { x: number; y: number }) => {
-      const onOpening = (arm === "east" || arm === "west") ? Math.abs(at.y) < 0.4 * L : Math.abs(at.x) < 0.4 * L;
-      if (onOpening) return false;
-      if (arm === "east") return at.x < 1.2 * L;
-      if (arm === "west") return at.x > -1.2 * L;
-      if (arm === "north") return at.y > -1.2 * L;
-      return at.y < 1.2 * L;
-    };
     let center: { x: number; y: number };
-    const mustTurn = cursor !== null && run >= cap && (segment < 3 || laneClear(dir, cursor.center, cursor.double) || run >= 8);
     if (!cursor) {
       dir = arm;
       center = firstCenter(spinner, arm, double);
       run = 1;
-    } else if (mustTurn) {
-      const turn = turnOf(dir, cursor.center);
-      center = cornerCenter(cursor.center, dir, turn, cursor.double, double);
-      dir = turn;
-      run = 1;
-      segment += 1;
-    } else {
-      const ahead = straightCenter(cursor.center, dir, cursor.double, double);
-      // Turn one tile early when the tile after this one would have to cross
-      // the centre. Turning from there keeps the corner in this arm's half.
-      const peekTurn = turnOutward(dir, ahead);
-      const peek = cornerCenter(ahead, dir, peekTurn, double, true);
-      if (leavesHalf(ahead) || leavesHalf(peek)) {
-        const turn = turnOutward(dir, cursor.center);
-        center = cornerCenter(cursor.center, dir, turn, cursor.double, double);
+    } else if (run >= ROW_CAP && !double) {
+      // The opening turn is the measured pinwheel. Every later turn steps
+      // further from the spinner. A double stays on the arm it is already on,
+      // crosswise, so a corner is always a flush end-to-end join.
+      const turn: LayoutDir = segment === 0 ? pinwheelTurn(arm, dir) : turnOutward(dir, cursor.center);
+      const corner = cornerCenter(cursor.center, dir, turn, cursor.double, double);
+      const parent = boxFromCenter(cursor.center, cursor.dir, cursor.double);
+      const own = out.map((laid) => ({ x: laid.x, y: laid.y, w: laid.w, h: laid.h }));
+      if (crowded(boxFromCenter(corner, turn, double), own, parent)) {
+        center = straightCenter(cursor.center, dir, cursor.double, double);
+        run += 1;
+      } else {
+        center = corner;
         dir = turn;
         run = 1;
         segment += 1;
-      } else {
-        center = ahead;
-        run += 1;
       }
+    } else {
+      center = straightCenter(cursor.center, dir, cursor.double, double);
+      run += 1;
     }
-    const lane = laneOf(dir, center);
-    if (!lanes.some((used) => used.along === lane.along && Math.abs(used.at - lane.at) < 0.2 * L)) lanes.push(lane);
     out.push(toTile(tile, boxFromCenter(center, dir, double), dir, arm));
     cursor = { center, dir, run, double };
   }

@@ -87,6 +87,10 @@ export interface AuditSizeReport {
   g13: number;
   g14: number;
   g15: number;
+  /** Non-joined tiles whose rendered rects are closer than 0.5 L. */
+  renderClose: number;
+  /** Joined tiles whose touching ends do not line up. */
+  renderSkew: number;
   /** Chain bbox area divided by the felt area, at the end of each hand. */
   endFill: number[];
   settledOverlap: number;
@@ -217,6 +221,7 @@ function scorePinwheel(
     if (chain[0]) firstOfArm.add(chain[0].tileId);
     let prevId = board.center.tileId;
     let prevDir: LayoutDir | null = null;
+    let leftArm = false;
     chain.forEach((tile, index) => {
       joined.add(pair(prevId, tile.tileId));
       const laid = byId.get(tile.tileId);
@@ -245,11 +250,18 @@ function scorePinwheel(
         report.g10 += 1;
         note("g10", seed, play, `${arm} ${index} ${laid.direction}`);
       }
-      if (index === 3 && laid && laid.direction !== pinwheelTurn(arm, arm)) {
-        report.g11 += 1;
-        note("g11", seed, play, `${arm} ${laid.direction}`);
+      if (!leftArm && laid && laid.direction !== arm) {
+        leftArm = true;
+        if (laid.direction !== pinwheelTurn(arm, arm)) {
+          report.g11 += 1;
+          note("g11", seed, play, `${arm} ${laid.direction}`);
+        } else if (index !== 3 && !chain.slice(0, index).some((earlier) => earlier.low === earlier.high)) {
+          report.g10 += 1;
+          note("g10", seed, play, `${arm} turned at ${index}`);
+        }
       }
-      if (index === 3 && laid && prev && !isDoubleId(tile.tileId) && !isDoubleId(prevId) && (arm === "west" || arm === "east")) {
+      if (index <= 4 && laid && prev && prevDir === arm && laid.direction === pinwheelTurn(arm, arm)
+        && !isDoubleId(tile.tileId) && !isDoubleId(prevId) && (arm === "west" || arm === "east")) {
         const here = centerOf(laid);
         const was = centerOf(prev);
         const dx = (here.x - was.x) / TILE_LONG;
@@ -275,6 +287,50 @@ function scorePinwheel(
         report.g9 += 1;
         note("g9", seed, play, `${left.tileId} ${right.tileId}`);
         i = tiles.length;
+        break;
+      }
+    }
+  }
+  const screenOf = (tile: PlacedTile) => renderedTileRect(felt, tile, scale, shift);
+  const screenGap = (
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ) => {
+    const dx = Math.max(a.left - b.right, b.left - a.right, 0);
+    const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
+    return dx === 0 ? dy : dy === 0 ? dx : Math.hypot(dx, dy);
+  };
+  const endsMeet = (
+    a: { left: number; top: number; right: number; bottom: number },
+    b: { left: number; top: number; right: number; bottom: number },
+  ) => {
+    const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    const gapX = Math.max(a.left - b.right, b.left - a.right, 0);
+    const gapY = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
+    if (overlapY > 0 && gapY === 0) return overlapY >= 0.8 * Math.min(a.bottom - a.top, b.bottom - b.top) - 1;
+    if (overlapX > 0 && gapX === 0) return overlapX >= 0.8 * Math.min(a.right - a.left, b.right - b.left) - 1;
+    return false;
+  };
+  const painted = tiles.map((tile) => ({ id: tile.tileId, rect: screenOf(tile) }));
+  for (let i = 0; i < painted.length; i += 1) {
+    for (let j = i + 1; j < painted.length; j += 1) {
+      const left = painted[i]!;
+      const right = painted[j]!;
+      if (joined.has(pair(left.id, right.id))) {
+        if (!endsMeet(left.rect, right.rect)) {
+          report.renderSkew += 1;
+          note("renderSkew", seed, play, `${left.id} ${right.id}`);
+          i = painted.length;
+          break;
+        }
+        continue;
+      }
+      if (firstOfArm.has(left.id) && firstOfArm.has(right.id)) continue;
+      if (screenGap(left.rect, right.rect) < 0.5 * longPx - 0.5) {
+        report.renderClose += 1;
+        note("renderClose", seed, play, `${left.id} ${right.id}`);
+        i = painted.length;
         break;
       }
     }
@@ -361,6 +417,8 @@ export function auditSize(
     g13: 0,
     g14: 0,
     g15: 0,
+    renderClose: 0,
+    renderSkew: 0,
     settledOverlap: 0,
     glideOverlap: 0,
     uiOverlap: 0,

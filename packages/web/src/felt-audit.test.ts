@@ -16,13 +16,14 @@ function failures(report: AuditSizeReport): number {
     + report.handEndSnap
     + report.refold
     + report.g1 + report.g2 + report.g3 + report.g7 + report.g8 + report.g9
-    + report.g10 + report.g11 + report.g12 + report.g13 + report.g14 + report.g15;
+    + report.g10 + report.g11 + report.g12 + report.g13 + report.g14 + report.g15
+    + report.renderClose + report.renderSkew;
 }
 
 function merge(left: AuditSizeReport | null, right: AuditSizeReport): AuditSizeReport {
   if (!left) return right;
   const sum = { ...left, endPx: [...left.endPx, ...right.endPx], endLong: [...left.endLong, ...right.endLong], endFill: [...left.endFill, ...right.endFill], worst: [...left.worst, ...right.worst].slice(0, 8) };
-  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "longUnder18", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut", "unjoinedGap", "spinnerBlind", "g1", "g2", "g3", "g7", "g8", "g9", "g10", "g11", "g12", "g13", "g14", "g15"] as const) {
+  for (const key of ["hands", "plays", "longChains", "doubleHeavy", "settledCut", "glideCut", "exposedCut", "connectGap", "handEndSnap", "refold", "tinyPlays", "longUnder18", "settledOverlap", "glideOverlap", "uiOverlap", "tiny", "zoomIn", "jump", "ghostCut", "unjoinedGap", "spinnerBlind", "g1", "g2", "g3", "g7", "g8", "g9", "g10", "g11", "g12", "g13", "g14", "g15", "renderClose", "renderSkew"] as const) {
     sum[key] += right[key];
   }
   return sum;
