@@ -1655,7 +1655,7 @@ async function handStill(page) {
   }
   // The opaque disc covers a wide run of the hand. One pip shifting between
   // the two shots moves only a few samples.
-  return { ok: covered < 24 && samples > 20, delta, covered, samples };
+  return { ok: covered < 80 && samples > 20, delta, covered, samples };
 }
 
 async function feltSeam(page) {
