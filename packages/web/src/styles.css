@@ -1189,7 +1189,9 @@ input {
   padding: 4px;
   border-radius: 12px;
   border: 1px solid rgba(239, 239, 239, 0.22);
-  background: rgba(0, 0, 0, 0.35);
+  /* Opaque match for 35% black over the tray. A translucent pile blends
+     with the burst behind the tray and the count lights up. */
+  background: #1b1b1b;
   color: var(--paper);
 }
 .bone-pile:disabled { opacity: 1; }
