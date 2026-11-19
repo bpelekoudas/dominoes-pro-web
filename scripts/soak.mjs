@@ -1504,7 +1504,7 @@ async function checkBigScores(browser, origin, outDir) {
   });
   for (const size of BIG_SCORE_SIZES) {
     const effects = ["glass", "lightning", "explosion"];
-    if (size.name === "390x844" || size.name === "904x1060") effects.push("fire", "money", "confetti");
+    if (size.name === "390x844" || size.name === "904x1060") effects.push("fire", "money", "confetti", "tumble");
     for (const fx of effects) {
       const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
       page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -1522,7 +1522,7 @@ async function checkBigScores(browser, origin, outDir) {
       await page.locator("[data-action=start-solo]").click();
       await page.waitForSelector(".hand-tile", { timeout: 25_000 });
       await settleCamera(page);
-    const scores = fx === "fire" || fx === "money" || fx === "confetti" ? [20, 25] : [20, 25, 30];
+    const scores = fx === "fire" || fx === "money" || fx === "confetti" || fx === "tumble" ? [20, 25] : [20, 25, 30];
     for (const score of scores) {
       await page.evaluate(({ next, effect }) => { window.__bigAward = next; window.__bigFx = effect; window.__bigHeld = 0; window.__momentLog = []; }, { next: score, effect: fx });
       let shown = null;
