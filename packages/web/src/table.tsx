@@ -144,6 +144,9 @@ export function Table({
   const settledKey = useRef("");
   const turnBudget = useRef<{ scale: number; roomW: number; roomH: number } | null>(null);
   const pinwheelRoom = useRef<{ roomW: number; roomH: number; openScale: number } | null>(null);
+  // Counts measure passes that set state before the browser paints. A resize
+  // can feed this effect its own update. Past a few passes that is a loop,
+  // and React unmounts the table (error 185).
   const layoutPasses = useRef(0);
   const [pinEpoch, setPinEpoch] = useState(0);
   const boardKeyNow = board?.center
@@ -281,11 +284,8 @@ export function Table({
     let measuredThisFrame = false;
     const measure = () => {
       if (measuredThisFrame) return;
-      // A resize can feed this effect its own setState. A handful of passes
-      // settles the camera. More than that is a loop, and React will unmount
-      // the table (error 185) before the felt is on screen.
       layoutPasses.current += 1;
-      if (layoutPasses.current > 12) {
+      if (layoutPasses.current > 8) {
         window.requestAnimationFrame(() => { layoutPasses.current = 0; });
         return;
       }
@@ -1109,6 +1109,18 @@ interface ScreenBox {
   height: number;
 }
 
+function sameScreenBoxes(current: ScreenBox[], next: ScreenBox[]): boolean {
+  if (current.length !== next.length) return false;
+  return current.every((box, index) => {
+    const other = next[index];
+    return box.id === other.id
+      && Math.abs(box.left - other.left) < 0.5
+      && Math.abs(box.top - other.top) < 0.5
+      && Math.abs(box.width - other.width) < 0.5
+      && Math.abs(box.height - other.height) < 0.5;
+  });
+}
+
 function useScreenBoxes(
   stageRef: { current: HTMLDivElement | null },
   fit: LayoutBox | null,
@@ -1116,16 +1128,18 @@ function useScreenBoxes(
   boxes: Array<LayoutBox & { id: string }>,
 ): ScreenBox[] {
   const [placed, setPlaced] = useState<ScreenBox[]>([]);
+  const boxesRef = useRef(boxes);
+  boxesRef.current = boxes;
+  // The array is a new object whenever the parent renders. The key is the
+  // content, so a fresh array of the same slots does not schedule another pass.
   const key = boxes.map((box) => `${box.id}:${box.x}:${box.y}:${box.w}:${box.h}`).join("|");
   useLayoutEffect(() => {
     const stage = stageRef.current;
-    if (!stage || !fit || boxes.length === 0) {
-      setPlaced([]);
-      return;
-    }
-    const origin = stage.getBoundingClientRect();
-    setPlaced(
-      boxes.map((box) => {
+    const slots = boxesRef.current;
+    setPlaced((current) => {
+      if (!stage || !fit || slots.length === 0) return current.length === 0 ? current : [];
+      const origin = stage.getBoundingClientRect();
+      const next = slots.map((box) => {
         const local = place(box, fit);
         return {
           id: box.id,
@@ -1134,9 +1148,10 @@ function useScreenBoxes(
           width: local.width * scale,
           height: local.height * scale,
         };
-      }),
-    );
-  }, [stageRef, fit, scale, key, boxes]);
+      });
+      return sameScreenBoxes(current, next) ? current : next;
+    });
+  }, [stageRef, fit, scale, key]);
   return placed;
 }
 
