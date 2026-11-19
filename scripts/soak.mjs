@@ -1615,7 +1615,7 @@ async function handStill(page) {
   });
   if (rects.length < 2) return { ok: false, reason: "The hand or the draw pile is missing." };
   await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => { node.style.visibility = "hidden"; });
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact], .score-pop").forEach((node) => { node.style.visibility = "hidden"; });
     const video = document.querySelector("[data-uhoh=blast]");
     if (video instanceof HTMLElement) video.style.visibility = "hidden";
   });
@@ -1628,7 +1628,7 @@ async function handStill(page) {
   const live = path.join("/tmp", `hand-live-${Date.now()}.png`);
   await page.screenshot({ path: live });
   await page.evaluate(() => {
-    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => { node.style.visibility = ""; });
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact], .score-pop").forEach((node) => { node.style.visibility = ""; });
   });
   const view = page.viewportSize();
   const before = rawRgb(bare);
@@ -1651,7 +1651,9 @@ async function handStill(page) {
       }
     }
   }
-  return { ok: delta <= 3 && samples > 20, delta, samples };
+  // The opaque disc drops a tile from about 108 to 16. A couple of channels
+  // of noise is the felt or a pip shifting one pixel between the two shots.
+  return { ok: delta <= 8 && samples > 20, delta, samples };
 }
 
 async function feltSeam(page) {
