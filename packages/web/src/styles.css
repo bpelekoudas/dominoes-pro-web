@@ -214,6 +214,8 @@ input {
   padding-top: max(12px, env(safe-area-inset-top));
 }
 .playbar {
+  position: relative;
+  z-index: 30;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
@@ -361,6 +363,7 @@ input {
 /* West sits above the left hand, north in the top-right corner, both in the
    dark bar above the felt. East sits in the dark tray, below the right hand. */
 .corner-bar {
+  position: relative;
   flex: none;
   display: flex;
   align-items: flex-start;
@@ -371,7 +374,7 @@ input {
   max-width: 100%;
   padding: 0 2px 4px;
   background: #141414;
-  z-index: 6;
+  z-index: 20;
 }
 .opponent-chip {
   display: flex;
@@ -440,7 +443,7 @@ input {
   z-index: 6;
 }
 .hand-tray:has(.opponent-chip[data-edge="right"]) .tray-notices {
-  padding-right: 72px;
+  padding-right: 104px;
   height: auto;
   min-height: 64px;
   max-height: none;
@@ -1065,7 +1068,7 @@ input {
 .actions { display: grid; gap: 8px; }
 .hand-tray {
   position: relative;
-  z-index: 3;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1989,14 +1992,22 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 
 .uhoh-blast {
   position: fixed;
-  z-index: 70;
+  z-index: 4;
   margin: 0;
   padding: 0;
   pointer-events: none;
   object-fit: cover;
-  background: #000;
+  background: transparent;
   mix-blend-mode: screen;
   transform: translate(-50%, -50%);
+  -webkit-mask-image: radial-gradient(circle at center, #000 50%, transparent 62%);
+  mask-image: radial-gradient(circle at center, #000 50%, transparent 62%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
   animation: uhoh-blast-out 1.2s linear forwards;
 }
 @keyframes uhoh-blast-out {

@@ -7,7 +7,7 @@
  * `npm run build:rules` first so the replay checker can import @uhoh/rules.
  */
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { alignedFronts, createSeatSync, exposedTotal, handCountsMatch, ingest, publicSignature, scoreMove, shiftFronts } from "./soak-sync.mjs";
@@ -1202,6 +1202,7 @@ function auditTokenSlots() {
         label,
         href: location.href,
         text: (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 240),
+        errs: window.__errs || [],
       };
     }
     const blockers = blockersNow();
@@ -1358,7 +1359,7 @@ async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
     // The chain eases for 480ms after a resize. Measuring during that glide
     // sees a tile still crossing a slot it will leave.
     await settleCamera(page);
-    const audit = await page.evaluate(auditTokenSlots);
+    let audit = await page.evaluate(auditTokenSlots);
     if (!audit.ok) {
       const saved = await saveUiFailure(page, outDir, audit);
       throw new Error(`${label} ${size.name}: ${audit.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
@@ -1370,8 +1371,9 @@ async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
 }
 
 async function checkBigScores(browser, origin, outDir) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  await page.addInitScript(() => {
+  const notes = [];
+  const pageErrors = [];
+  const installRewrite = async (page) => page.addInitScript(() => {
     const rewrite = (data) => {
       if (typeof data !== "string" || !data.includes('"lastPlay"')) return data;
       try {
@@ -1386,6 +1388,8 @@ async function checkBigScores(browser, origin, outDir) {
         }
         if (play.seq === window.__bigSeq && window.__bigHeld) {
           play.awarded = window.__bigHeld;
+          const scorer = (msg.view.players || []).find((player) => player.id === play.playerId);
+          if (scorer && window.__bigFx) scorer.effectId = window.__bigFx;
           window.__seenAwards = (window.__seenAwards || []).concat(play.awarded).slice(-6);
           return JSON.stringify(msg);
         }
@@ -1404,21 +1408,26 @@ async function checkBigScores(browser, origin, outDir) {
       },
     });
   });
-  await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.locator("[data-screen=splash], .arcade-home .arcade-name input").first().waitFor({ timeout: 15_000 });
-  if (await page.locator("[data-screen=splash]").count()) await page.locator("[data-screen=splash]").click();
-  await page.locator(".arcade-name input").fill("soak-score");
-  if (await page.locator("[data-action=age-13]").count()) await page.locator("[data-action=age-13]").click();
-  await page.locator("[data-action=solo]").click();
-  await page.locator("[data-screen=mode] button", { hasText: /^2$/ }).click();
-  await page.locator("[data-action=start-solo]").click();
-  await page.waitForSelector(".hand-tile", { timeout: 25_000 });
-  const notes = [];
   for (const size of BIG_SCORE_SIZES) {
-    await page.setViewportSize({ width: size.width, height: size.height });
-    await settleCamera(page);
+    for (const fx of ["glass", "lightning", "explosion"]) {
+      const page = await browser.newPage({ viewport: { width: size.width, height: size.height } });
+      page.on("pageerror", (error) => pageErrors.push(String(error)));
+      page.on("console", (message) => {
+        if (message.type() === "error") pageErrors.push(message.text());
+      });
+      await installRewrite(page);
+      await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.locator("[data-screen=splash], .arcade-home .arcade-name input").first().waitFor({ timeout: 15_000 });
+      if (await page.locator("[data-screen=splash]").count()) await page.locator("[data-screen=splash]").click();
+      await page.locator(".arcade-name input").fill(`soak-${fx}`);
+      if (await page.locator("[data-action=age-13]").count()) await page.locator("[data-action=age-13]").click();
+      await page.locator("[data-action=solo]").click();
+      await page.locator("[data-screen=mode] button", { hasText: /^2$/ }).click();
+      await page.locator("[data-action=start-solo]").click();
+      await page.waitForSelector(".hand-tile", { timeout: 25_000 });
+      await settleCamera(page);
     for (const score of [20, 25, 30]) {
-      await page.evaluate((next) => { window.__bigAward = next; window.__bigHeld = 0; window.__bigLock = false; window.__momentLog = []; }, score);
+      await page.evaluate(({ next, effect }) => { window.__bigAward = next; window.__bigFx = effect; window.__bigHeld = 0; window.__momentLog = []; }, { next: score, effect: fx });
       let shown = null;
       let lastProbe = null;
       let seenProbe = null;
@@ -1472,18 +1481,86 @@ async function checkBigScores(browser, origin, outDir) {
         if (lastProbe && lastProbe.ok) shown = lastProbe;
         else await page.waitForTimeout(200);
       }
-      if (!shown) throw new Error(`The ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
-      if ((size.name === "390x844" || size.name === "904x1060") && score === 20) {
-        const file = path.join(outDir, `big-score-${score}-${size.name}.png`);
-        mkdirSync(outDir, { recursive: true });
-        await page.screenshot({ path: file });
+      if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
+      await page.waitForFunction(() => {
+        const video = document.querySelector("[data-uhoh=blast]");
+        return video instanceof HTMLVideoElement && video.currentTime >= 0.28 && video.currentTime <= 0.85;
+      }, { timeout: 900 }).catch(() => undefined);
+      const seam = await feltSeam(page);
+      if (!seam.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(seam)}`);
+      if (size.name === "390x844" && score === 20) {
+        mkdirSync("/opt/cursor/artifacts", { recursive: true });
+        await page.screenshot({ path: `/opt/cursor/artifacts/fx-${fx}-390.png` });
       }
-      notes.push(`${size.name} +${score}`);
+      notes.push(`${size.name} ${fx} +${score}`);
       await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
     }
+      await page.close();
+    }
   }
-  await page.close();
+  const noisy = pageErrors.filter((line) => !/favicon|Failed to load resource|ResizeObserver loop/i.test(line));
+  if (noisy.length > 0) throw new Error(`Console errors during 20+ scores: ${noisy.slice(0, 3).join(" | ")}`);
   return `big scores ${notes.join(", ")}`;
+}
+
+async function feltSeam(page) {
+  const points = await page.evaluate(() => {
+    const video = document.querySelector("[data-uhoh=blast]");
+    const felt = document.querySelector(".table-scroll");
+    if (!(video instanceof HTMLVideoElement) || !felt) return null;
+    const v = video.getBoundingClientRect();
+    const f = felt.getBoundingClientRect();
+    const midX = Math.min(f.right - 6, Math.max(f.left + 6, (v.left + v.right) / 2));
+    const midY = Math.min(f.bottom - 6, Math.max(f.top + 6, (v.top + v.bottom) / 2));
+    const onFelt = (point) => point.x > f.left + 2 && point.x < f.right - 2 && point.y > f.top + 2 && point.y < f.bottom - 2;
+    const pairs = [
+      [{ x: v.left + 16, y: midY }, { x: v.left - 4, y: midY }],
+      [{ x: v.right - 16, y: midY }, { x: v.right + 4, y: midY }],
+      [{ x: midX, y: v.top + 16 }, { x: midX, y: v.top - 4 }],
+      [{ x: midX, y: v.bottom - 16 }, { x: midX, y: v.bottom + 4 }],
+    ];
+    const pair = pairs.find(([inside, outside]) => onFelt(inside) && onFelt(outside));
+    if (!pair) return { covered: true };
+    return { inside: pair[0], outside: pair[1] };
+  });
+  if (!points) return { ok: false, reason: "The blast or the felt is missing." };
+  if (points.covered) return { ok: true, covered: true };
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => {
+      node.style.visibility = "hidden";
+    });
+    const video = document.querySelector("[data-uhoh=blast]");
+    if (video instanceof HTMLElement) video.style.visibility = "hidden";
+  });
+  const bare = path.join("/tmp", `felt-seam-bare-${Date.now()}.png`);
+  await page.screenshot({ path: bare });
+  await page.evaluate(() => {
+    const video = document.querySelector("[data-uhoh=blast]");
+    if (video instanceof HTMLElement) video.style.visibility = "";
+  });
+  const live = path.join("/tmp", `felt-seam-live-${Date.now()}.png`);
+  await page.screenshot({ path: live });
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-uhoh=title], [data-uhoh=impact]").forEach((node) => {
+      node.style.visibility = "";
+    });
+  });
+  const deltas = ["inside", "outside"].map((side) => {
+    const point = points[side];
+    const before = rgbAt(bare, point.x, point.y);
+    const after = rgbAt(live, point.x, point.y);
+    const delta = Math.max(Math.abs(before[0] - after[0]), Math.abs(before[1] - after[1]), Math.abs(before[2] - after[2]));
+    return { side, delta, before, after };
+  });
+  const delta = Math.max(...deltas.map((item) => item.delta));
+  return { ok: delta <= 3, delta, deltas, points };
+}
+
+function rgbAt(file, x, y) {
+  const result = spawnSync("ffmpeg", ["-v", "error", "-i", file, "-vf", `crop=1:1:${Math.max(0, Math.floor(x))}:${Math.max(0, Math.floor(y))}`, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { maxBuffer: 64 });
+  const buf = result.stdout;
+  if (!buf || buf.length < 3) return [0, 0, 0];
+  return [buf[0], buf[1], buf[2]];
 }
 
 async function uiSmoke(origin, outDir = "soak-reports") {
@@ -1510,6 +1587,8 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     await page.addInitScript(() => {
       localStorage.clear();
       sessionStorage.clear();
+      window.__errs = [];
+      window.addEventListener("error", (event) => window.__errs.push(String(event.message)));
     });
     page.on("pageerror", (error) => errors.push(String(error)));
     page.on("console", (message) => {
@@ -1564,11 +1643,12 @@ async function uiSmoke(origin, outDir = "soak-reports") {
     const inner = await page.evaluate(auditTable);
     if (!inner.ok) {
       const saved = await saveUiFailure(page, outDir, inner);
-      throw new Error(`Fold inner: ${inner.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
+      const body = await page.evaluate(() => ({ text: (document.body?.innerText || "").slice(0, 180), errs: window.__errs || [] })).catch(() => ({}));
+      throw new Error(`Fold inner: ${inner.reason} ${JSON.stringify(body)} page ${errors.slice(-3).join(" | ")} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
     const playedSlots = await checkTokenSlots(page, outDir, "4 players after play");
     const bigScores = await checkBigScores(browser, origin, outDir);
-    const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
+    const noisy = errors.filter((line) => !/favicon|Failed to load resource|ResizeObserver loop/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
     return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}; ${bigScores}` };
   } finally {

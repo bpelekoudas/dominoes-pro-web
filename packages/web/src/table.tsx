@@ -277,7 +277,13 @@ export function Table({
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport || !frame || !liveBoard?.center) return;
+    let measuredThisFrame = false;
     const measure = () => {
+      if (measuredThisFrame) return;
+      measuredThisFrame = true;
+      window.requestAnimationFrame(() => {
+        measuredThisFrame = false;
+      });
       const handsClear = handClearance(viewport);
       setClip((current) => (sameInsets(current, handsClear) ? current : handsClear));
       // The overlay must not zoom the chain again once the last tile is inside
@@ -526,13 +532,24 @@ export function Table({
       }
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    let measureFrame = 0;
+    const schedule = () => {
+      if (measureFrame) return;
+      measureFrame = window.requestAnimationFrame(() => {
+        measureFrame = 0;
+        measure();
+      });
+    };
+    const observer = new ResizeObserver(schedule);
     observer.observe(viewport);
     const app = viewport.closest(".felt-app");
     app?.querySelectorAll(".playbar, .hand-tray, .edge-top, .edge-badge, .edge-slivers, .token-slot, .seat-pips, .talk-line").forEach((node) => {
       observer.observe(node);
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(measureFrame);
+    };
   }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId, view.lastPlay?.seq, flightDone]);
 
   useLayoutEffect(() => {
@@ -1132,14 +1149,14 @@ function useBigMoment(
       return null;
     });
   };
-  // Start the moment in this render. Waiting for an effect let the next
-  // state arrive first, and the word never faded in. A later small play
-  // does not clear it. The timer does, and it will not restart the same play.
-  if (liveKey && lastPlay && liveKey !== skip.current && moment?.key !== liveKey) {
+  // Start before paint. A later small play does not clear it. The timer
+  // does, and the same play does not start again.
+  useLayoutEffect(() => {
+    if (!liveKey || !lastPlay || liveKey === skip.current) return;
     skip.current = liveKey;
     const scorer = players.find((player) => player.id === lastPlay.playerId);
     setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId, effect: normalizeFx(scorer?.effectId) });
-  }
+  }, [liveKey, lastPlay, players]);
   useEffect(() => {
     if (!moment) return;
     const key = moment.key;

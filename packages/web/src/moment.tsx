@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { MOTION, motionMs } from "../../rules/src/motion.js";
-import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, videoFxAsset, warmVideoFx, type FxId } from "./fx.js";
+import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, peakReach, readEquippedFx, videoFxAsset, warmVideoFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { scorePopupText } from "./feel/score-delta.js";
 import { playUhOh, unlockSound } from "./sound.js";
@@ -289,14 +289,12 @@ export function MomentLayer({
  * The word shrinks only as far as it must to find that clear spot.
  */
 function blastBox(anchor: HitBox | null): { left: number; top: number; size: number } {
-  const size = Math.min(window.innerWidth, window.innerHeight, 520) * 0.78;
-  const rawX = anchor ? anchor.x : window.innerWidth / 2;
-  const rawY = anchor ? anchor.y : window.innerHeight * 0.46;
-  return {
-    left: Math.min(window.innerWidth - size / 2, Math.max(size / 2, rawX)),
-    top: Math.min(window.innerHeight - size / 2, Math.max(size / 2, rawY)),
-    size,
-  };
+  const x = anchor ? anchor.x : window.innerWidth / 2;
+  const y = anchor ? anchor.y : window.innerHeight * 0.46;
+  // peakReach is how far the burst travels. The square is about 1.6 times that
+  // radius, so the circle covers ~80% of the viewport. It may run off the felt.
+  const size = peakReach(window.innerWidth, window.innerHeight, x, y) * 1.6;
+  return { left: x, top: y, size };
 }
 
 function clearTitleSpot(anchor: HitBox | null): { left: number; top: number; font: number } {
