@@ -1666,8 +1666,8 @@ async function checkBigScores(browser, origin, outDir) {
         });
       });
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060")) {
-        const label = size.name === "390x844" ? "390" : "904";
+      if (!process.env.SOAK_PASSES && score === 20 && (size.name === "390x844" || size.name === "904x1060" || fx === "legend")) {
+        const label = size.name.split("x")[0];
         const shot = fx === "quake" ? "earthquake" : fx;
         // The clip fades itself out on a 1.2s clock. Hold it open for this still,
         // taken before the pixel checks, so the picture is the middle of the burst.

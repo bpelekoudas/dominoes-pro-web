@@ -232,7 +232,7 @@ export function MomentLayer({
   const hitStyle = anchor
     ? { left: anchor.x, top: anchor.y, width: anchor.w, height: anchor.h }
     : { left: "50%", top: "46%", width: 44, height: 88 };
-  const titleAt = clearTitleSpot(anchor);
+  const titleAt = clearTitleSpot(anchor, fxId);
 
   // Every 20+ plays the equipped burst. Glass is the default. Glass, fire,
   // lightning, money, confetti, tumble, earthquake, trophy rain, fireworks,
@@ -345,10 +345,20 @@ function blastBox(anchor: HitBox | null): { left: number; top: number; size: num
   return { left: x, top: y, size };
 }
 
-function clearTitleSpot(anchor: HitBox | null): { left: number; top: number; font: number } {
+function clearTitleSpot(anchor: HitBox | null, fxId?: string): { left: number; top: number; font: number } {
   const blocked = [...document.querySelectorAll("[data-board-tile], .edge-badge, .seat-chip, .hand-tile, .hand-tray, .playbar")]
     .map((node) => node.getBoundingClientRect())
     .filter((box) => box.width > 2 && box.height > 2);
+  // Legend's crest hold is above the tile (about y=165 of the 480 clip). The
+  // big score must not cover it. Other effects keep the spot above the tile.
+  if (fxId === "legend" && anchor) {
+    const size = peakReach(window.innerWidth, window.innerHeight, anchor.x, anchor.y) * 1.6;
+    const left = anchor.x - size / 2 + (150 / 480) * size;
+    const right = anchor.x - size / 2 + (330 / 480) * size;
+    const top = anchor.y - size / 2 + (105 / 480) * size;
+    const bottom = anchor.y - size / 2 + (210 / 480) * size;
+    blocked.push({ left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON() { return {}; } });
+  }
   const nominal = Math.min(window.innerWidth * 0.415, 250);
   const fonts = [nominal, nominal * 0.78, nominal * 0.62, 96, 78];
   const spotsFor = (height: number) => {
@@ -359,7 +369,12 @@ function clearTitleSpot(anchor: HitBox | null): { left: number; top: number; fon
       { left: window.innerWidth * 0.22, top: window.innerHeight * 0.46 },
       { left: window.innerWidth * 0.78, top: window.innerHeight * 0.46 },
     ];
-    if (anchor) {
+    if (anchor && fxId === "legend") {
+      spots.unshift({
+        left: anchor.x,
+        top: Math.min(window.innerHeight - height / 2 - 8, anchor.y + anchor.h / 2 + height / 2 + 18),
+      });
+    } else if (anchor) {
       spots.unshift({
         left: anchor.x,
         top: Math.max(height / 2 + 8, anchor.y - anchor.h / 2 - height / 2 - 14),
