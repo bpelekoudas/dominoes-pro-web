@@ -1370,6 +1370,100 @@ async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
   return notes.join("; ");
 }
 
+async function stressFoldCover(browser, origin) {
+  const notes = [];
+  for (let hand = 1; hand <= 2; hand += 1) {
+    const page = await browser.newPage({ viewport: { width: 344, height: 882 } });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
+    page.on("console", (message) => {
+      if (message.type() === "error") errors.push(message.text());
+    });
+    await page.addInitScript(() => {
+      const rewrite = (data) => {
+        if (typeof data !== "string" || !data.includes('"lastPlay"')) return data;
+        try {
+          const msg = JSON.parse(data);
+          const play = msg.view && msg.view.lastPlay;
+          if (!play || !play.tileId) return data;
+          const award = window.__bigAward;
+          if (award && play.seq !== window.__bigSeq) {
+            window.__bigSeq = play.seq;
+            window.__bigHeld = award;
+            window.__bigAward = 0;
+          }
+          if (play.seq === window.__bigSeq && window.__bigHeld) {
+            play.awarded = window.__bigHeld;
+            return JSON.stringify(msg);
+          }
+          return data;
+        } catch {
+          return data;
+        }
+      };
+      const desc = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+      Object.defineProperty(WebSocket.prototype, "onmessage", {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get() { return desc.get.call(this); },
+        set(fn) { desc.set.call(this, (event) => fn({ data: rewrite(event.data) })); },
+      });
+    });
+    await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    if (await page.locator("[data-screen=splash]").count()) await page.locator("[data-screen=splash]").click();
+    await page.locator(".arcade-name input").fill(`fold-${hand}`);
+    if (await page.locator("[data-action=age-13]").count()) await page.locator("[data-action=age-13]").click();
+    await page.locator("[data-action=solo]").click();
+    await page.locator("[data-screen=mode] button", { hasText: /^4$/ }).click();
+    await page.locator("[data-action=start-solo]").click();
+    await page.waitForSelector(".token-slot", { timeout: 25_000 });
+    for (const score of [20, 25, 30]) {
+      await page.evaluate((next) => { window.__bigAward = next; window.__bigHeld = 0; }, score);
+      let shown = false;
+      for (let watch = 0; watch < 40 && !shown; watch += 1) {
+        shown = await page.evaluate((next) => {
+          const title = document.querySelector(`[data-uhoh="title"][data-awarded="${next}"]`);
+          const video = document.querySelector("[data-uhoh=blast]");
+          return Boolean(title) && video instanceof HTMLVideoElement && video.currentTime > 0.04;
+        }, score);
+        if (shown) break;
+        await page.evaluate(() => {
+          if (!window.__bigAward) return;
+          document.querySelector(".hint-dismiss")?.click();
+          const playable = document.querySelector(".hand-tile[data-playable=true]");
+          const selected = document.querySelector(".hand-tile.selected");
+          if (!selected && playable instanceof HTMLElement) playable.click();
+          else {
+            const hot = document.querySelector("[data-end-id][data-hot=true]");
+            if (hot instanceof HTMLElement) hot.click();
+            else if (playable instanceof HTMLElement) playable.click();
+            else document.querySelector("[data-action=draw], [data-action=knock], [data-action=continue]")?.click();
+          }
+        });
+        await page.waitForTimeout(150);
+      }
+      if (!shown) throw new Error(`Fold cover hand ${hand} never showed +${score}`);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(200);
+      await page.setViewportSize({ width: 344, height: 882 });
+      await page.waitForTimeout(400);
+      const snap = await page.evaluate(() => ({
+        slots: document.querySelectorAll("[data-token-slot]").length,
+        text: (document.body.innerText || "").replace(/\s+/g, " ").trim().slice(0, 80),
+      }));
+      if (snap.slots < 4) {
+        throw new Error(`Fold cover hand ${hand} lost its seats during +${score}: ${JSON.stringify(snap)}`);
+      }
+      notes.push(`hand ${hand} +${score} slots ${snap.slots}`);
+      await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
+    }
+    const noisy = errors.filter((line) => /185|Maximum update depth/i.test(line));
+    if (noisy.length > 0) throw new Error(`Fold cover hand ${hand} hit the update loop: ${noisy[0]}`);
+    await page.close();
+  }
+  return `fold cover loop ${notes.join(", ")}`;
+}
+
 async function checkBigScores(browser, origin, outDir) {
   const notes = [];
   const pageErrors = [];
@@ -1647,10 +1741,11 @@ async function uiSmoke(origin, outDir = "soak-reports") {
       throw new Error(`Fold inner: ${inner.reason} ${JSON.stringify(body)} page ${errors.slice(-3).join(" | ")} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
     const playedSlots = await checkTokenSlots(page, outDir, "4 players after play");
+    const foldCover = await stressFoldCover(browser, origin);
     const bigScores = await checkBigScores(browser, origin, outDir);
     const noisy = errors.filter((line) => !/favicon|Failed to load resource|ResizeObserver loop/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}; ${bigScores}` };
+    return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}; ${foldCover}; ${bigScores}` };
   } finally {
     await browser.close();
   }
