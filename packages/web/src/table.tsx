@@ -144,6 +144,7 @@ export function Table({
   const settledKey = useRef("");
   const turnBudget = useRef<{ scale: number; roomW: number; roomH: number } | null>(null);
   const pinwheelRoom = useRef<{ roomW: number; roomH: number; openScale: number } | null>(null);
+  const layoutPasses = useRef(0);
   const [pinEpoch, setPinEpoch] = useState(0);
   const boardKeyNow = board?.center
     ? [board.center.tileId, ...(["west", "east", "north", "south"] as const).flatMap((arm) => board.arms[arm].map((tile) => tile.tileId))].join(",")
@@ -280,9 +281,18 @@ export function Table({
     let measuredThisFrame = false;
     const measure = () => {
       if (measuredThisFrame) return;
+      // A resize can feed this effect its own setState. A handful of passes
+      // settles the camera. More than that is a loop, and React will unmount
+      // the table (error 185) before the felt is on screen.
+      layoutPasses.current += 1;
+      if (layoutPasses.current > 12) {
+        window.requestAnimationFrame(() => { layoutPasses.current = 0; });
+        return;
+      }
       measuredThisFrame = true;
       window.requestAnimationFrame(() => {
         measuredThisFrame = false;
+        layoutPasses.current = 0;
       });
       const handsClear = handClearance(viewport);
       setClip((current) => (sameInsets(current, handsClear) ? current : handsClear));
@@ -328,8 +338,10 @@ export function Table({
       const nextPin = { roomW: pinRoom.w, roomH: pinRoom.h, openScale };
       const prevPin = pinwheelRoom.current;
       pinwheelRoom.current = nextPin;
-      if (!prevPin || prevPin.roomW !== nextPin.roomW || prevPin.roomH !== nextPin.roomH
-        || Math.abs(prevPin.openScale - nextPin.openScale) > 1e-4) {
+      if (!prevPin
+        || Math.abs(prevPin.roomW - nextPin.roomW) > 0.5
+        || Math.abs(prevPin.roomH - nextPin.roomH) > 0.5
+        || Math.abs(prevPin.openScale - nextPin.openScale) > 1e-3) {
         setPinEpoch((value) => value + 1);
       }
       const feltBox = viewport.getBoundingClientRect();
