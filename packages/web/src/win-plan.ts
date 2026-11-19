@@ -347,3 +347,98 @@ export function revealOrigin(
   top = Math.max(8, Math.min(top, viewport.height - row.height - 8));
   return { left, top };
 }
+
+const REVEAL_PAD = 4;
+const REVEAL_STEP = 8;
+
+/** Felt first, then the header or the tray, so a reveal can leave the chain. */
+export function revealRooms(
+  edge: "left" | "top" | "right" | "bottom",
+  felt: Box | null,
+  viewport: { width: number; height: number },
+): Box[] {
+  const rooms: Box[] = [];
+  if (felt && felt.width > 0 && felt.height > 0) {
+    rooms.push({
+      left: felt.left + REVEAL_PAD,
+      top: felt.top + REVEAL_PAD,
+      right: felt.right - REVEAL_PAD,
+      bottom: felt.bottom - REVEAL_PAD,
+      width: Math.max(0, felt.width - REVEAL_PAD * 2),
+      height: Math.max(0, felt.height - REVEAL_PAD * 2),
+    });
+  }
+  const headerBottom = felt ? felt.top - REVEAL_PAD : 72;
+  const trayTop = felt ? felt.bottom + REVEAL_PAD : viewport.height - 140;
+  const header: Box = {
+    left: 8,
+    top: 8,
+    right: viewport.width - 8,
+    bottom: Math.max(8, headerBottom),
+    width: Math.max(0, viewport.width - 16),
+    height: Math.max(0, headerBottom - 8),
+  };
+  const tray: Box = {
+    left: 8,
+    top: trayTop,
+    right: viewport.width - 8,
+    bottom: viewport.height - 8,
+    width: Math.max(0, viewport.width - 16),
+    height: Math.max(0, viewport.height - 8 - trayTop),
+  };
+  if (edge === "bottom") rooms.push(tray, header);
+  else rooms.push(header, tray);
+  return rooms;
+}
+
+function revealCovers(
+  left: number,
+  top: number,
+  row: { width: number; height: number },
+  obstacles: readonly Box[],
+): boolean {
+  const near = {
+    left: left - REVEAL_PAD,
+    top: top - REVEAL_PAD,
+    right: left + row.width + REVEAL_PAD,
+    bottom: top + row.height + REVEAL_PAD,
+  };
+  return obstacles.some((box) => near.left < box.right && near.right > box.left && near.top < box.bottom && near.bottom > box.top);
+}
+
+function revealSteps(min: number, max: number): number[] {
+  const out: number[] = [];
+  for (let value = min; value < max; value += REVEAL_STEP) out.push(value);
+  out.push(max);
+  return out;
+}
+
+/**
+ * Keep the rail-side spot when it misses the chain. Otherwise take the nearest
+ * open cell in the felt, and only then a cell off the felt.
+ */
+export function clearReveal(
+  preferred: { left: number; top: number },
+  row: { width: number; height: number },
+  obstacles: readonly Box[],
+  rooms: readonly Box[],
+): { left: number; top: number } {
+  if (!revealCovers(preferred.left, preferred.top, row, obstacles)) return preferred;
+  const px = preferred.left + row.width / 2;
+  const py = preferred.top + row.height / 2;
+  for (const room of rooms) {
+    const maxLeft = room.right - row.width;
+    const maxTop = room.bottom - row.height;
+    if (maxLeft < room.left || maxTop < room.top) continue;
+    let best: { left: number; top: number; dist: number } | null = null;
+    for (const top of revealSteps(room.top, maxTop)) {
+      for (const left of revealSteps(room.left, maxLeft)) {
+        if (revealCovers(left, top, row, obstacles)) continue;
+        const dist = (left + row.width / 2 - px) ** 2 + (top + row.height / 2 - py) ** 2;
+        if (!best || dist < best.dist) best = { left, top, dist };
+      }
+    }
+    if (best) return { left: best.left, top: best.top };
+  }
+  return preferred;
+}

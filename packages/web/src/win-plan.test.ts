@@ -17,7 +17,9 @@ import {
   lastLandMs,
   pipPosition,
   planWinPips,
+  clearReveal,
   revealOrigin,
+  revealRooms,
   scoreAt,
   uhOhWaitMs,
   winBannerCopy,
@@ -197,5 +199,32 @@ describe("win banners", () => {
     );
     expect(top.top).toBe(62);
     expect(top.left).toBe(12);
+  });
+
+  it("moves a reveal off a chain tile into free felt", () => {
+    const felt = { left: 0, top: 90, right: 412, bottom: 720, width: 412, height: 630 };
+    const row = { width: 72, height: 90 };
+    const preferred = { left: 300, top: 130 };
+    const tip = { left: 330, top: 140, right: 370, bottom: 210, width: 40, height: 70 };
+    const rooms = revealRooms("right", felt, { width: 412, height: 915 });
+    const spot = clearReveal(preferred, row, [tip], rooms);
+    const box = { left: spot.left - 4, top: spot.top - 4, right: spot.left + row.width + 4, bottom: spot.top + row.height + 4 };
+    expect(box.right <= tip.left || box.left >= tip.right || box.bottom <= tip.top || box.top >= tip.bottom).toBe(true);
+    expect(spot.left).toBeGreaterThanOrEqual(felt.left);
+    expect(spot.top).toBeGreaterThanOrEqual(felt.top);
+    expect(spot.left + row.width).toBeLessThanOrEqual(felt.right);
+    expect(spot.top + row.height).toBeLessThanOrEqual(felt.bottom);
+    expect(spot.left).toBeLessThan(preferred.left);
+  });
+
+  it("parks the reveal off the felt when the felt is full", () => {
+    const felt = { left: 0, top: 90, right: 412, bottom: 720, width: 412, height: 630 };
+    const row = { width: 72, height: 90 };
+    const rooms = revealRooms("right", felt, { width: 412, height: 915 });
+    const spot = clearReveal({ left: 300, top: 130 }, row, [felt], rooms);
+    const onFelt = spot.top + row.height > felt.top && spot.top < felt.bottom && spot.left + row.width > felt.left && spot.left < felt.right;
+    expect(onFelt).toBe(false);
+    const covers = spot.left - 4 < felt.right && spot.left + row.width + 4 > felt.left && spot.top - 4 < felt.bottom && spot.top + row.height + 4 > felt.top;
+    expect(covers).toBe(false);
   });
 });

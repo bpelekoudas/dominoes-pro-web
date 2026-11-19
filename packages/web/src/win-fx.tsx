@@ -27,10 +27,13 @@ import {
   matchImpact,
   pipPosition,
   planWinPips,
+  clearReveal,
   revealOrigin,
+  revealRooms,
   scoreAt,
   uhOhWaitMs,
   winBannerCopy,
+  type Box,
   type Point,
   type WinPlan,
 } from "./win-plan";
@@ -98,6 +101,10 @@ function playWinStingOnce(key: string, kind: "hand" | "game" | "match" | "lineup
 
 function cssEscape(value: string): string {
   return window.CSS?.escape ? window.CSS.escape(value) : value.replace(/["\\]/g, "");
+}
+
+function domBox(rect: DOMRect): Box {
+  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height };
 }
 
 function baseScores(view: PlayerView): Record<string, number> {
@@ -417,13 +424,18 @@ export function WinShow({
   const place = () => {
     const root = rootRef.current;
     if (!root) return;
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const feltNode = document.querySelector(".table-scroll");
+    const felt = feltNode ? domBox(feltNode.getBoundingClientRect()) : null;
+    const chain = [...document.querySelectorAll<HTMLElement>("[data-board-tile]")].map((tile) => domBox(tile.getBoundingClientRect()));
+    const taken: Box[] = [];
     for (const seat of revealsRef.current) {
       const node = root.querySelector(`[data-win-reveal="${cssEscape(seat.playerId)}"]`) as HTMLElement | null;
       const rail = document.querySelector(`.rail[data-player-id="${cssEscape(seat.playerId)}"]`);
       if (!node || !rail) continue;
       const railBox = rail.getBoundingClientRect();
       const row = { width: node.offsetWidth || 32, height: node.offsetHeight || 64 };
-      const spot = revealOrigin(
+      const preferred = revealOrigin(
         seat.edge,
         {
           left: railBox.left,
@@ -434,10 +446,19 @@ export function WinShow({
           height: railBox.height,
         },
         row,
-        { width: window.innerWidth, height: window.innerHeight },
+        viewport,
       );
+      const spot = clearReveal(preferred, row, [...chain, ...taken], revealRooms(seat.edge, felt, viewport));
       node.style.left = `${spot.left}px`;
       node.style.top = `${spot.top}px`;
+      taken.push({
+        left: spot.left,
+        top: spot.top,
+        right: spot.left + row.width,
+        bottom: spot.top + row.height,
+        width: row.width,
+        height: row.height,
+      });
     }
   };
 
