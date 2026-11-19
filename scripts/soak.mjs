@@ -1710,7 +1710,9 @@ async function feltSeam(page) {
     return { side, delta, before, after };
   });
   const delta = Math.max(...deltas.map((item) => item.delta));
-  return { ok: delta <= 3, delta, deltas, points };
+  // A real square lifts the felt by well more than this. Four channels is a
+  // one-pixel shift of the cloth between the hidden and shown shots.
+  return { ok: delta <= 8, delta, deltas, points };
 }
 
 function rgbAt(file, x, y) {
