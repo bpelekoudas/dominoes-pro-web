@@ -128,6 +128,11 @@ describe("winner pop", () => {
     }
     expect(placed!.box.bottom).toBeLessThan(tray.top);
     expect(placed!.box.top).toBeGreaterThan(48);
+    // A full-width felt between the header and the tray is where that hold sits.
+    // Blocking that rectangle is what kept the phone pop from mounting at all.
+    const felt = box(0, 110, 390, 563);
+    expect(overlaps(placed!.box, felt, 0)).toBe(true);
+    expect(overlaps(placed!.box, tile, 0)).toBe(false);
 
     const game = placeWinnerPop({
       kind: "game",

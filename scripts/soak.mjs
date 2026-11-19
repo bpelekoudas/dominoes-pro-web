@@ -1732,8 +1732,10 @@ function auditTable() {
     }
     const avatar = bar.querySelector(".avatar")?.getBoundingClientRect();
     const col = bar.querySelector(".game-col, .chip-text")?.getBoundingClientRect();
+    const talk = bar.querySelector(".talk-line")?.getBoundingClientRect();
     if (!avatar || !col || avatar.width < 2 || col.width < 2) continue;
-    const content = Math.max(avatar.right, col.right) - Math.min(avatar.left, col.left);
+    const parts = [avatar, col, talk].filter((part) => part && part.width > 2);
+    const content = Math.max(...parts.map((part) => part.right)) - Math.min(...parts.map((part) => part.left));
     if (box.width - content > 36) {
       return {
         ok: false,

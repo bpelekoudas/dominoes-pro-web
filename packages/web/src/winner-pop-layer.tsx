@@ -229,8 +229,11 @@ function findSeat(id: string): { edge: SeatEdge; avatar: Box; score: Box } | nul
 }
 
 function collectObstacles(): Box[] {
+  // The felt itself is not an obstacle. On a phone it is the only open cell,
+  // and treating the whole felt as blocked means the winner never mounts.
+  // Tiles, the rack, and badges still keep the hold off the chain.
   const nodes = document.querySelectorAll(
-    "[data-board-tile], .table-scroll, .hand-tile, .edge-badge, .seat-chip, .edge-slivers, .hand-tray, .playbar, .win-reveal, .bone-pile, .feel-call span, .feel-tally",
+    "[data-board-tile], .hand-tile, .edge-badge, .seat-chip, .edge-slivers, .hand-tray, .playbar, .win-reveal, .bone-pile, .feel-call span, .feel-tally",
   );
   const boxes: Box[] = [];
   for (const node of nodes) {
