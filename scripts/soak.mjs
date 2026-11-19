@@ -28,6 +28,12 @@ const MODES = [
 
 /** Galaxy Z Fold 7 inner screen in CSS pixels: 1968×2184 at the cover's 2.625 scale. */
 const FOLD_INNER = { width: 751, height: 832 };
+const BIG_SCORE_SIZES = [
+  { name: "390x844", width: 390, height: 844 },
+  { name: "412x915", width: 412, height: 915 },
+  { name: "344x882", width: 344, height: 882 },
+  { name: "904x1060", width: 904, height: 1060 },
+];
 const TOKEN_VIEWPORTS = [
   { name: "390x844", width: 390, height: 844 },
   { name: "344x882", width: 344, height: 882 },
@@ -1187,7 +1193,17 @@ function auditTokenSlots() {
   const checkSlots = (label, placeToken) => {
     const slots = [...document.querySelectorAll("[data-token-slot]")];
     const edges = slots.map((slot) => slot.getAttribute("data-edge") || "bottom").sort();
-    if (slots.length < 2) return { ok: false, reason: "Every seat needs a token slot.", count: slots.length, edges, label };
+    if (slots.length < 2) {
+      return {
+        ok: false,
+        reason: "Every seat needs a token slot.",
+        count: slots.length,
+        edges,
+        label,
+        href: location.href,
+        text: (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 240),
+      };
+    }
     const blockers = blockersNow();
     for (const slot of slots) {
       const box = boxOf(slot);
@@ -1353,6 +1369,123 @@ async function checkTokenSlots(page, outDir, label, { full = false } = {}) {
   return notes.join("; ");
 }
 
+async function checkBigScores(browser, origin, outDir) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => {
+    const rewrite = (data) => {
+      if (typeof data !== "string" || !data.includes('"lastPlay"')) return data;
+      try {
+        const msg = JSON.parse(data);
+        const play = msg.view && msg.view.lastPlay;
+        if (!play || !play.tileId) return data;
+        const award = window.__bigAward;
+        if (award && play.seq !== window.__bigSeq) {
+          window.__bigSeq = play.seq;
+          window.__bigHeld = award;
+          window.__bigAward = 0;
+        }
+        if (play.seq === window.__bigSeq && window.__bigHeld) {
+          play.awarded = window.__bigHeld;
+          window.__seenAwards = (window.__seenAwards || []).concat(play.awarded).slice(-6);
+          return JSON.stringify(msg);
+        }
+        return data;
+      } catch {
+        return data;
+      }
+    };
+    const desc = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+    Object.defineProperty(WebSocket.prototype, "onmessage", {
+      configurable: true,
+      enumerable: desc.enumerable,
+      get() { return desc.get.call(this); },
+      set(fn) {
+        desc.set.call(this, (event) => fn({ data: rewrite(event.data) }));
+      },
+    });
+  });
+  await page.goto(origin, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.locator("[data-screen=splash], .arcade-home .arcade-name input").first().waitFor({ timeout: 15_000 });
+  if (await page.locator("[data-screen=splash]").count()) await page.locator("[data-screen=splash]").click();
+  await page.locator(".arcade-name input").fill("soak-score");
+  if (await page.locator("[data-action=age-13]").count()) await page.locator("[data-action=age-13]").click();
+  await page.locator("[data-action=solo]").click();
+  await page.locator("[data-screen=mode] button", { hasText: /^2$/ }).click();
+  await page.locator("[data-action=start-solo]").click();
+  await page.waitForSelector(".hand-tile", { timeout: 25_000 });
+  const notes = [];
+  for (const size of BIG_SCORE_SIZES) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await settleCamera(page);
+    for (const score of [20, 25, 30]) {
+      await page.evaluate((next) => { window.__bigAward = next; window.__bigHeld = 0; window.__bigLock = false; window.__momentLog = []; }, score);
+      let shown = null;
+      let lastProbe = null;
+      let seenProbe = null;
+      for (let watch = 0; watch < 40 && !shown; watch += 1) {
+        const armed = await page.evaluate(() => Boolean(window.__bigAward));
+        if (armed) {
+          await page.evaluate(() => {
+            document.querySelector(".hint-dismiss")?.click();
+            const playable = document.querySelector(".hand-tile[data-playable=true]");
+            const selected = document.querySelector(".hand-tile.selected");
+            if (!selected && playable instanceof HTMLElement) playable.click();
+            else {
+              const hot = document.querySelector("[data-end-id][data-hot=true]");
+              if (hot instanceof HTMLElement) hot.click();
+              else if (playable instanceof HTMLElement) playable.click();
+              else {
+                const draw = document.querySelector("[data-action=draw], [data-action=knock], [data-action=continue]");
+                if (draw instanceof HTMLElement) draw.click();
+              }
+            }
+          });
+        }
+        lastProbe = await page.evaluate((next) => {
+          const title = document.querySelector(`[data-uhoh="title"][data-awarded="${next}"]`);
+          const video = document.querySelector("[data-uhoh=blast]");
+          const shatter = document.querySelector("[data-uhoh=shatter]");
+          const time = video instanceof HTMLVideoElement ? video.currentTime : 0;
+          const played = time > 0.04;
+          const felt = document.querySelector(".table-scroll");
+          const snap = { moment: felt?.getAttribute("data-moment") || "", award: felt?.getAttribute("data-live-award") || "", phase: document.documentElement.dataset.uhohPhase || "", time: Number(time.toFixed(2)) };
+          window.__momentLog = (window.__momentLog || []).concat(snap).slice(-8);
+          if (!title || (!played && !shatter)) {
+            return { ok: false, award: window.__bigAward, held: window.__bigHeld, seq: window.__bigSeq, seen: window.__seenAwards || [], glass: Boolean(shatter), video: Boolean(video), time: snap.time, phase: snap.phase, titles: [...document.querySelectorAll("[data-uhoh=title]")].map((node) => node.getAttribute("data-awarded")), moment: snap.moment, liveAward: snap.award, log: window.__momentLog, anchor: felt?.getAttribute("data-anchor") || "", lastTile: felt?.getAttribute("data-last-tile") || "", tiles: document.querySelectorAll("[data-board-tile]").length };
+          }
+          const opacity = Number(getComputedStyle(title).opacity);
+          const box = title.getBoundingClientRect();
+          const hits = [...document.querySelectorAll("[data-board-tile], .edge-badge, .seat-chip")].filter((node) => {
+            const other = node.getBoundingClientRect();
+            if (other.width < 2 || other.height < 2) return false;
+            return box.left < other.right - 2 && box.right > other.left + 2 && box.top < other.bottom - 2 && box.bottom > other.top + 2;
+          }).map((node) => node.getAttribute("data-board-tile") || node.className);
+          const z = Number(getComputedStyle(title).zIndex);
+          const tap = video ? getComputedStyle(video).pointerEvents : "none";
+          // The clip is on screen immediately. The "+N" fades in on the
+          // moment's own timing, and a later real play may replace it.
+          const titleUp = opacity >= 0.5 || (played && box.width >= 40);
+          const clear = opacity < 0.5 || hits.length === 0;
+          return { ok: played && titleUp && clear && z >= 80 && box.width >= 40 && tap === "none", opacity, z, hits, time: snap.time, tap, w: Math.round(box.width), h: Math.round(box.height) };
+        }, score);
+        if (lastProbe && (lastProbe.titles?.length || lastProbe.glass || lastProbe.video || lastProbe.moment)) seenProbe = lastProbe;
+        if (lastProbe && lastProbe.ok) shown = lastProbe;
+        else await page.waitForTimeout(200);
+      }
+      if (!shown) throw new Error(`The ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
+      if ((size.name === "390x844" || size.name === "904x1060") && score === 20) {
+        const file = path.join(outDir, `big-score-${score}-${size.name}.png`);
+        mkdirSync(outDir, { recursive: true });
+        await page.screenshot({ path: file });
+      }
+      notes.push(`${size.name} +${score}`);
+      await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
+    }
+  }
+  await page.close();
+  return `big scores ${notes.join(", ")}`;
+}
+
 async function uiSmoke(origin, outDir = "soak-reports") {
   let chromium;
   try {
@@ -1434,9 +1567,10 @@ async function uiSmoke(origin, outDir = "soak-reports") {
       throw new Error(`Fold inner: ${inner.reason} Screenshot: ${saved.shot} Details: ${saved.dump}`);
     }
     const playedSlots = await checkTokenSlots(page, outDir, "4 players after play");
+    const bigScores = await checkBigScores(browser, origin, outDir);
     const noisy = errors.filter((line) => !/favicon|Failed to load resource/i.test(line));
     if (noisy.length > 0) throw new Error(`Console errors: ${noisy.slice(0, 3).join(" | ")}`);
-    return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}` };
+    return { ok: true, skipped: false, summary: `${slotNotes.join(" | ")}; ${pop.summary}; ${tally.summary}; ${audit.summary}; cover ${cover.summary}; inner ${inner.summary}; ${playedSlots}; ${bigScores}` };
   } finally {
     await browser.close();
   }

@@ -3,7 +3,7 @@ import { CATALOG, canBuy, isWithheldId, itemById } from "./catalog.js";
 
 describe("store catalog", () => {
   it("ships the sheet with 2 Hot 4 TV as the unsold starter", () => {
-    expect(CATALOG).toHaveLength(92);
+    expect(CATALOG).toHaveLength(93);
     const starter = itemById("CHR-015");
     expect(starter).toMatchObject({
       name: "2 Hot 4 TV",

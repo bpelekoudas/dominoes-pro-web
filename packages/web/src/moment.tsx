@@ -2,11 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { MOTION, motionMs } from "../../rules/src/motion.js";
-import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, type FxId } from "./fx.js";
+import { FX_LIST, HEAVY_FX, createFxScene, drawFx, normalizeFx, readEquippedFx, videoFxAsset, warmVideoFx, type FxId } from "./fx.js";
 import { CRACK_MS, SLAM_MS, buildGlass, drawGlass } from "./glass.js";
 import { scorePopupText } from "./feel/score-delta.js";
 import { playUhOh, unlockSound } from "./sound.js";
-import { faceRotation, PipHalf } from "./pips.js";
+import { faceRotation, PipHalf, SpinnerDot } from "./pips.js";
 
 const SHAKE_MS = 400;
 const TOTAL_MS = BIG_MOMENT_MS;
@@ -91,6 +91,8 @@ export function MomentLayer({
   const fxId = normalizeFx(effect);
   const level = bigMomentLevel(awarded) ?? "medium";
   const [phase, setPhase] = useState<"impact" | "shatter" | "title">(reduced ? "title" : "impact");
+  const [clipOk, setClipOk] = useState(true);
+  const blastRef = useRef<HTMLVideoElement>(null);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
 
   useEffect(() => {
@@ -134,8 +136,25 @@ export function MomentLayer({
     };
   }, [fxId, token, level, reduced]);
 
+  const clip = videoFxAsset(fxId);
+  const blast = Boolean(clip) && clipOk && !reduced;
+  useEffect(() => {
+    setClipOk(true);
+  }, [token, fxId]);
+  useEffect(() => {
+    if (!blast) return;
+    warmVideoFx();
+    const video = blastRef.current;
+    if (!video) return;
+    const fail = () => setClipOk(false);
+    video.addEventListener("error", fail);
+    const pending = video.play();
+    if (pending) pending.catch(fail);
+    return () => video.removeEventListener("error", fail);
+  }, [blast, token]);
+
   useLayoutEffect(() => {
-    if (reduced) return;
+    if (reduced || blast) return;
     const canvas = canvasRef.current;
     const width = window.innerWidth;
     const height = window.innerHeight;
@@ -149,8 +168,11 @@ export function MomentLayer({
     document.documentElement.style.setProperty("--hit-y", `${(hitY / height) * 100}%`);
     document.documentElement.dataset.crackX = hitX.toFixed(1);
     document.documentElement.dataset.crackY = hitY.toFixed(1);
-    const glass = fxId === "glass" ? buildGlass(width, height, hitX, hitY, awarded) : null;
-    const themed = fxId === "glass" ? null : createFxScene(fxId, width, height, hitX, hitY, awarded);
+    // A filmed effect that did not start falls back to its canvas. Mega
+    // explosion has no particle scene, so that one uses the house shatter.
+    const canvasId = fxId === "explosion" ? "glass" : fxId;
+    const particles = canvasId === "glass" || canvasId === "explosion" ? null : createFxScene(canvasId, width, height, hitX, hitY, awarded);
+    const glass = particles ? null : buildGlass(width, height, hitX, hitY, awarded);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     let frame = 0;
@@ -162,7 +184,7 @@ export function MomentLayer({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
       if (glass) drawGlass(ctx, glass, visual);
-      else if (themed) drawFx(ctx, themed, visual);
+      else if (particles) drawFx(ctx, particles, visual);
       const glassPhase = visual < SLAM_MS ? "impact" : visual < BREAK_MS ? "cracks" : visual < 500 ? "loose" : visual < 640 ? "mid" : "fly";
       if (root.dataset.uhohGlass !== glassPhase) root.dataset.uhohGlass = glassPhase;
       if (t < TOTAL_MS) frame = requestAnimationFrame(draw);
@@ -174,54 +196,143 @@ export function MomentLayer({
       delete root.dataset.crackX;
       delete root.dataset.crackY;
     };
-  }, [anchor, awarded, effect, fxId, reduced, token]);
+  }, [anchor, awarded, blast, effect, fxId, reduced, token]);
 
   const hitStyle = anchor
     ? { left: anchor.x, top: anchor.y, width: anchor.w, height: anchor.h }
     : { left: "50%", top: "46%", width: 44, height: 88 };
+  const titleAt = clearTitleSpot(anchor);
 
-  // A plain score shows the points. The full-screen fracture reads as broken
-  // geometry over the chain, so it stays off unless the table cries UH OH.
-  const burst = reduced || !cry
+  // Every 20+ plays the equipped burst. Glass is the default. Mega explosion
+  // is the filmed blast instead of canvas particles. A lock or a comeback
+  // also says UH-OH. A plain score shows the points. The burst is portaled
+  // onto the body so the stage transform cannot clip it.
+  const blastAt = blastBox(anchor);
+  const burst = reduced
     ? null
-    : createPortal(
-        <>
-          <canvas ref={canvasRef} className="uhoh-cracks" data-uhoh="shatter" data-shake={shake ?? "off"} />
-          <div className="uhoh-flash" aria-hidden="true" />
-        </>,
-        document.body,
-      );
+    : blast
+      ? createPortal(
+          <video
+            key={token}
+            ref={blastRef}
+            className="uhoh-blast"
+            data-uhoh="blast"
+            data-fx={fxId}
+            muted
+            playsInline
+            autoPlay
+            preload="auto"
+            style={{ left: blastAt.left, top: blastAt.top, width: blastAt.size, height: blastAt.size }}
+          >
+            <source src={clip?.webm} type="video/webm" />
+            <source src={clip?.mp4} type="video/mp4" />
+          </video>,
+          document.body,
+        )
+      : createPortal(
+          <>
+            <canvas ref={canvasRef} className="uhoh-cracks" data-uhoh="shatter" data-shake={shake ?? "off"} />
+            <div className="uhoh-flash" aria-hidden="true" />
+          </>,
+          document.body,
+        );
+  const slam = reduced || phase !== "impact" ? null : (
+    <div className="uhoh-slam" style={hitStyle} data-uhoh="impact" data-tile={tileId ?? "demo"}>
+      <Face a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
+    </div>
+  );
+  const title = (
+    <div
+      className={`uhoh-title${reduced ? " reduced" : ""}`}
+      data-uhoh="title"
+      data-origin={anchor ? "tile" : "center"}
+      data-phase={phase}
+      data-awarded={awarded}
+      style={{
+        left: titleAt.left,
+        top: titleAt.top,
+        ["--uhoh-size" as string]: `${titleAt.font}px`,
+        ["--uhoh-points" as string]: `${Math.round(titleAt.font * 0.46)}px`,
+      }}
+      role="img"
+      aria-label={cry ? `UH-OH, plus ${awarded}` : `plus ${awarded}`}
+    >
+      {cry ? (
+        <div className="uhoh-word">
+          <span>UH</span>
+          <Hyphen />
+          <span>OH</span>
+        </div>
+      ) : (
+        <div className="uhoh-word">{scorePopupText(awarded)}</div>
+      )}
+      {cry ? <p className="uhoh-points">{scorePopupText(awarded)}</p> : null}
+    </div>
+  );
 
   return (
     <>
       {burst}
-      {reduced || phase !== "impact" ? null : (
-        <div className="uhoh-slam" style={hitStyle} data-uhoh="impact" data-tile={tileId ?? "demo"}>
-          <Face a={tile.a} b={tile.b} orientation={tile.orientation} spinner={tile.spinner} />
-        </div>
+      {createPortal(
+        <>
+          {slam}
+          {title}
+        </>,
+        document.body,
       )}
-      <div
-        className={`uhoh-title${reduced ? " reduced" : ""}`}
-        data-uhoh="title"
-        data-origin={anchor ? "tile" : "center"}
-        data-phase={phase}
-        style={anchor ? { left: anchor.x, top: anchor.y } : undefined}
-        role="img"
-        aria-label={cry ? `UH-OH, plus ${awarded}` : `plus ${awarded}`}
-      >
-        {cry ? (
-          <div className="uhoh-word">
-            <span>UH</span>
-            <Hyphen />
-            <span>OH</span>
-          </div>
-        ) : (
-          <div className="uhoh-word">{scorePopupText(awarded)}</div>
-        )}
-        {cry ? <p className="uhoh-points">{scorePopupText(awarded)}</p> : null}
-      </div>
     </>
   );
+}
+
+/**
+ * A spot for the big word that misses tiles, badges, and the rack.
+ * The word shrinks only as far as it must to find that clear spot.
+ */
+function blastBox(anchor: HitBox | null): { left: number; top: number; size: number } {
+  const size = Math.min(window.innerWidth, window.innerHeight, 520) * 0.78;
+  const rawX = anchor ? anchor.x : window.innerWidth / 2;
+  const rawY = anchor ? anchor.y : window.innerHeight * 0.46;
+  return {
+    left: Math.min(window.innerWidth - size / 2, Math.max(size / 2, rawX)),
+    top: Math.min(window.innerHeight - size / 2, Math.max(size / 2, rawY)),
+    size,
+  };
+}
+
+function clearTitleSpot(anchor: HitBox | null): { left: number; top: number; font: number } {
+  const blocked = [...document.querySelectorAll("[data-board-tile], .edge-badge, .seat-chip, .hand-tile, .hand-tray, .playbar")]
+    .map((node) => node.getBoundingClientRect())
+    .filter((box) => box.width > 2 && box.height > 2);
+  const nominal = Math.min(window.innerWidth * 0.415, 250);
+  const fonts = [nominal, nominal * 0.78, nominal * 0.62, 96, 78];
+  const spotsFor = (height: number) => {
+    const spots = [
+      { left: window.innerWidth / 2, top: window.innerHeight * 0.16 },
+      { left: window.innerWidth / 2, top: window.innerHeight * 0.84 },
+      { left: window.innerWidth * 0.5, top: window.innerHeight * 0.32 },
+      { left: window.innerWidth * 0.22, top: window.innerHeight * 0.46 },
+      { left: window.innerWidth * 0.78, top: window.innerHeight * 0.46 },
+    ];
+    if (anchor) {
+      spots.unshift({
+        left: anchor.x,
+        top: Math.max(height / 2 + 8, anchor.y - anchor.h / 2 - height / 2 - 14),
+      });
+    }
+    return spots;
+  };
+  for (const font of fonts) {
+    const width = font * 2.3;
+    const height = font * 1.05;
+    const hits = (left: number, top: number) => {
+      const box = { left: left - width / 2, right: left + width / 2, top: top - height / 2, bottom: top + height / 2 };
+      if (box.left < 8 || box.top < 8 || box.right > window.innerWidth - 8 || box.bottom > window.innerHeight - 8) return true;
+      return blocked.some((other) => box.left < other.right - 2 && box.right > other.left + 2 && box.top < other.bottom - 2 && box.bottom > other.top + 2);
+    };
+    const clear = spotsFor(height).find((spot) => !hits(spot.left, spot.top));
+    if (clear) return { ...clear, font };
+  }
+  return { left: window.innerWidth / 2, top: Math.max(56, window.innerHeight * 0.14), font: 78 };
 }
 
 function Face({
@@ -241,6 +352,7 @@ function Face({
       <PipHalf value={a} rotation={rotation} />
       <span className="domino-split" />
       <PipHalf value={b} rotation={rotation} />
+      {spinner ? <SpinnerDot /> : null}
     </span>
   );
 }

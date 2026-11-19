@@ -9,6 +9,7 @@ import { motionMs } from "../../rules/src/motion.js";
 import { demoAward, demoRequested, FxGallery, fxGalleryRequested, UhOhPreview } from "./moment.js";
 import { cuesForPlay, cuesForTurn } from "./cues";
 import { primeMusic } from "./music";
+import { warmVideoFx } from "./fx.js";
 import { isMuted, playCues, preloadSounds, setMuted, unlockSound } from "./sound";
 import { Domino, Hand, Table } from "./table";
 import { MatchCardFrame } from "./match-card-frame";
@@ -184,6 +185,7 @@ export function App() {
     const unlock = () => {
       unlockSound();
       primeMusic();
+      warmVideoFx();
     };
     window.addEventListener("pointerdown", unlock, { once: true });
     return () => window.removeEventListener("pointerdown", unlock);

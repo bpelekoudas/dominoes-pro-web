@@ -366,6 +366,9 @@ input {
   align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0 2px 4px;
   background: #141414;
   z-index: 6;
@@ -373,9 +376,9 @@ input {
 .opponent-chip {
   display: flex;
   align-items: flex-start;
-  gap: 2px;
+  gap: 8px;
   min-width: 0;
-  max-width: 78px;
+  max-width: 92px;
 }
 .opponent-chip[data-edge="top"] { margin-left: auto; }
 .opponent-chip .token-slot { flex: none; margin-top: 2px; }
@@ -387,8 +390,9 @@ input {
   left: auto;
   top: auto;
   right: auto;
-  width: max-content;
-  max-width: none;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
   margin: 0;
   padding: 2px 3px 3px;
   border-radius: 12px;
@@ -417,7 +421,9 @@ input {
   transform: none;
   display: block;
   width: auto;
-  max-width: 72px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   max-height: 16px;
   margin-top: 2px;
   white-space: nowrap;
@@ -1320,6 +1326,25 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   box-shadow: inset 0 0 0 1px rgba(239, 239, 239, 0.28);
 }
 .domino.spinner { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(0, 0, 0, 0.55); }
+/* One circle on the divider. 16% of the short side is a little under a pip
+   (20% of the half) so it stays off the inner row of a 6. The ring is inset. */
+.spinner-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  width: 16%;
+  height: 8%;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--spinner-dot, #e31e26);
+  box-shadow: inset 0 0 0 1px var(--spinner-ring, #141414);
+}
+.domino.horizontal .spinner-dot { width: 8%; height: 16%; }
 .half {
   position: relative;
   flex: 1;
@@ -1962,6 +1987,22 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   transform: translateY(-50%);
 }
 
+.uhoh-blast {
+  position: fixed;
+  z-index: 70;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  object-fit: cover;
+  background: #000;
+  mix-blend-mode: screen;
+  transform: translate(-50%, -50%);
+  animation: uhoh-blast-out 1.2s linear forwards;
+}
+@keyframes uhoh-blast-out {
+  0%, 78% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .uhoh-cracks,
 .uhoh-flash {
   position: fixed;
@@ -2015,7 +2056,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   justify-content: center;
   gap: 0.04em;
   font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
-  font-size: min(41.5vw, 250px);
+  font-size: var(--uhoh-size, min(41.5vw, 250px));
   line-height: 0.78;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -2032,7 +2073,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
 .uhoh-points {
   margin: 0;
   font-family: "Bebas Neue", "Arial Narrow", Impact, sans-serif;
-  font-size: min(24vw, 112px);
+  font-size: var(--uhoh-points, min(24vw, 112px));
   line-height: 0.9;
   color: #d5a336;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45), 0 0 16px rgba(213, 163, 54, 0.75);
@@ -2101,7 +2142,7 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   .control-token, .draw-flight { transition: none; animation: none; }
   .seat-notice { animation: none; opacity: 1; }
   .score-pop { opacity: 1; }
-  .uhoh-slam, .uhoh-cracks, .uhoh-flash { display: none; }
+  .uhoh-slam, .uhoh-cracks, .uhoh-flash, .uhoh-blast { display: none; }
   .table-scroll.shaking, .uhoh-preview.shaking, .fx-board.shaking { animation: none; }
   .uhoh-title { animation: uhoh-flash 900ms ease-out forwards; }
   .tier-up { animation: none; }
@@ -2922,6 +2963,18 @@ body:has(.store-screen) { overflow: hidden; height: 100dvh; }
   background: repeating-linear-gradient(135deg, #fff 0 8px, #e31e26 8px 16px);
 }
 [data-tile-skin="candy"] .domino:not(.face-down) .half i { background: #1a1a1a; }
+/* Center-dot ink. Fill reads against the face; the ring reads against the pips. */
+[data-tile-skin="ivory"] { --spinner-dot: #e31e26; --spinner-ring: #141414; }
+[data-tile-skin="wood"] { --spinner-dot: #ffffff; --spinner-ring: #1a1008; }
+[data-tile-skin="neon"] { --spinner-dot: #e31e26; --spinner-ring: #f4f4f4; }
+[data-tile-skin="marble"] { --spinner-dot: #d80000; --spinner-ring: #141414; }
+[data-tile-skin="charcoal"] { --spinner-dot: #ffffff; --spinner-ring: #141414; }
+[data-tile-skin="gold"] { --spinner-dot: #141414; --spinner-ring: #ffffff; }
+[data-tile-skin="sky"] { --spinner-dot: #141414; --spinner-ring: #ffffff; }
+[data-tile-skin="cherry"] { --spinner-dot: #141414; --spinner-ring: #ffffff; }
+[data-tile-skin="boss"] { --spinner-dot: #141414; --spinner-ring: #ffffff; }
+[data-tile-skin="ice"] { --spinner-dot: #e31e26; --spinner-ring: #141414; }
+[data-tile-skin="candy"] { --spinner-dot: #141414; --spinner-ring: #ffe14a; }
 
 .rail:not(.turn) .seat-chip.win-hot,
 .you-float .seat-chip.win-hot { opacity: 1; }

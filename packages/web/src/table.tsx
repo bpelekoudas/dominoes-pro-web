@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
-import { scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./feel/score-delta.js";
+import { scoreDeltaLabel, scorePopupForPlay } from "./feel/score-delta.js";
 import { shouldRefitFelt } from "./portrait-lock";
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
@@ -35,7 +35,7 @@ import {
 import { handFit } from "./hand-fit.js";
 import { FeelRipple, useLiveFeel } from "./feel/live";
 import { scoreTier } from "./feel/ladder";
-import { bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
+import { BIG_MOMENT_MS, bigMomentLevel, type BigMomentLevel } from "../../rules/src/moment.js";
 import { boardDuringOpponentFlight, departureBox, holdCameraForChain, OPPONENT_GLIDE_MS, shouldFlyOpponentTile, type SeatBox } from "./arrival.js";
 import { normalizeFx, type FxId } from "./fx.js";
 import { demoAward, MomentLayer } from "./moment.js";
@@ -47,7 +47,7 @@ import {
   GHOST_HEIGHT,
   GHOST_WIDTH,
 } from "./drop.js";
-import { faceRotation, PipHalf } from "./pips.js";
+import { faceRotation, PipHalf, SpinnerDot } from "./pips.js";
 
 const NO_SLOTS: Array<LayoutBox & { id: string }> = [];
 
@@ -77,6 +77,7 @@ export function Domino({
           <PipHalf value={a} rotation={rotation} />
           <span className="domino-split" />
           <PipHalf value={b} rotation={rotation} />
+          {spinner ? <SpinnerDot /> : null}
         </>
       )}
     </span>
@@ -619,10 +620,22 @@ export function Table({
   const { moment, dismissMoment } = useBigMoment(view.lastPlay, view.players, replayToken);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
   const [slamming, setSlamming] = useState(false);
-  const landed = useTileCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, lastTileId);
-  // Keep the state object. A fresh literal would restart the shatter on every render.
-  const anchor = moment && landed && moment.tileId === lastTileId ? landed : null;
-  const livePopup = scorePopupText(view.lastPlay?.awarded ?? 0);
+  // Follow the scoring tile, not whichever tile landed last. A later play
+  // used to drop the anchor and unmount the moment before the word faded in.
+  const hitId = moment?.tileId ?? lastTileId;
+  const landed = useTileCenter(viewportRef, layout, frame, shownScale, shift.x, shift.y + lift, hitId);
+  const heldAnchor = useRef<{ id: string; box: { x: number; y: number; w: number; h: number } } | null>(null);
+  if (!moment) heldAnchor.current = null;
+  else if (moment.tileId && landed && hitId === moment.tileId) heldAnchor.current = { id: moment.tileId, box: landed };
+  const anchor = !moment
+    ? null
+    : moment.tileId
+      ? landed && hitId === moment.tileId
+        ? landed
+        : heldAnchor.current?.id === moment.tileId
+          ? heldAnchor.current.box
+          : null
+      : landed;
   const popup = scorePopupForPlay(view.lastPlay, pop);
   const tray = typeof document === "undefined" ? null : document.querySelector(".hand-tray");
   const trayRect = tray?.getBoundingClientRect();
@@ -651,6 +664,10 @@ export function Table({
     <div
       className={`table-scroll${dropLead ? " drop-ready" : ""}${shake ? " shaking" : ""}${handOver && lastTileId ? " hand-over" : ""}`}
       data-last-tile={lastTileId ?? ""}
+      data-moment={moment?.key ?? ""}
+      data-live-award={view.lastPlay?.awarded ?? ""}
+      data-moment-tile={moment?.tileId ?? ""}
+      data-anchor={anchor ? "yes" : "no"}
       data-shake={shake ?? "off"}
       ref={viewportRef}
       data-open-total={view.openTotal}
@@ -739,7 +756,7 @@ export function Table({
         </div>
         </div>
       ) : null}
-      {moment && anchor && livePopup && livePopup === scorePopupText(moment.awarded) ? (
+      {moment && anchor ? (
         <MomentLayer
           token={moment.key}
           awarded={moment.awarded}
@@ -757,7 +774,7 @@ export function Table({
           onPhase={(phase) => setSlamming(phase === "impact" && !prefersReducedMotion())}
           onDone={() => {
             setSlamming(false);
-            dismissMoment();
+            dismissMoment(moment.key);
           }}
         />
       ) : null}
@@ -1100,26 +1117,35 @@ function useBigMoment(
   replayToken: number,
 ): {
   moment: { key: string; awarded: number; tileId: string | null; effect: FxId } | null;
-  dismissMoment: () => void;
+  dismissMoment: (key?: string) => void;
 } {
   const liveKey =
     lastPlay && bigMomentLevel(lastPlay.awarded) ? `play-${lastPlay.seq}:${lastPlay.awarded}` : "";
-  const skip = useRef(liveKey);
-  const playersRef = useRef(players);
-  playersRef.current = players;
+  // Empty on purpose. Seeding this with the first liveKey skips a 20 that is
+  // already on the table when the felt mounts.
+  const skip = useRef("");
   const [moment, setMoment] = useState<{ key: string; awarded: number; tileId: string | null; effect: FxId } | null>(null);
-  if (moment && moment.key.startsWith("play-") && moment.key !== liveKey) setMoment(null);
-  const dismiss = () => setMoment(null);
-  useEffect(() => {
-    if (liveKey === skip.current) return;
+  const dismiss = (key?: string) => {
+    setMoment((prev) => {
+      if (!prev) return null;
+      if (key && prev.key !== key) return prev;
+      return null;
+    });
+  };
+  // Start the moment in this render. Waiting for an effect let the next
+  // state arrive first, and the word never faded in. A later small play
+  // does not clear it. The timer does, and it will not restart the same play.
+  if (liveKey && lastPlay && liveKey !== skip.current && moment?.key !== liveKey) {
     skip.current = liveKey;
-    if (!liveKey || !lastPlay) {
-      setMoment((prev) => (prev && prev.key.startsWith("play-") ? null : prev));
-      return;
-    }
-    const scorer = playersRef.current.find((player) => player.id === lastPlay.playerId);
+    const scorer = players.find((player) => player.id === lastPlay.playerId);
     setMoment({ key: liveKey, awarded: lastPlay.awarded, tileId: lastPlay.tileId, effect: normalizeFx(scorer?.effectId) });
-  }, [liveKey, lastPlay]);
+  }
+  useEffect(() => {
+    if (!moment) return;
+    const key = moment.key;
+    const timer = window.setTimeout(() => dismiss(key), BIG_MOMENT_MS);
+    return () => window.clearTimeout(timer);
+  }, [moment?.key]);
   const tileRef = useRef(lastPlay?.tileId ?? null);
   tileRef.current = lastPlay?.tileId ?? null;
   useEffect(() => {

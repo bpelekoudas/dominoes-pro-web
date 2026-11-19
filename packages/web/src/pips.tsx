@@ -106,3 +106,8 @@ export function PipHalf({ value, rotation }: { value: number; rotation: PipRotat
     </span>
   );
 }
+
+/** The single center mark on the spinner. Color comes from the skin. */
+export function SpinnerDot() {
+  return <i className="spinner-dot" data-spinner-dot="" aria-hidden="true" />;
+}

@@ -15,6 +15,7 @@ export const FX_LIST = [
   { id: "trophy", code: "FX-008", name: "Trophy rain" },
   { id: "fireworks", code: "FX-009", name: "Fireworks finale" },
   { id: "legend", code: "FX-010", name: "Legend gold burst" },
+  { id: "explosion", code: "FX-011", name: "Mega explosion" },
 ] as const;
 
 export type FxId = (typeof FX_LIST)[number]["id"];
@@ -24,7 +25,39 @@ const EQUIP_KEY = "uhoh.previewFx";
 const IMPACT = 220;
 const EXPAND = 860;
 
-export const HEAVY_FX = new Set<FxId>(["glass", "fire", "lightning", "quake", "fireworks", "legend"]);
+export const HEAVY_FX = new Set<FxId>(["glass", "fire", "lightning", "quake", "fireworks", "legend", "explosion"]);
+
+/**
+ * Filmed bursts. The file name is FX-00N-<id>.mp4 and .webm under /fx.
+ * Fire stays on the canvas until its clip is confirmed. A missing file,
+ * or a play() that rejects, falls back to the canvas effect.
+ */
+const VIDEO_FX = new Set<FxId>(["glass", "lightning", "explosion"]);
+
+export function videoFxAsset(id: FxId): { mp4: string; webm: string } | null {
+  if (!VIDEO_FX.has(id)) return null;
+  const meta = FX_LIST.find((fx) => fx.id === id);
+  if (!meta) return null;
+  return { mp4: `/fx/${meta.code}-${id}.mp4`, webm: `/fx/${meta.code}-${id}.webm` };
+}
+
+/** Fetch each filmed burst after the first tap so the next 20+ can start on the tile. */
+export function warmVideoFx(): void {
+  if (typeof document === "undefined") return;
+  const marked = document.documentElement;
+  if (marked.dataset.blastWarm === "1") return;
+  marked.dataset.blastWarm = "1";
+  for (const id of VIDEO_FX) {
+    const asset = videoFxAsset(id);
+    if (!asset) continue;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.src = asset.mp4;
+    video.load();
+  }
+}
 
 export function normalizeFx(value: string | null | undefined): FxId {
   if (value && FX_IDS.has(value)) return value as FxId;
@@ -78,7 +111,7 @@ interface Bolt {
 }
 
 export interface FxScene {
-  id: Exclude<FxId, "glass">;
+  id: Exclude<FxId, "glass" | "explosion">;
   bits: Bit[];
   bolts: Bolt[];
   hitX: number;
@@ -89,7 +122,7 @@ export interface FxScene {
 }
 
 export function createFxScene(
-  id: Exclude<FxId, "glass">,
+  id: Exclude<FxId, "glass" | "explosion">,
   width: number,
   height: number,
   ox: number,

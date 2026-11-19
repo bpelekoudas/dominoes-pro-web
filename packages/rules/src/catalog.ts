@@ -1435,6 +1435,24 @@ export const CATALOG: readonly StoreItem[] = [
     "art": true
   },
   {
+    "id": "FX-011",
+    "name": "Mega explosion",
+    "category": "effect",
+    "rarity": "Epic",
+    "obtain": "bones",
+    "bones": 10000,
+    "gold": 800,
+    "unlock": "",
+    "limited": false,
+    "availableFrom": null,
+    "availableUntil": null,
+    "description": "A mushroom-cloud blast on an UH-OH. The fireball is cosmetic only.",
+    "avatarId": null,
+    "fxId": "explosion",
+    "skin": null,
+    "art": true
+  },
+  {
     "id": "TT-001",
     "name": "Read 'em and weep!",
     "category": "trash",

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { FX_LIST, createFxScene, normalizeFx, peakReach } from "./fx.js";
+import { FX_LIST, createFxScene, normalizeFx, peakReach, videoFxAsset } from "./fx.js";
 
 describe("uh-oh effects", () => {
-  it("lists ten effects and falls back to the house shatter", () => {
-    expect(FX_LIST).toHaveLength(10);
+  it("lists eleven effects and falls back to the house shatter", () => {
+    expect(FX_LIST).toHaveLength(11);
     expect(FX_LIST.map((fx) => fx.code)).toEqual([
       "FX-001",
       "FX-002",
@@ -15,16 +15,23 @@ describe("uh-oh effects", () => {
       "FX-008",
       "FX-009",
       "FX-010",
+      "FX-011",
     ]);
     expect(normalizeFx("nope")).toBe("glass");
     expect(normalizeFx("fireworks")).toBe("fireworks");
     expect(normalizeFx("legend")).toBe("legend");
+    expect(normalizeFx("explosion")).toBe("explosion");
+    expect(FX_LIST.find((fx) => fx.id === "explosion")?.name).toBe("Mega explosion");
+    expect(videoFxAsset("glass")).toEqual({ mp4: "/fx/FX-001-glass.mp4", webm: "/fx/FX-001-glass.webm" });
+    expect(videoFxAsset("lightning")).toEqual({ mp4: "/fx/FX-003-lightning.mp4", webm: "/fx/FX-003-lightning.webm" });
+    expect(videoFxAsset("explosion")).toEqual({ mp4: "/fx/FX-011-explosion.mp4", webm: "/fx/FX-011-explosion.webm" });
+    expect(videoFxAsset("fire")).toBeNull();
   });
 
   it("starts on the placed tile and reaches most of the screen", () => {
     const origin = { x: 48, y: 610 };
     for (const fx of FX_LIST) {
-      if (fx.id === "glass") continue;
+      if (fx.id === "glass" || fx.id === "explosion") continue;
       const scene = createFxScene(fx.id, 390, 844, origin.x, origin.y, 25);
       expect(scene.hitX).toBe(origin.x);
       expect(scene.hitY).toBe(origin.y);
