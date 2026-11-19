@@ -1765,24 +1765,17 @@ async function feltSeam(page) {
   const sentinels = await traySentinels(page);
   const bare = path.join("/tmp", `felt-seam-bare-${Date.now()}.png`);
   const live = path.join("/tmp", `felt-seam-live-${Date.now()}.png`);
-  let deltas = null;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    if (!(await captureBlast(page, bare, { hide: true, sentinels }))) continue;
-    if (!(await captureBlast(page, live, { hide: false, sentinels }))) continue;
-    deltas = ["inside", "outside"].map((side) => {
-      const point = points[side];
-      const before = rgbAt(bare, point.x, point.y);
-      const after = rgbAt(live, point.x, point.y);
-      // Screen blend can only lift the felt. A sample that gets darker is the
-      // felt texture shifting a pixel between the two shots, not a square.
-      const delta = Math.max(0, after[0] - before[0], after[1] - before[1], after[2] - before[2]);
-      return { side, delta, before, after };
-    });
-    const stale = deltas.some((item) => item.before.every((channel) => channel <= 18));
-    if (!stale) break;
-    deltas = null;
-  }
-  if (!deltas) return { ok: false, reason: "The hidden clip left a black ring on the felt." };
+  if (!(await captureBlast(page, bare, { hide: true, sentinels }))) return { ok: false, reason: "The hidden clip left a black ring on the felt." };
+  if (!(await captureBlast(page, live, { hide: false, sentinels }))) return { ok: false, reason: "The clip left a black ring on the felt." };
+  const deltas = ["inside", "outside"].map((side) => {
+    const point = points[side];
+    const before = rgbAt(bare, point.x, point.y);
+    const after = rgbAt(live, point.x, point.y);
+    // Screen blend can only lift the felt. A sample that gets darker is the
+    // felt texture shifting a pixel between the two shots, not a square.
+    const delta = Math.max(0, after[0] - before[0], after[1] - before[1], after[2] - before[2]);
+    return { side, delta, before, after };
+  });
   const delta = Math.max(...deltas.map((item) => item.delta));
   // A real square lifts the felt by well more than this. Four channels is a
   // one-pixel shift of the cloth between the hidden and shown shots.
