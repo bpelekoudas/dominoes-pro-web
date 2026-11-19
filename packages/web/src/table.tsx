@@ -16,6 +16,8 @@ import {
   chainHeldAtHandEnd,
   chainViewShift,
   clampGhostToFelt,
+  PINWHEEL_LONG_FRAC,
+  PINWHEEL_MARGIN,
   safeRoom,
   frameInsets,
   settledHandCamera,
@@ -133,6 +135,8 @@ export function Table({
   const settledChain = useRef<BoardLayout | null>(null);
   const settledKey = useRef("");
   const turnBudget = useRef<{ scale: number; roomW: number; roomH: number } | null>(null);
+  const pinwheelRoom = useRef<{ roomW: number; roomH: number; openScale: number } | null>(null);
+  const [pinEpoch, setPinEpoch] = useState(0);
   const boardKeyNow = board?.center
     ? [board.center.tileId, ...(["west", "east", "north", "south"] as const).flatMap((arm) => board.arms[arm].map((tile) => tile.tileId))].join(",")
     : "";
@@ -148,12 +152,12 @@ export function Table({
     settledKey.current = boardKeyNow;
   }
   const computed = useMemo(
-    () => pictureFrom(board, limits, settledChain.current, turnBudget.current),
-    [board, limits, flightDone, handKey, boardKeyNow],
+    () => pictureFrom(board, limits, settledChain.current, turnBudget.current, pinwheelRoom.current ?? undefined),
+    [board, limits, flightDone, handKey, boardKeyNow, pinEpoch],
   );
   const incomingComputed = useMemo(
-    () => pictureFrom(liveBoard, limits, settledChain.current, turnBudget.current),
-    [liveBoard, limits, handKey, boardKeyNow],
+    () => pictureFrom(liveBoard, limits, settledChain.current, turnBudget.current, pinwheelRoom.current ?? undefined),
+    [liveBoard, limits, handKey, boardKeyNow, pinEpoch],
   );
   if (computed) chainMemory.current = computed;
   const chainRef = useRef<BoardLayout | null>(null);
@@ -301,6 +305,21 @@ export function Table({
       const screenWidth = column instanceof HTMLElement ? column.clientWidth : width;
       const felt = { w: width, h: height };
       const frameEdge = frameInsets(view.tableId, felt);
+      const openScale = (PINWHEEL_LONG_FRAC * Math.max(1, screenWidth)) / 72;
+      const fitEdge = {
+        left: Math.max(frameEdge.left, PINWHEEL_MARGIN),
+        right: Math.max(frameEdge.right, PINWHEEL_MARGIN),
+        top: Math.max(frameEdge.top, PINWHEEL_MARGIN),
+        bottom: Math.max(frameEdge.bottom, PINWHEEL_MARGIN),
+      };
+      const pinRoom = safeRoom(felt, fitEdge);
+      const nextPin = { roomW: pinRoom.w, roomH: pinRoom.h, openScale };
+      const prevPin = pinwheelRoom.current;
+      pinwheelRoom.current = nextPin;
+      if (!prevPin || prevPin.roomW !== nextPin.roomW || prevPin.roomH !== nextPin.roomH
+        || Math.abs(prevPin.openScale - nextPin.openScale) > 1e-4) {
+        setPinEpoch((value) => value + 1);
+      }
       const feltBox = viewport.getBoundingClientRect();
       const keepOuts = [...document.querySelectorAll<HTMLElement>(".edge-slivers")].map(
         (node) => {
@@ -349,7 +368,7 @@ export function Table({
         roomW: roomNow.w,
         roomH: roomNow.h,
       };
-      const picture = pictureFrom(liveBoard, handLimits, settledChain.current, budgetNow) ?? solved.layout;
+      const picture = pictureFrom(liveBoard, handLimits, settledChain.current, budgetNow, pinwheelRoom.current ?? undefined) ?? solved.layout;
       // The camera fits and centres the placed tiles. Drop targets stay put
       // but they are not part of the picture the board scales to.
       const drawn = picture.tiles;

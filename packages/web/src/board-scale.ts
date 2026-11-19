@@ -633,7 +633,7 @@ export function settledHandCamera(input: {
     bottom: Math.max(edge.bottom, PINWHEEL_MARGIN),
   };
   const room = safeRoom(input.felt, fitEdge);
-  const layout = layoutPinwheel(input.board);
+  const layout = layoutPinwheel(input.board, { roomW: room.w, roomH: room.h, openScale: open });
   const box = chainBounds(layout.tiles, 0);
   const fit = Math.min(room.w / Math.max(1, box.w), room.h / Math.max(1, box.h));
   const scale = Math.min(cap, Number.isFinite(fit) && fit > 0 ? fit : cap);
@@ -903,10 +903,11 @@ export function pictureFrom(
   limits?: LayoutLimits | null,
   previous?: BoardLayout | null,
   budget?: FitBudget | null,
+  felt?: { roomW: number; roomH: number; openScale: number },
 ): BoardLayout | null {
   if (!board?.center) return null;
   try {
-    return layoutPinwheel(board);
+    return layoutPinwheel(board, felt ?? (budget ? { roomW: budget.roomW, roomH: budget.roomH, openScale: budget.scale } : undefined));
   } catch {
     try {
       return layoutBoard(board, limits ?? undefined);

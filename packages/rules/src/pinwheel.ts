@@ -145,20 +145,98 @@ interface Cursor {
   double: boolean;
 }
 
-/** The 90° turn whose step points away from the spinner. */
-function turnOutward(dir: LayoutDir, center: { x: number; y: number }): LayoutDir {
-  const options = [counterClockwise(dir), clockwise(dir)];
-  let best = options[0];
-  let bestDot = -Infinity;
-  for (const option of options) {
-    const step = STEP[option];
-    const dot = step.x * center.x + step.y * center.y;
-    if (dot > bestDot) {
-      bestDot = dot;
-      best = option;
-    }
+const OPPOSITE: Record<LayoutDir, LayoutDir> = {
+  east: "west",
+  west: "east",
+  north: "south",
+  south: "north",
+};
+
+/** Centre-to-centre of neighbouring serpentine lanes. PlayDrift's parallel lanes sit here. */
+const LANE_PITCH = 2.63 * L;
+
+/** The felt, in design pixels, that still fits at the opening scale. */
+export interface PinwheelRoom {
+  roomW: number;
+  roomH: number;
+  openScale: number;
+}
+
+interface RoomBox {
+  roomW: number;
+  roomH: number;
+  openScale: number;
+  maxHalfW: number;
+  maxHalfH: number;
+}
+
+function roomOf(room: PinwheelRoom | undefined): RoomBox {
+  const open = room?.openScale && room.openScale > 0 ? room.openScale : (0.125 * 390) / L;
+  const roomW = room?.roomW && room.roomW > 0 ? room.roomW : 320;
+  const roomH = room?.roomH && room.roomH > 0 ? room.roomH : 488;
+  const floor = 18 / L;
+  return {
+    roomW,
+    roomH,
+    openScale: open,
+    maxHalfW: roomW / floor / 2,
+    maxHalfH: roomH / floor / 2,
+  };
+}
+
+function fitScale(boxes: readonly LayoutBox[], room: RoomBox): number {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const box of boxes) {
+    minX = Math.min(minX, box.x);
+    minY = Math.min(minY, box.y);
+    maxX = Math.max(maxX, box.x + box.w);
+    maxY = Math.max(maxY, box.y + box.h);
   }
-  return best;
+  if (!Number.isFinite(minX)) return room.openScale;
+  const fit = Math.min(room.roomW / Math.max(1, maxX - minX), room.roomH / Math.max(1, maxY - minY));
+  return Math.min(room.openScale, fit);
+}
+
+function axisOf(arm: ArmId): "x" | "y" {
+  return arm === "west" || arm === "east" ? "x" : "y";
+}
+
+function outwardSign(arm: ArmId): number {
+  return arm === "west" || arm === "north" ? -1 : 1;
+}
+
+function laneTravel(arm: ArmId, lane: number): LayoutDir {
+  const first = pinwheelTurn(arm, arm);
+  return lane % 2 === 0 ? first : OPPOSITE[first];
+}
+
+function linkTravel(arm: ArmId): LayoutDir {
+  const sign = outwardSign(arm);
+  if (axisOf(arm) === "x") return sign < 0 ? "west" : "east";
+  return sign < 0 ? "north" : "south";
+}
+
+function coord(center: { x: number; y: number }, axis: "x" | "y"): number {
+  return axis === "x" ? center.x : center.y;
+}
+
+/** Stay on this arm's side of the spinner. The other half belongs to the facing arm. */
+function crossesArm(arm: ArmId, dir: LayoutDir, center: { x: number; y: number }): boolean {
+  if (arm === "west" && dir === "north" && center.y < -0.35 * L) return true;
+  if (arm === "east" && dir === "south" && center.y > 0.35 * L) return true;
+  if (arm === "north" && dir === "east" && center.x > 0.35 * L) return true;
+  if (arm === "south" && dir === "west" && center.x < -0.35 * L) return true;
+  return false;
+}
+
+/** Adding this box would force the picture to zoom out. */
+function needsZoom(existing: readonly LayoutBox[], extra: LayoutBox, room: RoomBox): boolean {
+  const now = fitScale(existing, room);
+  const next = fitScale([...existing, extra], room);
+  return next < now - 1e-4;
 }
 
 function crowded(box: LayoutBox, own: readonly LayoutBox[], parent: LayoutBox | null): boolean {
@@ -169,10 +247,14 @@ function crowded(box: LayoutBox, own: readonly LayoutBox[], parent: LayoutBox | 
   });
 }
 
-function placeChain(arm: ArmId, chain: readonly OrientedTile[], spinner: LayoutBox): PlacedTile[] {
+function placeChain(arm: ArmId, chain: readonly OrientedTile[], spinner: LayoutBox, room: RoomBox): PlacedTile[] {
   const out: PlacedTile[] = [];
   let cursor: Cursor | null = null;
-  let segment = 0;
+  let phase: "row" | "lane" | "link" = "row";
+  let lane = 0;
+  let laneAt = 0;
+  const axis = axisOf(arm);
+  const linkDir = linkTravel(arm);
   for (const tile of chain) {
     const double = isDouble(tile);
     let dir: LayoutDir = arm;
@@ -181,33 +263,67 @@ function placeChain(arm: ArmId, chain: readonly OrientedTile[], spinner: LayoutB
       dir = cursor.dir;
       run = cursor.run;
     }
+    const own = () => out.map((laid) => ({ x: laid.x, y: laid.y, w: laid.w, h: laid.h }));
+    const parent = () => (cursor ? boxFromCenter(cursor.center, cursor.dir, cursor.double) : null);
     let center: { x: number; y: number };
     if (!cursor) {
       dir = arm;
       center = firstCenter(spinner, arm, double);
       run = 1;
-    } else if (run >= ROW_CAP && !double) {
-      // The opening turn is the measured pinwheel. Every later turn steps
-      // further from the spinner. A double stays on the arm it is already on,
-      // crosswise, so a corner is always a flush end-to-end join.
-      const turn: LayoutDir = segment === 0 ? pinwheelTurn(arm, dir) : turnOutward(dir, cursor.center);
-      const corner = cornerCenter(cursor.center, dir, turn, cursor.double, double);
-      const parent = boxFromCenter(cursor.center, cursor.dir, cursor.double);
-      const own = out.map((laid) => ({ x: laid.x, y: laid.y, w: laid.w, h: laid.h }));
-      if (crowded(boxFromCenter(corner, turn, double), own, parent)) {
+    } else if (phase === "row" && run >= ROW_CAP && !double && !cursor.double) {
+      const turn: LayoutDir = pinwheelTurn(arm, dir);
+      center = cornerCenter(cursor.center, dir, turn, cursor.double, double);
+      dir = turn;
+      run = 1;
+      phase = "lane";
+      lane = 0;
+      laneAt = coord(center, axis);
+    } else if (phase === "link" && !double) {
+      const ret = laneTravel(arm, lane + 1);
+      const landed = cornerCenter(cursor.center, dir, ret, cursor.double, double);
+      const landedAt = coord(landed, axis);
+      const spacing = Math.abs(landedAt - laneAt);
+      if (spacing >= 2.55 * L && !cursor.double) {
+        center = landed;
+        dir = ret;
+        run = 1;
+        phase = "lane";
+        lane += 1;
+        laneAt = coord(landed, axis);
+      } else {
         center = straightCenter(cursor.center, dir, cursor.double, double);
         run += 1;
-      } else {
-        center = corner;
-        dir = turn;
+      }
+    } else if (phase === "lane" && !double) {
+      const ahead = straightCenter(cursor.center, dir, cursor.double, double);
+      const aheadBox = boxFromCenter(ahead, dir, double);
+      const placed = [...own(), boxFromCenter(cursor.center, cursor.dir, cursor.double)];
+      const blocked = needsZoom(placed, aheadBox, room) || crossesArm(arm, dir, ahead)
+        || crowded(aheadBox, own(), parent());
+      const target = laneAt + outwardSign(arm) * LANE_PITCH;
+      const laneRoom = axis === "x" ? room.maxHalfW : room.maxHalfH;
+      const nextLaneFits = Math.abs(target) + L <= laneRoom;
+      // A corner off a double reaches back onto the tile before it. Run one
+      // more normal tile so the turn joins a flush end.
+      if (!blocked || cursor.double) {
+        center = ahead;
+        run += 1;
+      } else if (nextLaneFits) {
+        center = cornerCenter(cursor.center, dir, linkDir, cursor.double, double);
+        dir = linkDir;
         run = 1;
-        segment += 1;
+        phase = "link";
+      } else {
+        // Another lane would drop the long side under 18px. Keep this lane.
+        center = ahead;
+        run += 1;
       }
     } else {
       center = straightCenter(cursor.center, dir, cursor.double, double);
       run += 1;
     }
-    out.push(toTile(tile, boxFromCenter(center, dir, double), dir, arm));
+    const box = boxFromCenter(center, dir, double);
+    out.push(toTile(tile, box, dir, arm));
     cursor = { center, dir, run, double };
   }
   return out;
@@ -249,14 +365,16 @@ function fitOf(boxes: readonly LayoutBox[]): LayoutBox {
 }
 
 /** The chain PlayDrift draws: a centred spinner and a pinwheel on fixed lanes. */
-export function layoutPinwheel(board: BoardState): BoardLayout {
+export function layoutPinwheel(board: BoardState, felt?: PinwheelRoom): BoardLayout {
   if (!board.center) {
     return { tiles: [], ends: [], fit: { x: -L, y: -L, w: 2 * L, h: 2 * L }, previews: {} };
   }
+  const budget = roomOf(felt);
   const hub = centerTile(board);
   const tiles: PlacedTile[] = [hub];
   for (const arm of ["west", "east", "north", "south"] as const) {
-    for (const laid of placeChain(arm, board.arms[arm], hub)) tiles.push(laid);
+    const room = { ...budget };
+    for (const laid of placeChain(arm, board.arms[arm], hub, room)) tiles.push(laid);
   }
   const ends: PlacedEnd[] = [];
   const previews: BoardLayout["previews"] = {};
@@ -273,7 +391,7 @@ export function layoutPinwheel(board: BoardState): BoardLayout {
     const last = [...tiles].reverse().find((tile) => tile.arm === arm);
     if (!last) continue;
     ends.push({ x: last.x, y: last.y, w: last.w, h: last.h, id: arm, match: end.match, scorePips: end.scorePips });
-    const ghost = placeChain(arm, [...chain, { tileId: "ghost", low: 0, high: 1, inward: 0, outward: 1 }], hub);
+    const ghost = placeChain(arm, [...chain, { tileId: "ghost", low: 0, high: 1, inward: 0, outward: 1 }], hub, { ...budget });
     const next = ghost[ghost.length - 1];
     if (next) previews[arm] = { x: next.x, y: next.y, w: next.w, h: next.h };
   }
