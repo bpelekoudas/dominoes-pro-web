@@ -31,6 +31,10 @@ function artifactDir() {
   throw new Error("No writable artifacts directory. Set SOAK_ARTIFACTS.");
 }
 
+const STILL = ".hand-tile,.bone-pile,.hand-tray{animation:none !important;transition:none !important}";
+const HIDE_CHROME = `[data-uhoh=title],[data-uhoh=impact],.score-pop{visibility:hidden !important}${STILL}`;
+const HIDE_BLAST = `${HIDE_CHROME}[data-uhoh=blast]{display:none !important}`;
+
 const MODES = [
   { seats: 2, boneyardMode: "draw_until", seriesLength: 3 },
   { seats: 3, boneyardMode: "draw_one", seriesLength: 3 },
@@ -1633,9 +1637,6 @@ function rawRgb(file) {
   const result = spawnSync("ffmpeg", ["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], { maxBuffer: 16_000_000 });
   return result.stdout;
 }
-
-const HIDE_CHROME = "[data-uhoh=title],[data-uhoh=impact],.score-pop{visibility:hidden !important}";
-const HIDE_BLAST = `${HIDE_CHROME}[data-uhoh=blast]{display:none !important}`;
 
 function videoBlackAt(buf, view, x, y) {
   if (!buf || x < 0 || y < 0 || x >= view.width || y >= view.height) return false;
