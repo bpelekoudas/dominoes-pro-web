@@ -33,11 +33,15 @@ export const HEAVY_FX = new Set<FxId>(["glass", "fire", "lightning", "quake", "f
  */
 const VIDEO_FX = new Set<FxId>(["glass", "fire", "lightning", "money", "confetti", "tumble", "quake", "trophy", "explosion"]);
 
+// The effect id stays "quake". The filmed file uses the catalog name.
+const VIDEO_FILE: Partial<Record<FxId, string>> = { quake: "earthquake" };
+
 export function videoFxAsset(id: FxId): { mp4: string; webm: string } | null {
   if (!VIDEO_FX.has(id)) return null;
   const meta = FX_LIST.find((fx) => fx.id === id);
   if (!meta) return null;
-  return { mp4: `/fx/${meta.code}-${id}.mp4`, webm: `/fx/${meta.code}-${id}.webm` };
+  const file = VIDEO_FILE[id] ?? id;
+  return { mp4: `/fx/${meta.code}-${file}.mp4`, webm: `/fx/${meta.code}-${file}.webm` };
 }
 
 /** Fetch each filmed burst after the first tap so the next 20+ can start on the tile. */
