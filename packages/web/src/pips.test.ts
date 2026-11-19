@@ -54,6 +54,8 @@ describe("pip positions", () => {
     expect(PIP_PITCH).toBeCloseTo(0.31, 5);
     const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
     expect(css).toMatch(/\.half i \{[^}]*width:\s*20cqmin;\s*height:\s*20cqmin;/);
+    expect(css).toMatch(/\.domino \{[^}]*direction:\s*ltr;/);
+    expect(css).toMatch(/\.domino\.horizontal > \.half:first-of-type \{ grid-area: 1 \/ 1; \}/);
     expect(css).not.toMatch(/\.hand-tile \.half i \{[^}]*width:/);
     let checked = 0;
     for (const tile of allTiles()) {

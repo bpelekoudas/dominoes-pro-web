@@ -3228,6 +3228,74 @@ export function insideHard(box: LayoutBox): boolean {
   return insideRect(box, HARD_WIDTH, HARD_HEIGHT);
 }
 
+function halfBoxes(tile: PlacedTile): { start: LayoutBox; end: LayoutBox } {
+  const horizontal = tile.orientation === "horizontal" || tile.w + 0.01 >= tile.h;
+  if (horizontal) {
+    const w = tile.w / 2;
+    return {
+      start: { x: tile.x, y: tile.y, w, h: tile.h },
+      end: { x: tile.x + w, y: tile.y, w, h: tile.h },
+    };
+  }
+  const h = tile.h / 2;
+  return {
+    start: { x: tile.x, y: tile.y, w: tile.w, h },
+    end: { x: tile.x, y: tile.y + h, w: tile.w, h },
+  };
+}
+
+function joinScore(a: LayoutBox, b: LayoutBox): { gap: number; along: number } {
+  const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  const gapX = Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w), 0);
+  const gapY = Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h), 0);
+  // A real join has a small gap on one axis and overlap on the other.
+  const along = gapX > 1 && gapY > 1 ? 0 : Math.max(xOverlap, yOverlap, 0);
+  return { gap: Math.hypot(gapX, gapY), along };
+}
+
+/**
+ * Pips in the half of `tile` that sits against `toward`.
+ * `a` is the left half of a horizontal tile and the top half of a vertical one.
+ * A double's long side meets the neighbor with both halves, which show the same pip.
+ */
+export function halfFacing(tile: PlacedTile, toward: LayoutBox): number {
+  if (tile.a === tile.b) return tile.a;
+  const halves = halfBoxes(tile);
+  const start = joinScore(halves.start, toward);
+  const end = joinScore(halves.end, toward);
+  if (Math.abs(start.gap - end.gap) < 0.75) return start.along >= end.along ? tile.a : tile.b;
+  return start.gap < end.gap ? tile.a : tile.b;
+}
+
+/**
+ * The half that touches the tile it was played on shows that open pip.
+ * Checked for the first tile of every arm, tiles after a turn, and doubles.
+ * The matched pip is walked from the spinner face, not from the stored inward
+ * field, so a swap in both places cannot hide itself.
+ */
+export function adjacentHalvesMatch(board: BoardState, layout: BoardLayout): boolean {
+  if (!board.center) return layout.tiles.length === 0;
+  const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+  const center = byId.get(board.center.tileId);
+  if (!center) return false;
+  const face = (arm: (typeof ARM_IDS)[number]) =>
+    arm === "west" || arm === "north" ? board.center!.westValue : board.center!.eastValue;
+  for (const arm of ARM_IDS) {
+    let parent: PlacedTile = center;
+    let match = face(arm);
+    for (const tile of board.arms[arm]) {
+      const placed = byId.get(tile.tileId);
+      if (!placed) return false;
+      if (tile.low !== match && tile.high !== match) return false;
+      if (halfFacing(placed, parent) !== match) return false;
+      match = tile.low === tile.high ? tile.low : tile.low === match ? tile.high : tile.low;
+      parent = placed;
+    }
+  }
+  return true;
+}
+
 function insideRect(box: LayoutBox, width: number, height: number): boolean {
   return (
     box.x >= -width / 2 &&
