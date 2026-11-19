@@ -1997,6 +1997,15 @@ body.is-dragging .hand { touch-action: none; overflow: hidden; }
   transform: translateY(-50%);
 }
 
+.uhoh-blast-source {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
 .uhoh-blast {
   position: fixed;
   z-index: 4;

@@ -1444,7 +1444,7 @@ async function stressFoldCover(browser, origin) {
       for (let watch = 0; watch < 40 && !shown; watch += 1) {
         shown = await page.evaluate((next) => {
           const title = document.querySelector(`[data-uhoh="title"][data-awarded="${next}"]`);
-          const video = document.querySelector("[data-uhoh=blast]");
+          const video = document.querySelector("[data-uhoh=blast-video]");
           return Boolean(title) && video instanceof HTMLVideoElement && video.currentTime > 0.04;
         }, score);
         if (shown) break;
@@ -1574,7 +1574,7 @@ async function checkBigScores(browser, origin, outDir) {
         }
         lastProbe = await page.evaluate((next) => {
           const title = document.querySelector(`[data-uhoh="title"][data-awarded="${next}"]`);
-          const video = document.querySelector("[data-uhoh=blast]");
+          const video = document.querySelector("[data-uhoh=blast-video]");
           const shatter = document.querySelector("[data-uhoh=shatter]");
           const time = video instanceof HTMLVideoElement ? video.currentTime : 0;
           const played = time > 0.04;
@@ -1592,7 +1592,8 @@ async function checkBigScores(browser, origin, outDir) {
             return box.left < other.right - 2 && box.right > other.left + 2 && box.top < other.bottom - 2 && box.bottom > other.top + 2;
           }).map((node) => node.getAttribute("data-board-tile") || node.className);
           const z = Number(getComputedStyle(title).zIndex);
-          const tap = video ? getComputedStyle(video).pointerEvents : "none";
+          const blast = document.querySelector("[data-uhoh=blast]");
+          const tap = blast ? getComputedStyle(blast).pointerEvents : "none";
           // The clip is on screen immediately. The "+N" fades in on the
           // moment's own timing, and a later real play may replace it.
           const titleUp = opacity >= 0.5 || (played && box.width >= 40);
@@ -1605,11 +1606,11 @@ async function checkBigScores(browser, origin, outDir) {
       }
       if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
       await page.waitForFunction(() => {
-        const video = document.querySelector("[data-uhoh=blast]");
+        const video = document.querySelector("[data-uhoh=blast-video]");
         return video instanceof HTMLVideoElement && video.currentTime >= 0.4;
       }, { timeout: 1500 }).catch(() => undefined);
       await page.evaluate(() => {
-        const video = document.querySelector("[data-uhoh=blast]");
+        const video = document.querySelector("[data-uhoh=blast-video]");
         if (video instanceof HTMLVideoElement) video.pause();
       });
       const hand = await handStill(page);
@@ -1680,7 +1681,7 @@ async function handStill(page) {
     }).filter((box) => box.w > 4 && box.h > 4);
   });
   if (rects.length < 2) return { ok: false, reason: "The hand or the draw pile is missing." };
-  const videoThere = await page.evaluate(() => document.querySelector("[data-uhoh=blast]") instanceof HTMLVideoElement);
+  const videoThere = await page.evaluate(() => document.querySelector("[data-uhoh=blast-video]") instanceof HTMLVideoElement);
   if (!videoThere) return { ok: false, reason: "The filmed clip was gone." };
   const sentinels = await traySentinels(page);
   const bare = path.join("/tmp", `hand-bare-${Date.now()}.png`);
@@ -1729,10 +1730,11 @@ function blankShot(file, view) {
 
 async function feltSeam(page) {
   const readPoints = () => page.evaluate(() => {
-    const video = document.querySelector("[data-uhoh=blast]");
+    const video = document.querySelector("[data-uhoh=blast-video]");
+    const blast = document.querySelector("[data-uhoh=blast]");
     const felt = document.querySelector(".table-scroll");
-    if (!(video instanceof HTMLVideoElement) || !felt) return null;
-    const v = video.getBoundingClientRect();
+    if (!(video instanceof HTMLVideoElement) || !(blast instanceof HTMLElement) || !felt) return null;
+    const v = blast.getBoundingClientRect();
     const f = felt.getBoundingClientRect();
     const midX = Math.min(f.right - 6, Math.max(f.left + 6, (v.left + v.right) / 2));
     const midY = Math.min(f.bottom - 6, Math.max(f.top + 6, (v.top + v.bottom) / 2));

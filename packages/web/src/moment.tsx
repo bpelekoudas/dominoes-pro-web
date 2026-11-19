@@ -93,6 +93,7 @@ export function MomentLayer({
   const [phase, setPhase] = useState<"impact" | "shatter" | "title">(reduced ? "title" : "impact");
   const [clipOk, setClipOk] = useState(true);
   const blastRef = useRef<HTMLVideoElement>(null);
+  const paintRef = useRef<HTMLCanvasElement>(null);
   const [shake, setShake] = useState<BigMomentLevel | null>(null);
 
   useEffect(() => {
@@ -151,6 +152,36 @@ export function MomentLayer({
     const pending = video.play();
     if (pending) pending.catch(fail);
     return () => video.removeEventListener("error", fail);
+  }, [blast, token]);
+  useEffect(() => {
+    if (!blast) return;
+    const video = blastRef.current;
+    const canvas = paintRef.current;
+    if (!video || !canvas) return;
+    let frame = 0;
+    // Paint the decoded frame ourselves. A <video> big enough to cover the
+    // felt keeps its own overlay, and that overlay ignores the mask and the
+    // hand's stacking, so a frame can land on the tiles.
+    const paint = () => {
+      const side = canvas.clientWidth;
+      if (side >= 8 && video.readyState >= 2) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const pixels = Math.floor(side * dpr);
+        if (canvas.width !== pixels) {
+          canvas.width = pixels;
+          canvas.height = pixels;
+        }
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, side, side);
+          ctx.drawImage(video, 0, 0, side, side);
+        }
+      }
+      frame = requestAnimationFrame(paint);
+    };
+    frame = requestAnimationFrame(paint);
+    return () => cancelAnimationFrame(frame);
   }, [blast, token]);
 
   useLayoutEffect(() => {
@@ -214,21 +245,28 @@ export function MomentLayer({
     ? null
     : blast
       ? createPortal(
-          <video
-            key={token}
-            ref={blastRef}
-            className="uhoh-blast"
-            data-uhoh="blast"
-            data-fx={fxId}
-            muted
-            playsInline
-            autoPlay
-            preload="auto"
-            style={{ left: blastAt.left, top: blastAt.top, width: blastAt.size, height: blastAt.size }}
-          >
-            <source src={clip?.webm} type="video/webm" />
-            <source src={clip?.mp4} type="video/mp4" />
-          </video>,
+          <>
+            <video
+              key={token}
+              ref={blastRef}
+              className="uhoh-blast-source"
+              data-uhoh="blast-video"
+              muted
+              playsInline
+              autoPlay
+              preload="auto"
+            >
+              <source src={clip?.webm} type="video/webm" />
+              <source src={clip?.mp4} type="video/mp4" />
+            </video>
+            <canvas
+              ref={paintRef}
+              className="uhoh-blast"
+              data-uhoh="blast"
+              data-fx={fxId}
+              style={{ left: blastAt.left, top: blastAt.top, width: blastAt.size, height: blastAt.size }}
+            />
+          </>,
           document.body,
         )
       : createPortal(
