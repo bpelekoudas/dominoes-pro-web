@@ -74,12 +74,6 @@ export function Domino({
   );
 }
 
-function endPoints(plays: Array<{ endId: string; points: number }>, endId: string): string {
-  const found = plays.find((play) => play.endId === endId);
-  const points = found?.points ?? 0;
-  return points > 0 ? `+${points}` : "0";
-}
-
 export function Table({
   view,
   selectedTile,
@@ -697,7 +691,7 @@ export function Table({
                   onClick={() => chooseEnd(end.id)}
                   aria-label={`Open ${end.id} end, match ${end.match}`}
                 >
-                  {showScores && hot ? <em className="end-points">{endPoints(focusPlays, end.id)}</em> : null}
+                  {/* The open-end total stays in the tray. A number here sits on the felt. */}
                 </button>
               );
             })}
