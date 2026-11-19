@@ -203,10 +203,11 @@ export function MomentLayer({
     : { left: "50%", top: "46%", width: 44, height: 88 };
   const titleAt = clearTitleSpot(anchor);
 
-  // Every 20+ plays the equipped burst. Glass is the default. Mega explosion
-  // is the filmed blast instead of canvas particles. A lock or a comeback
-  // also says UH-OH. A plain score shows the points. The burst is portaled
-  // onto the body so the stage transform cannot clip it.
+  // Every 20+ plays the equipped burst. Glass is the default. Glass, fire,
+  // lightning, and mega explosion play the filmed clip, and fall back to
+  // canvas if it will not start. A lock or a comeback also says UH-OH. A
+  // plain score shows the points. The burst is portaled onto the body so
+  // the stage transform cannot clip it.
   const blastAt = blastBox(anchor);
   const burst = reduced
     ? null

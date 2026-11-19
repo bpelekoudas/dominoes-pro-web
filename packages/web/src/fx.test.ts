@@ -23,9 +23,10 @@ describe("uh-oh effects", () => {
     expect(normalizeFx("explosion")).toBe("explosion");
     expect(FX_LIST.find((fx) => fx.id === "explosion")?.name).toBe("Mega explosion");
     expect(videoFxAsset("glass")).toEqual({ mp4: "/fx/FX-001-glass.mp4", webm: "/fx/FX-001-glass.webm" });
+    expect(videoFxAsset("fire")).toEqual({ mp4: "/fx/FX-002-fire.mp4", webm: "/fx/FX-002-fire.webm" });
     expect(videoFxAsset("lightning")).toEqual({ mp4: "/fx/FX-003-lightning.mp4", webm: "/fx/FX-003-lightning.webm" });
     expect(videoFxAsset("explosion")).toEqual({ mp4: "/fx/FX-011-explosion.mp4", webm: "/fx/FX-011-explosion.webm" });
-    expect(videoFxAsset("fire")).toBeNull();
+    expect(videoFxAsset("money")).toBeNull();
   });
 
   it("starts on the placed tile and reaches most of the screen", () => {
