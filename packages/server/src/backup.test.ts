@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { listBackups, pruneBackups, restoreDatabase, writeBackup } from "./backup.js";
+import { listBackups, mirrorBackup, pruneBackups, restoreDatabase, writeBackup } from "./backup.js";
 import { Store } from "./db.js";
 
 const dirs: string[] = [];
@@ -57,5 +57,21 @@ describe("sqlite backups", () => {
     expect(left).toHaveLength(2);
     expect(left.some((name) => name.includes("T01-00-00"))).toBe(false);
     expect(readdirSync(path.join(dir, "backups")).filter((name) => name.endsWith(".sqlite"))).toHaveLength(2);
+  });
+
+  it("copies a snapshot to a second folder and restores from that copy", async () => {
+    const dir = tempDir();
+    const mirror = tempDir();
+    const store = new Store(path.join(dir, "uhoh.sqlite"));
+    store.insertUser(user("ada"));
+    const snap = await writeBackup(store.db, dir);
+    const copied = mirrorBackup(snap, mirror);
+    store.insertUser(user("bea"));
+    store.db.close();
+    const restored = restoreDatabase(dir, copied);
+    const again = new Store(restored.live);
+    expect(again.user("ada")?.display_name).toBe("ada");
+    expect(again.user("bea")).toBeNull();
+    again.db.close();
   });
 });

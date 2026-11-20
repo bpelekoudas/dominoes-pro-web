@@ -7,8 +7,14 @@ import websocket from "@fastify/websocket";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import {
   Accounts,
+  APPLE_STATE_COOKIE,
   appleConfigFromEnv,
+  appleStateCookie,
+  bridgeCookie,
   magicLinkDevMode,
+  readCookie,
+  redirectCsrfOk,
+  SESSION_COOKIE,
   sessionCookie,
   type AccountOptions,
   type SignInResult,
@@ -109,6 +115,14 @@ export async function createApp(options: AppOptions = {}) {
     bodyLimit: 1_048_576,
   });
   await app.register(websocket);
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => {
+    try {
+      const text = typeof body === "string" ? body : Buffer.from(body).toString("utf8");
+      done(null, Object.fromEntries(new URLSearchParams(text)));
+    } catch (error) {
+      done(error as Error);
+    }
+  });
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
     const raw = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -359,6 +373,37 @@ export async function createApp(options: AppOptions = {}) {
     const current = accounts.userFromCookieHeader(request.headers.cookie);
     const result = await accounts.signInGoogle(body.idToken ?? "", current?.id ?? null, body.confirm === true, body.age13 === true);
     return sendAuth(reply, request, result, store);
+  });
+
+  app.post("/api/auth/prepare-redirect", async (request, reply) => {
+    if (!originOk(request)) return reply.code(403).send({ error: "That request came from somewhere else." });
+    const secure = request.protocol === "https";
+    const state = randomBytes(16).toString("hex");
+    const cookies = [appleStateCookie(state, secure)];
+    const session = readCookie(request.headers.cookie, SESSION_COOKIE);
+    if (session) cookies.push(bridgeCookie(session, secure));
+    reply.header("set-cookie", cookies);
+    return { ok: true, appleState: state };
+  });
+
+  app.post("/api/auth/google/redirect", async (request, reply) => {
+    const body = (request.body ?? {}) as { credential?: string; g_csrf_token?: string };
+    if (!redirectCsrfOk(body.g_csrf_token, request.headers.cookie, "g_csrf_token")) {
+      return reply.redirect("/?auth=error&message=" + encodeURIComponent("That Google sign-in could not be checked."), 303);
+    }
+    const current = accounts.userFromCookieHeader(request.headers.cookie) ?? accounts.userFromBridge(request.headers.cookie);
+    const result = await accounts.signInGoogle(body.credential ?? "", current?.id ?? null, false, true);
+    return sendAuthRedirect(reply, request, result);
+  });
+
+  app.post("/api/auth/apple/redirect", async (request, reply) => {
+    const body = (request.body ?? {}) as { id_token?: string; state?: string };
+    if (!redirectCsrfOk(body.state, request.headers.cookie, APPLE_STATE_COOKIE)) {
+      return reply.redirect("/?auth=error&message=" + encodeURIComponent("That Apple sign-in could not be checked."), 303);
+    }
+    const current = accounts.userFromCookieHeader(request.headers.cookie) ?? accounts.userFromBridge(request.headers.cookie);
+    const result = await accounts.signInApple(body.id_token ?? "", current?.id ?? null, false, true);
+    return sendAuthRedirect(reply, request, result);
   });
 
   app.post("/api/auth/apple", async (request, reply) => {
@@ -794,6 +839,16 @@ function publicError(row: {
 
 function requestPath(url: string): string {
   return (url.split("?")[0] ?? "/").replace(/\/+$/, "") || "/";
+}
+
+function sendAuthRedirect(reply: FastifyReply, request: FastifyRequest, result: SignInResult) {
+  if (result.outcome === "ok" && result.token) {
+    reply.header("set-cookie", sessionCookie(result.token, request.protocol === "https", 30 * 24 * 60 * 60));
+    return reply.redirect("/", 303);
+  }
+  if (result.outcome === "already-claimed") return reply.redirect("/?auth=claimed", 303);
+  const message = "error" in result ? result.error : "That sign-in did not work.";
+  return reply.redirect(`/?auth=error&message=${encodeURIComponent(message.slice(0, 160))}`, 303);
 }
 
 function sendAuth(reply: FastifyReply, request: FastifyRequest, result: SignInResult, store: Store) {

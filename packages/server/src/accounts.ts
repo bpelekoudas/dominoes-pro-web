@@ -56,6 +56,9 @@ export interface AccountOptions {
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAGIC_MS = 15 * 60 * 1000;
 export const SESSION_COOKIE = "uhoh_session";
+/** Copy of the session sent on a cross-site Google or Apple redirect. */
+export const BRIDGE_COOKIE = "uhoh_bridge";
+export const APPLE_STATE_COOKIE = "uhoh_apple_state";
 
 const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"));
 const appleKeys = createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys"));
@@ -137,6 +140,29 @@ export function sessionCookie(token: string, secure: boolean, maxAge: number): s
   ];
   if (secure) parts.push("Secure");
   return parts.join("; ");
+}
+
+/**
+ * A Google or Apple redirect is a cross-site POST. Lax cookies stay home.
+ * On https the bridge is SameSite=None so the guest session can come along.
+ */
+export function bridgeCookie(value: string, secure: boolean): string {
+  const parts = [`${BRIDGE_COOKIE}=${encodeURIComponent(value)}`, "Path=/", "HttpOnly", "Max-Age=600"];
+  if (secure) parts.push("SameSite=None", "Secure");
+  else parts.push("SameSite=Lax");
+  return parts.join("; ");
+}
+
+export function appleStateCookie(state: string, secure: boolean): string {
+  const parts = [`${APPLE_STATE_COOKIE}=${encodeURIComponent(state)}`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=600"];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
+export function redirectCsrfOk(bodyToken: unknown, cookieHeader: string | undefined, cookieName: string): boolean {
+  if (typeof bodyToken !== "string" || !bodyToken) return false;
+  const cookie = readCookie(cookieHeader, cookieName);
+  return Boolean(cookie && cookie === bodyToken);
 }
 
 class RateLimit {
@@ -241,6 +267,13 @@ export class Accounts {
 
   userFromCookieHeader(header: string | undefined): PublicUser | null {
     const raw = readCookie(header, SESSION_COOKIE);
+    if (!raw) return null;
+    return this.userFromCookieValue(raw);
+  }
+
+  /** The session cookie is missing on a cross-site redirect. The bridge stands in for it. */
+  userFromBridge(header: string | undefined): PublicUser | null {
+    const raw = readCookie(header, BRIDGE_COOKIE);
     if (!raw) return null;
     return this.userFromCookieValue(raw);
   }

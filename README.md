@@ -134,7 +134,11 @@ A new deploy stops the old copy for a few seconds before the new one starts. Tha
 
 The server writes a snapshot to `/var/data/backups` about 30 seconds after it starts, again every 6 hours, and once more when it shuts down for a deploy. It keeps the 8 newest snapshots, and it stops sooner if those files would use more than 400 MB, so the live game still has room on the 1 GB disk. A snapshot is a consistent copy. Games can keep saving while it is written.
 
-These copies sit on the same disk as the live file. They survive a bad write and a deploy. They do not survive if that disk is deleted. To keep a copy off the machine, download one file from the Render shell when you want one.
+These copies sit on the same disk as the live file. They survive a bad write and a deploy. They do not survive if that disk is deleted. Render does not automatically copy that disk anywhere else. In the Render dashboard, open the disk and take a snapshot when you want a copy that is not on the machine. That snapshot is part of the disk you already pay for. It is not a new account.
+
+Set `BACKUP_MIRROR_DIR` only if you have a second folder to copy each snapshot into. Leave it unset on the current one-disk service.
+
+A deploy or restart does not wipe `/var/data`. New tables and columns are added only when they are missing. Old rows stay.
 
 To see the snapshots:
 

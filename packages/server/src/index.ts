@@ -1,4 +1,4 @@
-import { writeBackup } from "./backup.js";
+import { mirrorBackup, writeBackup } from "./backup.js";
 import { createApp, drainServer } from "./app.js";
 import { recordServerFault } from "./ops.js";
 
@@ -41,6 +41,11 @@ async function saveBackup(reason: string): Promise<void> {
   try {
     const file = await writeBackup(store.db, dataDir);
     console.log(`[backup] ${reason} ${file}`);
+    const mirror = process.env.BACKUP_MIRROR_DIR?.trim() ?? "";
+    if (mirror) {
+      const copied = mirrorBackup(file, mirror);
+      console.log(`[backup] copy ${copied}`);
+    }
   } catch (error) {
     console.warn(`[backup] ${reason} failed (${error instanceof Error ? error.message : "unknown"}).`);
   }
