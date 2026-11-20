@@ -31,6 +31,8 @@ interface StoreState {
   owned: string[];
   loadout: Loadout;
   items: StoreItem[];
+  /** From the server. Emotes stay hidden until EMOTES_ENABLED is on. */
+  emotesEnabled?: boolean;
 }
 
 interface ShopPack {
@@ -121,7 +123,11 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
     }
   };
 
-  const items = state?.items.filter((item) => item.category === tab) ?? [];
+  const emotesOn = state?.emotesEnabled === true;
+  const tabs = TABS.filter((entry) => entry.id !== "emote" || emotesOn);
+  const active = !emotesOn && tab === "emote" ? "character" : tab;
+  // Tabs, the grid, and any search or rotation of this payload share one list.
+  const items = (state?.items ?? []).filter((item) => item.category === active && (emotesOn || item.category !== "emote"));
   return (
     <section className="store-screen" role="dialog" aria-label="Store" data-screen="store">
       <header className="store-bar">
@@ -167,13 +173,13 @@ export function StoreScreen({ onClose, onChanged }: { onClose: () => void; onCha
         <a href="/privacy">Privacy</a>
       </nav>
       {error ? <p className="banner error">{error}</p> : null}
-      <div className="store-tabs" role="tablist">
-        {TABS.map((entry) => (
+      <div className="store-tabs" role="tablist" data-emotes={emotesOn ? "on" : "off"}>
+        {tabs.map((entry) => (
           <button
             type="button"
             key={entry.id}
             role="tab"
-            aria-selected={tab === entry.id}
+            aria-selected={active === entry.id}
             onClick={press(() => {
               setTab(entry.id);
               setPicked(null);

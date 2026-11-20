@@ -22,6 +22,7 @@ import {
 } from "@uhoh/rules";
 import { Cosmetics } from "./cosmetics.js";
 import type { Store } from "./db.js";
+import { emotesEnabled } from "./emotes.js";
 import { GAME_BONES_DAILY_CAP, bonesForGame } from "./economy.js";
 import { Hub, type AccountBotCard, type ServerMessage } from "./hub.js";
 import { denverDay, leaderboard, settleGame } from "./ranking.js";
@@ -510,6 +511,7 @@ export class BotLeague {
     const owned = new Set(this.owned(bot.userId));
     const choices = CATALOG.filter((item) => {
       if (isWithheldId(item.id) || isWithheldId(item.avatarId)) return false;
+      if (!emotesEnabled() && item.category === "emote") return false;
       if (!canBuy(item, "bones")) return false;
       if (owned.has(item.id)) return false;
       return (item.bones ?? 0) > 0 && (item.bones ?? 0) <= wallet.bones;
@@ -978,7 +980,8 @@ function itemWeight(item: StoreItem, personality: Personality): number {
   let taste = 1;
   if (personality === "flashy" && (item.category === "effect" || item.category === "frame")) taste = 4;
   if (personality === "collector" && (item.category === "tile" || item.category === "table")) taste = 4;
-  if (personality === "talker" && (item.category === "trash" || item.category === "emote")) taste = 4;
+  if (personality === "talker" && item.category === "trash") taste = 4;
+  if (personality === "talker" && item.category === "emote" && emotesEnabled()) taste = 4;
   if (personality === "portrait" && item.category === "character") taste = 4;
   return rarity * taste;
 }

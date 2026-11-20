@@ -181,13 +181,24 @@ describe("bot economy", () => {
     expect(grantSeasonRewards(store, "climber", 0, now)).toEqual([]);
     const shark = grantSeasonRewards(store, "climber", 1800, now);
     expect(shark).toEqual(["TT-003", "FRM-004", "TBL-006", "CHR-006", "FX-003", "FRM-002"]);
-    expect(grantSeasonRewards(store, "climber", 6000, now)).toEqual(["TIL-009", "CHR-023", "EMO-005", "FRM-003"]);
+    expect(SEASON_FREE_TRACK.find((tier) => tier.tierId === "big-shot")?.items).toContain("EMO-005");
+    expect(grantSeasonRewards(store, "climber", 6000, now)).toEqual(["TIL-009", "CHR-023", "FRM-003"]);
     const owned = store.db.prepare(`SELECT item_id FROM owned_items WHERE user_id = ?`).all("climber") as Array<{
       item_id: string;
     }>;
     const ids = owned.map((row) => row.item_id);
     for (const pass of SEASON_PASS_ONLY) expect(ids).not.toContain(pass);
     expect(ids).not.toContain("CHR-015");
+    expect(ids).not.toContain("EMO-005");
+    store.insertUser({
+      id: "climber-on",
+      display_name: "Climber On",
+      avatar_id: "homescreen",
+      created_at: now,
+      updated_at: now,
+      is_guest: 0,
+    });
+    expect(grantSeasonRewards(store, "climber-on", 6000, now, { EMOTES_ENABLED: "true" })).toContain("EMO-005");
   });
 
   it("keeps computer accounts off the public board", () => {

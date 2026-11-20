@@ -11,6 +11,7 @@ import {
   type StoreItem,
 } from "@uhoh/rules";
 import type { Store } from "./db.js";
+import { emotesEnabled } from "./emotes.js";
 
 export interface CosmeticLoadout {
   characterId: string | null;
@@ -29,6 +30,8 @@ export interface StoreSnapshot {
   owned: string[];
   loadout: CosmeticLoadout;
   items: readonly StoreItem[];
+  /** Mirrors EMOTES_ENABLED. The store UI hides the Emotes tab when this is false. */
+  emotesEnabled: boolean;
 }
 
 interface WalletRow {
@@ -63,6 +66,7 @@ export class Cosmetics {
   constructor(
     private readonly store: Store,
     private readonly now: () => Date = () => new Date(),
+    private readonly emotesOn: boolean = emotesEnabled(),
   ) {}
 
   snapshot(userId: string): StoreSnapshot {
@@ -76,7 +80,8 @@ export class Cosmetics {
       goldBones: wallet?.gold_bones ?? (bot ? 0 : TEST_GOLD),
       owned: this.owned(userId),
       loadout,
-      items: CATALOG,
+      items: this.listed(),
+      emotesEnabled: this.emotesOn,
     };
   }
 
@@ -84,6 +89,7 @@ export class Cosmetics {
     if (isWithheldId(itemId)) return { ok: false, error: "That item is not available." };
     const item = itemById(itemId);
     if (!item) return { ok: false, error: "That item is not in the store." };
+    if (this.emoteBlocked(item)) return { ok: false, error: "That item is not available." };
     const price = priceOf(item, currency);
     if (price == null) return { ok: false, error: "That one isn't for sale." };
     this.ensure(userId);
@@ -103,6 +109,7 @@ export class Cosmetics {
     if (isWithheldId(itemId)) return { ok: false, error: "That item is not available." };
     const item = itemById(itemId);
     if (!item) return { ok: false, error: "That item is not in the store." };
+    if (this.emoteBlocked(item)) return { ok: false, error: "That item is not available." };
     this.ensure(userId);
     if (!this.owns(userId, item.id)) return { ok: false, error: "Buy it before you wear it." };
     const column = SLOT[item.category];
@@ -142,7 +149,7 @@ export class Cosmetics {
     const row = this.store.db.prepare(`SELECT * FROM loadouts WHERE user_id = ?`).get(userId) as LoadoutRow | undefined;
     if (!row) return [];
     const lines = [];
-    for (const id of [row.trash_id, row.emote_id]) {
+    for (const id of [row.trash_id, this.emotesOn ? row.emote_id : null]) {
       if (!id || !this.owns(userId, id)) continue;
       const item = itemById(id);
       if (!item) continue;
@@ -162,7 +169,8 @@ export class Cosmetics {
         .run(userId, bot ? 0 : TEST_BONES, bot ? 0 : TEST_GOLD, stamp);
     }
     for (const item of CATALOG) {
-      if (item.obtain === "free") this.grant(userId, item.id);
+      if (item.obtain !== "free" || this.emoteBlocked(item)) continue;
+      this.grant(userId, item.id);
     }
     const existing = this.store.db.prepare(`SELECT character_id FROM loadouts WHERE user_id = ?`).get(userId) as
       | { character_id: string | null }
@@ -178,16 +186,17 @@ export class Cosmetics {
       this.store.db
         .prepare(
           `INSERT INTO loadouts (user_id, character_id, tile_id, table_id, frame_id, effect_id, trash_id, emote_id)
-           VALUES (?, ?, 'TIL-001', 'TBL-001', NULL, 'FX-001', 'TT-001', 'EMO-001')`,
+           VALUES (?, ?, 'TIL-001', 'TBL-001', NULL, 'FX-001', 'TT-001', ?)`,
         )
-        .run(userId, worn?.id ?? null);
+        .run(userId, worn?.id ?? null, this.emotesOn ? "EMO-001" : null);
     } else if (bare && !existing.character_id && worn) {
       this.store.db.prepare(`UPDATE loadouts SET character_id = ? WHERE user_id = ?`).run(worn.id, userId);
     }
   }
 
   private grant(userId: string, itemId: string): void {
-    if (isWithheldId(itemId) || !itemById(itemId)) return;
+    const item = itemById(itemId);
+    if (isWithheldId(itemId) || !item || this.emoteBlocked(item)) return;
     this.store.db
       .prepare(`INSERT INTO owned_items (user_id, item_id, acquired_at) VALUES (?, ?, ?) ON CONFLICT(user_id, item_id) DO NOTHING`)
       .run(userId, itemId, this.stamp());
@@ -213,5 +222,15 @@ export class Cosmetics {
 
   private stamp(): string {
     return this.now().toISOString();
+  }
+
+  /** Store listings, search, and featured rotations all read this list. */
+  private listed(): readonly StoreItem[] {
+    if (this.emotesOn) return CATALOG;
+    return CATALOG.filter((item) => item.category !== "emote");
+  }
+
+  private emoteBlocked(item: StoreItem): boolean {
+    return !this.emotesOn && item.category === "emote";
   }
 }

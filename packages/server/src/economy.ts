@@ -1,5 +1,6 @@
 import { isWithheldId, itemById, TEST_BONES, TEST_GOLD } from "@uhoh/rules";
 import type { Store } from "./db.js";
+import { emotesEnabled } from "./emotes.js";
 
 /** Bones for finishing a completed game. Incomplete games pay nothing. */
 export const GAME_FINISH_BONES = 20;
@@ -138,15 +139,23 @@ export function grantBonusBones(
 }
 
 /** Grant every free-track item the account's season points have reached. Idempotent. */
-export function grantSeasonRewards(store: Store, userId: string, points: number, at: string): string[] {
+export function grantSeasonRewards(
+  store: Store,
+  userId: string,
+  points: number,
+  at: string,
+  env: { EMOTES_ENABLED?: string | undefined } = process.env,
+): string[] {
   const granted: string[] = [];
   const passOnly = new Set<string>(SEASON_PASS_ONLY);
+  const allowEmotes = emotesEnabled(env);
   for (const tier of SEASON_FREE_TRACK) {
     if (points < tier.min) continue;
     for (const itemId of tier.items) {
       if (passOnly.has(itemId) || isWithheldId(itemId)) continue;
       const item = itemById(itemId);
       if (!item || item.obtain !== "season") continue;
+      if (item.category === "emote" && !allowEmotes) continue;
       const result = store.db
         .prepare(
           `INSERT INTO owned_items (user_id, item_id, acquired_at) VALUES (?, ?, ?)
