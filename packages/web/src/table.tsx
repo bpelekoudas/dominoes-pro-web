@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { createPortal } from "react-dom";
 import type { PlayerView } from "@uhoh/rules";
 import { PHONE_HEIGHT, PHONE_WIDTH, straightBox, TILE_SHORT, type BoardLayout, type LayoutBox, type LayoutLimits, type PlacedEnd } from "../../rules/src/layout.js";
-import { scoreDeltaLabel, scorePopupForPlay } from "./feel/score-delta.js";
+import { scoreDeltaLabel, scoreFloaterPoint, scorePopupForPlay } from "./feel/score-delta.js";
 import { shouldRefitFelt } from "./portrait-lock";
 import { motionMs } from "../../rules/src/motion.js";
 import { SCORE_FLY_MS, scorePopWindow } from "./feel/score-time.js";
@@ -668,10 +668,16 @@ export function Table({
   const popup = scorePopupForPlay(view.lastPlay, pop);
   const tray = typeof document === "undefined" ? null : document.querySelector(".hand-tray");
   const trayRect = tray?.getBoundingClientRect();
-  const popAt =
-    popup && pop && trayRect && trayRect.width > 1
-      ? { left: trayRect.left + Math.min(96, trayRect.width / 2), top: trayRect.top + 10, place: "above" as const }
-      : null;
+  const youName = typeof document === "undefined" ? null : document.querySelector(".you-float .chip-name")?.getBoundingClientRect();
+  const popped = popup && pop && trayRect && trayRect.width > 1
+    ? scoreFloaterPoint({
+        aim: { left: trayRect.left + Math.min(96, trayRect.width / 2), top: trayRect.top + 10 },
+        name: youName && youName.width > 2 ? youName : null,
+        width: pop.awarded >= 20 ? 110 : 72,
+        height: pop.awarded >= 20 ? 52 : 36,
+      })
+    : null;
+  const popAt = popped ? { ...popped, place: "above" as const } : null;
   const placed = moment?.tileId ? layout?.tiles.find((tile) => tile.tileId === moment.tileId) : undefined;
 
   function onCamDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1365,8 +1371,24 @@ function FlyingScore({
 }) {
   const [spot, setSpot] = useState(at);
   const [fly, setFly] = useState(false);
+  const popRef = useRef<HTMLParagraphElement>(null);
   useLayoutEffect(() => {
-    setSpot(at);
+    const sizeOf = () => {
+      const measured = popRef.current?.getBoundingClientRect();
+      if (measured && measured.width > 2) return { width: measured.width, height: measured.height };
+      return { width: pop.awarded >= 20 ? 110 : 72, height: pop.awarded >= 20 ? 52 : 36 };
+    };
+    const clearOf = (aim: { left: number; top: number }, name: DOMRect | null | undefined) => {
+      const size = sizeOf();
+      return scoreFloaterPoint({
+        aim,
+        name: name && name.width > 2 ? name : null,
+        width: size.width,
+        height: size.height,
+      });
+    };
+    const you = document.querySelector(".you-float .chip-name")?.getBoundingClientRect() ?? null;
+    setSpot({ ...at, ...clearOf(at, you) });
     setFly(false);
     let frame = 0;
     const wait = scorePopWindow(pop.awarded).fly;
@@ -1374,9 +1396,11 @@ function FlyingScore({
       const chip = document.querySelector<HTMLElement>(`[data-win-score="${CSS.escape(pop.playerId)}"]`);
       const rect = chip?.getBoundingClientRect();
       if (!rect || rect.width < 1) return;
+      const name = chip.closest(".seat-chip")?.querySelector(".chip-name")?.getBoundingClientRect() ?? null;
       frame = window.requestAnimationFrame(() => {
+        const point = clearOf({ left: rect.left + rect.width / 2, top: rect.top + rect.height / 2 }, name);
         setFly(true);
-        setSpot({ left: rect.left + rect.width / 2, top: rect.top + rect.height / 2, place: "above" });
+        setSpot({ left: point.left, top: point.top, place: "above" });
       });
     }, wait);
     return () => {
@@ -1386,6 +1410,7 @@ function FlyingScore({
   }, [pop.seq, pop.awarded, pop.playerId, at.left, at.top, at.place]);
   return createPortal(
     <p
+      ref={popRef}
       className="score-pop"
       style={{ left: spot.left, top: spot.top, transitionDuration: fly ? `${SCORE_FLY_MS}ms` : "0ms" }}
       data-awarded={pop.awarded}

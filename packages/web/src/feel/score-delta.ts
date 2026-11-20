@@ -66,6 +66,36 @@ export function scoreChaseFrames(from: number, to: number, awarded: number): num
   return frames;
 }
 
+/**
+ * A point the +N can sit on without covering the seat name.
+ * The floater is centered on `aim`. If that box crosses the name, it moves
+ * just above the name, or just below when above would leave the screen.
+ */
+export function scoreFloaterPoint(input: {
+  aim: { left: number; top: number };
+  name: { left: number; right: number; top: number; bottom: number } | null;
+  width: number;
+  height: number;
+}): { left: number; top: number } {
+  const left = input.aim.left;
+  const top = input.aim.top;
+  const name = input.name;
+  if (!name || name.right - name.left < 2 || name.bottom - name.top < 2) return { left, top };
+  const covers = (x: number, y: number) => {
+    const box = {
+      left: x - input.width / 2,
+      right: x + input.width / 2,
+      top: y - input.height / 2,
+      bottom: y + input.height / 2,
+    };
+    return box.left < name.right - 1 && box.right > name.left + 1 && box.top < name.bottom - 1 && box.bottom > name.top + 1;
+  };
+  if (!covers(left, top)) return { left, top };
+  const above = name.top - input.height / 2 - 6;
+  if (!covers(left, above) && above - input.height / 2 >= 4) return { left, top: above };
+  return { left, top: name.bottom + input.height / 2 + 6 };
+}
+
 /** Celebration wins. A count applies only while it still belongs to this play. */
 export function chipScore(input: {
   score: number;
