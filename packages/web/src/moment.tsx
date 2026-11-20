@@ -128,7 +128,15 @@ export function MomentLayer({
         setShake(null);
         onShakeRef.current(null);
       }, reduced ? 0 : motionMs(200) + motionMs(SHAKE_MS)),
-      window.setTimeout(() => onDoneRef.current(), reduced ? REDUCED_MS : TOTAL_MS),
+      window.setTimeout(function finish() {
+        // The soak holds the clip open while it samples pixels. A finished
+        // moment is not a square on the felt; the sample just has to see it.
+        if ((window as Window & { __holdMoment?: boolean }).__holdMoment) {
+          timers.push(window.setTimeout(finish, 200));
+          return;
+        }
+        onDoneRef.current();
+      }, reduced ? REDUCED_MS : TOTAL_MS),
     ];
     return () => {
       for (const timer of timers) window.clearTimeout(timer);

@@ -1602,11 +1602,14 @@ async function checkBigScores(browser, origin, outDir) {
       await settleCamera(page);
     const scores = fx === "glass" || fx === "lightning" || fx === "explosion" ? [20, 25, 30] : [20, 25];
     for (const score of scores) {
-      await page.evaluate(({ next, effect }) => { window.__bigAward = next; window.__bigFx = effect; window.__bigHeld = 0; window.__momentLog = []; }, { next: score, effect: fx });
+      await page.evaluate(({ next, effect }) => { window.__bigAward = next; window.__bigFx = effect; window.__bigHeld = 0; window.__momentLog = []; window.__holdMoment = true; }, { next: score, effect: fx });
       let shown = null;
       let lastProbe = null;
       let seenProbe = null;
-      for (let watch = 0; watch < 40 && !shown; watch += 1) {
+      // A play can land on the last look, with the clip mounted and currentTime
+      // still 0. Those extra looks are for the clock, not another tile.
+      let extra = 0;
+      for (let watch = 0; watch < 40 + extra && !shown; watch += 1) {
         const armed = await page.evaluate(() => Boolean(window.__bigAward));
         if (armed) {
           await page.evaluate(() => {
@@ -1654,10 +1657,22 @@ async function checkBigScores(browser, origin, outDir) {
           return { ok: played && titleUp && clear && z >= 80 && box.width >= 40 && tap === "none", opacity, z, hits, time: snap.time, tap, w: Math.round(box.width), h: Math.round(box.height) };
         }, score);
         if (lastProbe && (lastProbe.titles?.length || lastProbe.glass || lastProbe.video || lastProbe.moment)) seenProbe = lastProbe;
+        const waitingOnClock = Boolean(
+          lastProbe && lastProbe.ok === false && lastProbe.video && (lastProbe.titles?.length ?? 0) > 0 && lastProbe.time < 0.05 && !lastProbe.glass,
+        );
+        if (waitingOnClock && extra < 12) extra += 1;
         if (lastProbe && lastProbe.ok) shown = lastProbe;
-        else await page.waitForTimeout(200);
+        else await page.waitForTimeout(waitingOnClock ? 100 : 200);
       }
-      if (!shown) throw new Error(`The ${fx} ${score} animation is hidden or covering a tile at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
+      if (!shown) {
+        const waiting = Boolean(seenProbe && seenProbe.video && (seenProbe.titles?.length ?? 0) > 0 && seenProbe.time < 0.05);
+        const reason = waiting
+          ? "clip was on screen but had not started"
+          : seenProbe?.hits?.length
+            ? "score is covering a tile"
+            : "animation is hidden or covering a tile";
+        throw new Error(`The ${fx} ${score} ${reason} at ${size.name}: ${JSON.stringify(seenProbe || lastProbe)}`);
+      }
       await page.evaluate(() => {
         const video = document.querySelector("[data-uhoh=blast-video]");
         const blast = document.querySelector("[data-uhoh=blast]");
@@ -1696,6 +1711,7 @@ async function checkBigScores(browser, origin, outDir) {
       const seam = await feltSeam(page, shots);
       if (!seam.ok) throw new Error(`The ${fx} clip draws a square on the felt at ${size.name}: ${JSON.stringify(seam)}`);
       notes.push(`${size.name} ${fx} +${score}`);
+      await page.evaluate(() => { window.__holdMoment = false; });
       await page.waitForFunction(() => !document.querySelector("[data-uhoh=title]"), { timeout: 5000 }).catch(() => undefined);
     }
       await page.close();

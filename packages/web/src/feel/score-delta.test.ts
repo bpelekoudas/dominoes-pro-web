@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planWinPips } from "../win-plan";
-import { chipScore, scoreChaseFrames, scoreChaseKey, scoreDeltaLabel, scorePopupForPlay, scorePopupText } from "./score-delta";
+import { chipScore, scoreChaseFrames, scoreChaseKey, scoreDeltaLabel, scoreFloaterPoint, scorePopupForPlay, scorePopupText } from "./score-delta";
 
 describe("score delta", () => {
   it("shows the award itself and never a stand-in 20", () => {
@@ -29,6 +29,27 @@ describe("score delta", () => {
     expect(scoreChaseFrames(50, 70, 20)).toEqual([50, 55, 60, 65, 70]);
     expect(scoreChaseFrames(50, 50, 0)).toEqual([]);
     expect(scoreChaseFrames(50, 65, 15)).not.toContain(70);
+  });
+
+  it("keeps the +N off the seat name", () => {
+    const you = { left: 70, right: 130, top: 700, bottom: 714 };
+    expect(scoreFloaterPoint({ aim: { left: 100, top: 707 }, name: you, width: 100, height: 48 })).toEqual({
+      left: 100,
+      top: 670,
+    });
+    expect(scoreFloaterPoint({ aim: { left: 220, top: 400 }, name: you, width: 40, height: 20 })).toEqual({
+      left: 220,
+      top: 400,
+    });
+    const high = { left: 10, right: 80, top: 8, bottom: 22 };
+    expect(scoreFloaterPoint({ aim: { left: 40, top: 15 }, name: high, width: 80, height: 40 })).toEqual({
+      left: 40,
+      top: 48,
+    });
+    expect(scoreFloaterPoint({ aim: { left: 40, top: 15 }, name: null, width: 80, height: 40 })).toEqual({
+      left: 40,
+      top: 15,
+    });
   });
 
   it("ignores a count that belongs to an earlier play", () => {
