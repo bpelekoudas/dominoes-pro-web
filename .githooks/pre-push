@@ -1,0 +1,6 @@
+#!/bin/sh
+# The production build is what Render runs. Typecheck the rules and server
+# packages, then build the web client, before a branch is pushed.
+set -e
+echo "pre-push: npm run build"
+npm run build

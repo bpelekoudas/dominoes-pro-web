@@ -1,0 +1,800 @@
+{
+  "players": [
+    {
+      "id": "p_51dd77f00b1abe986f",
+      "name": "soak-0583xj4"
+    },
+    {
+      "id": "p_e6e28bf0e72c28f491",
+      "name": "soak-1dh4txx"
+    },
+    {
+      "id": "p_c46fbbf7a552d6496b",
+      "name": "soak-2p5e6db"
+    },
+    {
+      "id": "p_fe3f6a4972f4ac5f09",
+      "name": "soak-362dssz"
+    }
+  ],
+  "config": {
+    "boneyardMode": "draw_until",
+    "seriesLength": 5,
+    "targetScore": 150
+  },
+  "hands": [
+    {
+      "gameNumber": 1,
+      "handNumber": 1,
+      "seed": "34a5dda99393279543233e6c2057956af44088931d66f1a08eafa009c789d4ca",
+      "actions": [
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "6-6",
+            "endId": "lead"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-6",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "3-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "0-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "3-3",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "1-3",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "3-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "1-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "2-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "0-3",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-1",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "4-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "4-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "1-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "5-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "1-5",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "3-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "1-1",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-3",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "2-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "5-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "1-2",
+            "endId": "east"
+          }
+        }
+      ]
+    },
+    {
+      "gameNumber": 1,
+      "handNumber": 2,
+      "seed": "9fb32f849f2a5c8b2d246d561dcf0a11a0f77b5edeb516d0b28d3867fe1e720a",
+      "actions": [
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-3",
+            "endId": "lead"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "2-6",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-3",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-0",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-6",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "4-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "5-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "3-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "3-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-1",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "1-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "4-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "6-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-5",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "4-6",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "1-5",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "1-2",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-5",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "3-6",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "5-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-2",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "knock"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "1-3",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "2-2",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "2-4",
+            "endId": "south"
+          }
+        }
+      ]
+    },
+    {
+      "gameNumber": 1,
+      "handNumber": 3,
+      "seed": "495eac41d7765c5e44a279d1930eb8a1afca53d16c1953aca8c3bbdbef92f363",
+      "actions": [
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-1",
+            "endId": "lead"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "1-2",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "2-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "1-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "1-3",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "3-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "4-4",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "4-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "5-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "1-5",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-4",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "2-2",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "1-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "3-6",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "4-5",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-2",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "3-3",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-3",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-0",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-6",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "5-5",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "2-6",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "3-5",
+            "endId": "west"
+          }
+        }
+      ]
+    },
+    {
+      "gameNumber": 1,
+      "handNumber": 4,
+      "seed": "4426cf4f5a92ea0095c68b154b2807c122ff793f5a3057249cd8477c5ad4890f",
+      "actions": [
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-2",
+            "endId": "lead"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "0-0",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "2-5",
+            "endId": "east"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "0-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "0-1",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "5-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "0-3",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "3-3",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "1-6",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "1-3",
+            "endId": "south"
+          }
+        },
+        {
+          "playerId": "p_51dd77f00b1abe986f",
+          "intent": {
+            "type": "play",
+            "tileId": "4-5",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_e6e28bf0e72c28f491",
+          "intent": {
+            "type": "play",
+            "tileId": "2-4",
+            "endId": "west"
+          }
+        },
+        {
+          "playerId": "p_c46fbbf7a552d6496b",
+          "intent": {
+            "type": "play",
+            "tileId": "4-6",
+            "endId": "north"
+          }
+        },
+        {
+          "playerId": "p_fe3f6a4972f4ac5f09",
+          "intent": {
+            "type": "play",
+            "tileId": "1-5",
+            "endId": "east"
+          }
+        }
+      ]
+    }
+  ],
+  "failure": "No state change for more than 20s."
+}

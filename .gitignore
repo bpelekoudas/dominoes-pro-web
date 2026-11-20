@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.DS_Store
+playwright-report/
+test-results/
+/tmp/uhoh-shots/
+soak-reports/
