@@ -17,7 +17,7 @@ import {
   chainHeldAtHandEnd,
   type CameraPose,
   chainViewShift,
-  clampGhostToFelt,
+  fitAroundGhosts,
   PINWHEEL_LONG_FRAC,
   PINWHEEL_MARGIN,
   safeRoom,
@@ -231,6 +231,7 @@ export function Table({
   shownPose.current = { scale: visual.scale, x: visual.x, y: visual.y };
   const armOnce = useRef(false);
   const held = useRef<{ hand: string; scale: number } | null>(null);
+  const appliedCam = useRef<{ hand: string; scale: number; shift: { x: number; y: number } } | null>(null);
   const feltLock = useRef<{ hand: string; w: number; h: number; table: string } | null>(null);
   const placedBoxes = useRef<Map<string, { x: number; y: number; w: number; h: number }>>(new Map());
   const [relocating, setRelocating] = useState<ReadonlySet<string>>(new Set());
@@ -397,11 +398,26 @@ export function Table({
       // but they are not part of the picture the board scales to.
       const drawn = picture.tiles;
       const frameShift = boardShift(solved.edge);
-      const zoom = solved.scale;
-      const centered = chainViewShift(drawn, zoom);
+      const tileZoom = solved.scale;
+      const focusId = dragTileId ?? selectedTile;
+      const focusPlays = focusId ? view.legalPlays.filter((play) => play.tileId === focusId) : [];
+      const focusEnds = [...new Set(focusPlays.map((play) => play.endId))];
+      const focusDouble = Boolean(focusId && focusId.split("-")[0] === focusId.split("-")[1]);
+      const ghostBoxes = focusEnds.length > 1
+        ? focusEnds.flatMap((endId) => {
+            const key = endId as "west" | "east" | "north" | "south";
+            const box = focusDouble ? picture.doublePreviews?.[key] : picture.previews[key];
+            return box ? [box] : [];
+          })
+        : [];
+      const fitted = ghostBoxes.length > 0
+        ? fitAroundGhosts({ tiles: drawn, ghosts: ghostBoxes, felt, edge: solved.edge, scale: tileZoom })
+        : null;
+      const zoom = fitted?.scale ?? tileZoom;
+      const centered = fitted?.shift ?? chainViewShift(drawn, zoom);
       const nextShift = {
-        x: centered.x + frameShift.x + solved.nudge.x,
-        y: centered.y + frameShift.y + solved.nudge.y,
+        x: centered.x + (fitted ? 0 : frameShift.x) + solved.nudge.x,
+        y: centered.y + (fitted ? 0 : frameShift.y) + solved.nudge.y,
       };
       const placed = view.lastPlay ? picture.tiles.find((tile) => tile.tileId === view.lastPlay?.tileId) : undefined;
       if (placed) {
@@ -470,7 +486,7 @@ export function Table({
       viewport.dataset.playRight = solved.edge.right.toFixed(0);
       viewport.dataset.cameraSettling = "false";
       viewport.dataset.zoom = "ease";
-      const prevScale = held.current?.hand === handKey ? held.current.scale : null;
+      const prevScale = appliedCam.current?.hand === handKey ? appliedCam.current.scale : held.current?.hand === handKey ? held.current.scale : null;
       const cameraMoves =
         prevScale == null
         || Math.abs(prevScale - zoom) > 0.01
@@ -529,7 +545,8 @@ export function Table({
         setScale((current) => (Math.abs(current - zoom) < 0.01 ? current : zoom));
         setPan((current) => (Math.abs(current.x - shift.x) < 1 && Math.abs(current.y - shift.y) < 1 ? current : shift));
       }
-      held.current = { hand: handKey, scale: zoom };
+      held.current = { hand: handKey, scale: tileZoom };
+      appliedCam.current = { hand: handKey, scale: zoom, shift };
       turnBudget.current = { scale: zoom, roomW: roomNow.w, roomH: roomNow.h };
       frozen.current = handOver;
       setCamMode("fit");
@@ -562,7 +579,7 @@ export function Table({
       observer.disconnect();
       window.cancelAnimationFrame(measureFrame);
     };
-  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId, view.lastPlay?.seq, flightDone]);
+  }, [layout, frame, handOver, handKey, lastTileId, playableKey, overview, punch, view.tableId, view.lastPlay?.seq, flightDone, selectedTile, dragTileId]);
 
   useLayoutEffect(() => {
     const next = new Map<string, SeatBox>();
@@ -815,23 +832,12 @@ export function Table({
       ) : null}
       {slots.map((slot) => {
         const face = ghostFaces.get(slot.id) ?? null;
-        const viewport = viewportRef.current;
-        const felt = viewport?.getBoundingClientRect();
-        const inset = (name: string) => Number(viewport?.dataset[name] ?? 8);
-        const placed = felt
-          ? clampGhostToFelt(slot, {
-            left: felt.left + inset("playLeft"),
-            top: felt.top + inset("playTop"),
-            right: felt.right - inset("playRight"),
-            bottom: felt.bottom - inset("playBottom"),
-          })
-          : slot;
         return createPortal(
           <div
             key={slot.id}
             className="ghost-slot"
             data-end-id={slot.id}
-            style={{ left: placed.left, top: placed.top, width: placed.width, height: placed.height }}
+            style={{ left: slot.left, top: slot.top, width: slot.width, height: slot.height }}
           >
             {face ? <Domino a={face.a} b={face.b} orientation={face.orientation} /> : null}
           </div>,
@@ -1095,16 +1101,17 @@ function liveHandBox(playerId: string): SeatBox | null {
 }
 
 function nextSlotBox(layout: BoardLayout, end: PlacedEnd, isDouble: boolean): LayoutBox {
+  const preview = isDouble ? layout.doublePreviews?.[end.id] : layout.previews[end.id];
+  if (preview) return preview;
   const tip = [...layout.tiles].reverse().find((tile) => tile.arm === end.id);
   if (!tip) {
     const center = layout.tiles[0];
     if (!center) return end;
     return straightBox(center, end.id, isDouble);
   }
-  // A double, and the tile played on a double, stay on the current line.
   const tipIsDouble = tip.direction === "north" || tip.direction === "south" ? tip.w > tip.h : tip.h > tip.w;
   if (isDouble || tipIsDouble) return straightBox(tip, tip.direction, isDouble);
-  return layout.previews[end.id] ?? straightBox(tip, tip.direction, false);
+  return straightBox(tip, tip.direction, false);
 }
 
 interface ScreenBox {

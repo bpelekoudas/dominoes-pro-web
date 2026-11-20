@@ -93,6 +93,8 @@ export interface BoardLayout {
    * Not part of the fit, so a ghost slot does not shrink the chain.
    */
   previews: Partial<Record<ArmId, LayoutBox>>;
+  /** Where the next double on an open arm would sit. Same rule as a real play. */
+  doublePreviews?: Partial<Record<ArmId, LayoutBox>>;
   /** Where each arm stopped. The next tile continues from here. */
   cursors?: Partial<Record<ArmId, SnakeCursor>>;
 }
