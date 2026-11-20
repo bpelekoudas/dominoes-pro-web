@@ -81,7 +81,9 @@ const {
   scoreDomino,
   scoreLocked,
   shuffleWithSeed,
+  adjacentHalvesMatch,
   layoutBoard,
+  layoutPinwheel,
   layoutOverlaps,
   tilesOnBoard,
   winsNeeded,
@@ -814,6 +816,17 @@ async function playMatch(mode, index, options) {
       ];
       if (pictures.some((layout) => layoutOverlaps(layout))) {
         throw new Error("A tile covers another tile.");
+      }
+      const layouts = [...pictures];
+      try {
+        layouts.push(layoutPinwheel(view.board));
+      } catch {
+        // A board the pinwheel will not draw still has to match in the fold layout.
+      }
+      for (const layout of layouts) {
+        if (!adjacentHalvesMatch(view.board, layout)) {
+          throw new Error("A tile's touching half does not match the pip it was played on.");
+        }
       }
     }
     if (!view.board?.center) {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ARM_IDS, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
+import { ARM_IDS, emptyBoard, openEnds, placeTile, type ArmId, type BoardState } from "./board.js";
 import {
   applyIntent,
   beginHand,
@@ -21,6 +21,8 @@ import {
   HARD_WIDTH,
   insideHard,
   insidePhone,
+  adjacentHalvesMatch,
+  halfFacing,
   layoutBoard,
   extendLayoutFitting,
   layoutOverlaps,
@@ -33,6 +35,7 @@ import {
   type LayoutBox,
   type PlacedTile,
 } from "./layout.js";
+import { layoutPinwheel } from "./pinwheel.js";
 import { shuffleWithSeed } from "./rng.js";
 import { allTiles, tileById, type Tile } from "./tiles.js";
 
@@ -1319,6 +1322,72 @@ describe("spinner drop target", () => {
         const right = layout.tiles[j]!;
         if (joined.has(key(left.tileId, right.tileId))) continue;
         expect(boxGap(left, right)).toBeGreaterThanOrEqual(UNJOINED_GAP - 0.5);
+      }
+    }
+  });
+});
+
+describe("touching halves", () => {
+  function play(board: BoardState, endId: string, id: string): BoardState {
+    return placeTile(board, endId, tileById(id));
+  }
+
+  function spinnerChain(): BoardState {
+    let board = play(emptyBoard(), "lead", "5-5");
+    board = play(board, "west", "0-5");
+    board = play(board, "east", "1-5");
+    board = play(board, "north", "2-5");
+    board = play(board, "south", "3-5");
+    board = play(board, "west", "0-2");
+    board = play(board, "west", "2-3");
+    board = play(board, "west", "3-4");
+    board = play(board, "west", "4-6");
+    board = play(board, "east", "1-1");
+    board = play(board, "east", "1-4");
+    return board;
+  }
+
+  function expectTouching(board: BoardState, layout: BoardLayout): void {
+    expect(adjacentHalvesMatch(board, layout)).toBe(true);
+    const byId = new Map(layout.tiles.map((tile) => [tile.tileId, tile]));
+    const center = byId.get("5-5")!;
+    for (const arm of ARM_IDS) {
+      let parent = center;
+      for (const tile of board.arms[arm]) {
+        const placed = byId.get(tile.tileId)!;
+        const matched = tile.inward;
+        expect(halfFacing(placed, parent), `${arm} ${tile.tileId} touches ${parent.tileId}`).toBe(matched);
+        expect(halfFacing(parent, placed), `${arm} ${parent.tileId} meets ${tile.tileId}`).toBe(matched);
+        parent = placed;
+      }
+    }
+    const west = byId.get("0-5")!;
+    const east = byId.get("1-5")!;
+    const north = byId.get("2-5")!;
+    const south = byId.get("3-5")!;
+    expect(west.a).toBe(0);
+    expect(west.b).toBe(5);
+    expect(east.a).toBe(5);
+    expect(east.b).toBe(1);
+    expect(north.b).toBe(5);
+    expect(south.a).toBe(5);
+  }
+
+  it("puts the matched pip on the half that touches, on every arm and after a turn", () => {
+    const board = spinnerChain();
+    expectTouching(board, layoutPinwheel(board));
+    expectTouching(board, layoutBoard(board));
+  });
+
+  it("holds for dealt hands on both layout engines", () => {
+    for (const players of [2, 3, 4] as const) {
+      for (const mode of ["draw_one", "draw_until"] as const) {
+        for (let seed = 0; seed < 6; seed += 1) {
+          for (const board of playHand(players, mode, seed)) {
+            expect(adjacentHalvesMatch(board, layoutBoard(board)), `${players} ${mode} ${seed} fold`).toBe(true);
+            expect(adjacentHalvesMatch(board, layoutPinwheel(board)), `${players} ${mode} ${seed} pinwheel`).toBe(true);
+          }
+        }
       }
     }
   });
