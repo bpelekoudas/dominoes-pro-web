@@ -378,22 +378,30 @@ export function layoutPinwheel(board: BoardState, felt?: PinwheelRoom): BoardLay
   }
   const ends: PlacedEnd[] = [];
   const previews: BoardLayout["previews"] = {};
+  const doublePreviews: NonNullable<BoardLayout["doublePreviews"]> = {};
+  const ordinary: OrientedTile = { tileId: "ghost", low: 0, high: 1, inward: 0, outward: 1 };
+  const doubled: OrientedTile = { tileId: "ghost", low: 0, high: 0, inward: 0, outward: 0 };
   for (const end of openEnds(board)) {
     if (end.id !== "west" && end.id !== "east" && end.id !== "north" && end.id !== "south") continue;
     const arm = end.id;
     const chain = board.arms[arm];
-    if (chain.length === 0) {
-      const slot = boxFromCenter(firstCenter(hub, arm, false), arm, false);
+    const nextBox = (ghost: OrientedTile) => {
+      if (chain.length === 0) return boxFromCenter(firstCenter(hub, arm, ghost.low === ghost.high), arm, ghost.low === ghost.high);
+      const laid = placeChain(arm, [...chain, ghost], hub, { ...budget });
+      const next = laid[laid.length - 1];
+      return next ? { x: next.x, y: next.y, w: next.w, h: next.h } : null;
+    };
+    const slot = nextBox(ordinary);
+    const dbl = nextBox(doubled);
+    if (chain.length === 0 && slot) {
       ends.push({ ...slot, id: arm, match: end.match, scorePips: end.scorePips });
-      previews[arm] = slot;
-      continue;
+    } else {
+      const last = [...tiles].reverse().find((tile) => tile.arm === arm);
+      if (!last) continue;
+      ends.push({ x: last.x, y: last.y, w: last.w, h: last.h, id: arm, match: end.match, scorePips: end.scorePips });
     }
-    const last = [...tiles].reverse().find((tile) => tile.arm === arm);
-    if (!last) continue;
-    ends.push({ x: last.x, y: last.y, w: last.w, h: last.h, id: arm, match: end.match, scorePips: end.scorePips });
-    const ghost = placeChain(arm, [...chain, { tileId: "ghost", low: 0, high: 1, inward: 0, outward: 1 }], hub, { ...budget });
-    const next = ghost[ghost.length - 1];
-    if (next) previews[arm] = { x: next.x, y: next.y, w: next.w, h: next.h };
+    if (slot) previews[arm] = slot;
+    if (dbl) doublePreviews[arm] = dbl;
   }
-  return { tiles, ends, fit: fitOf(tiles), previews };
+  return { tiles, ends, fit: fitOf(tiles), previews, doublePreviews };
 }

@@ -746,6 +746,51 @@ export function chooseReadableLayout(
   };
 }
 
+/**
+ * Shrink the camera, still centred on the placed tiles, until every drop
+ * target sits inside the copper. The chain's layout does not change.
+ */
+export function fitAroundGhosts(input: {
+  tiles: readonly LayoutBox[];
+  ghosts: readonly LayoutBox[];
+  felt: FeltSize;
+  edge: AxisInsets;
+  scale: number;
+}): { scale: number; shift: { x: number; y: number } } {
+  const shiftAt = (scale: number) => {
+    const centered = chainViewShift(input.tiles, scale);
+    const frame = boardShift(input.edge);
+    return { x: centered.x + frame.x, y: centered.y + frame.y };
+  };
+  const overflow = (scale: number) => {
+    const shift = shiftAt(scale);
+    let over = 0;
+    for (const box of [...input.tiles, ...input.ghosts]) {
+      const rect = renderedTileRect(input.felt, box, scale, shift);
+      over = Math.max(
+        over,
+        input.edge.left - rect.left,
+        input.edge.top - rect.top,
+        rect.right - (input.felt.w - input.edge.right),
+        rect.bottom - (input.felt.h - input.edge.bottom),
+      );
+    }
+    return over;
+  };
+  let scale = input.scale;
+  if (input.ghosts.length > 0 && overflow(scale) > 0.5) {
+    let low = Math.min(0.12, scale);
+    let high = scale;
+    for (let step = 0; step < 18; step += 1) {
+      const mid = (low + high) / 2;
+      if (overflow(mid) > 0.5) high = mid;
+      else low = mid;
+    }
+    scale = low;
+  }
+  return { scale, shift: shiftAt(scale) };
+}
+
 /** Pull a play-target ghost back inside the copper inset. The tile stays full size when the room allows. */
 export function clampGhostToFelt(
   box: { left: number; top: number; width: number; height: number },
